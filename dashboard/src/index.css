@@ -1035,6 +1035,8 @@ body {
 /* ═══ Finance ═══ */
 .finance-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin-bottom: 28px; }
 .finance-kpis-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
+.finance-kpis-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-bottom: 28px; }
+@media (max-width: 900px) { .finance-kpis-5 { grid-template-columns: repeat(3, 1fr); } }
 .kpi-card {
   background: var(--bg-card); border: 1px solid var(--border-accent); border-radius: var(--radius-lg);
   padding: 20px; position: relative; overflow: hidden;
@@ -1260,7 +1262,7 @@ body {
   .services-grid, .lank-cards-grid, .svc-overview-grid { grid-template-columns: 1fr; }
   .mobile-menu-btn { display: flex !important; }
   .finance-kpis { grid-template-columns: repeat(2, 1fr); }
-  .finance-kpis-4 { grid-template-columns: repeat(2, 1fr); }
+  .finance-kpis-4, .finance-kpis-5 { grid-template-columns: repeat(2, 1fr); }
   .bank-grid-3 { grid-template-columns: 1fr; }
   .svc-stats-row { grid-template-columns: repeat(2, 1fr); }
 
@@ -1515,6 +1517,19 @@ body {
 .password-change-banner:hover {
   background: linear-gradient(90deg, rgba(239, 68, 68, 0.2), rgba(239, 68, 68, 0.1));
   transform: translateX(2px);
+}
+
+/* ═══ Cross-tab navigation link (clic en título de cuenta real) ═══ */
+.cross-nav-link {
+  display: inline-flex;
+  align-items: center;
+  transition: color 0.2s ease, opacity 0.2s ease;
+}
+.cross-nav-link:hover {
+  color: var(--accent-primary);
+}
+.cross-nav-link:hover svg {
+  opacity: 1 !important;
 }
 
 /* ═══ Highlight user slot pulse (usuario específico) ═══ */
@@ -4604,7 +4619,7 @@ body {
 @media (max-width: 480px) {
   /* Grids a 1 ó 2 columnas */
   .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-  .finance-kpis, .finance-kpis-4 { grid-template-columns: 1fr; }
+  .finance-kpis, .finance-kpis-4, .finance-kpis-5 { grid-template-columns: 1fr; }
   .status-stats-row { grid-template-columns: 1fr; }
   .analyze-kpi-grid { grid-template-columns: 1fr; }
   .slot-grid { grid-template-columns: 1fr; }
@@ -5166,7 +5181,7 @@ code, pre, .clabe-digits, .alert-v2-highlight code {
   }
 
   /* Finance — full stack everything */
-  .finance-kpis, .finance-kpis-4 {
+  .finance-kpis, .finance-kpis-4, .finance-kpis-5 {
     gap: 8px;
   }
   .kpi-card {

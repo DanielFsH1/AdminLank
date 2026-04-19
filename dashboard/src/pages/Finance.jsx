@@ -3,9 +3,9 @@ import { useDocument } from '../hooks/useFirestore';
 import { collection, onSnapshot, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { formatMXN, getBankMeta, getProfileImage, BANKS } from '../config/services';
-import { confirmRecurringExpense, saveCreditAccount, deleteCreditAccount, addCreditInstallment, removeCreditInstallment, saveCreditStatement } from '../hooks/firestoreActions';
+import { confirmRecurringExpense, saveCreditAccount, deleteCreditAccount, addCreditInstallment, removeCreditInstallment, saveCreditStatement, logManualChange } from '../hooks/firestoreActions';
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
-import { BankIcon, BarChartIcon, CalendarIcon, CheckCircleIcon, ClipboardIcon, ClockIcon, CloseIcon, CreditCardIcon, EditIcon, ExpenseIcon, FolderIcon, HourglassIcon, KeyIcon, LinkIcon, MoneyIcon, PlusIcon, ReceiptIcon, RefreshIcon, SaveIcon, TrashIcon, TrendUpIcon, WarningIcon } from '../components/Icons';
+import { BankIcon, BarChartIcon, CalendarIcon, CheckCircleIcon, ClipboardIcon, ClockIcon, CloseIcon, CreditCardIcon, DepositIcon, EditIcon, ExpenseIcon, FolderIcon, HourglassIcon, KeyIcon, LinkIcon, MoneyIcon, PlusIcon, ReceiptIcon, RefreshIcon, SaveIcon, TrashIcon, TrendUpIcon, WarningIcon } from '../components/Icons';
 
 const MONTH_NAMES_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const MONTH_NAMES_EN = ['january','february','march','april','may','june','july','august','september','october','november','december'];
@@ -49,6 +49,16 @@ export default function Finance() {
  const [confirmingExpenseIdx, setConfirmingExpenseIdx] = useState(null); // Prevenir doble-clic en confirmar cobro
  const [pendingAmounts, setPendingAmounts] = useState({}); // Montos editables para cobros pendientes
  const [expenseToast, setExpenseToast] = useState({ visible: false, message: '', type: 'success' });
+
+ // Depósitos/Ingresos
+ const [addDepositModal, setAddDepositModal] = useState(false);
+ const [editDepositModal, setEditDepositModal] = useState(null); // { index, entry }
+ const [removeDepositConfirm, setRemoveDepositConfirm] = useState(null);
+ const [depositToast, setDepositToast] = useState({ visible: false, message: '', type: 'success' });
+
+ const showDepositToast = useCallback((msg, type = 'success') => {
+   setDepositToast({ visible: true, message: msg, type });
+ }, []);
 
  // Credit accounts state
  const [creditAccounts, setCreditAccounts] = useState([]);
@@ -105,6 +115,12 @@ export default function Finance() {
    return clabes
      .map((c, idx) => c.type === 'credito' ? { value: idx, label: `${c.bank} — ${c.clabe}` } : null)
      .filter(Boolean);
+ }, [clabes]);
+
+ const bankAccountOptions = useMemo(() => {
+   const debitClabes = clabes.filter(c => c.type !== 'credito');
+   const bankNames = [...new Set(debitClabes.map(c => c.bank))];
+   return bankNames.map(b => ({ value: b, label: b }));
  }, [clabes]);
 
  // Historial de meses
@@ -273,10 +289,14 @@ export default function Finance() {
         const totals = { ...(ov.totals || {}) };
         if (entryType === 'expense' || entryType === 'investment') {
           totals.manualExpensesGross = Math.max(0, (totals.manualExpensesGross || 0) + delta);
+        } else if (entryType === 'deposit') {
+          totals.manualDepositsGross = Math.max(0, (totals.manualDepositsGross || 0) + delta);
         }
         totals.bankNetAfterExpenses = (totals.withdrawalCompletedGross || 0)
+          + (totals.manualDepositsGross || 0)
           - (totals.manualExpensesGross || 0) - (totals.manualInvestmentsGross || 0);
         totals.estimatedNetWallet = (totals.walletCreditsGross || 0)
+          + (totals.manualDepositsGross || 0)
           - (totals.manualExpensesGross || 0) - (totals.manualInvestmentsGross || 0);
         await updateDoc(overviewRef, { totals });
       }
@@ -289,10 +309,14 @@ export default function Finance() {
         const totals = { ...(mData.totals || {}) };
         if (entryType === 'expense' || entryType === 'investment') {
           totals.manualExpensesGross = Math.max(0, (totals.manualExpensesGross || 0) + delta);
+        } else if (entryType === 'deposit') {
+          totals.manualDepositsGross = Math.max(0, (totals.manualDepositsGross || 0) + delta);
         }
         totals.bankNetAfterExpenses = (totals.withdrawalCompletedGross || 0)
+          + (totals.manualDepositsGross || 0)
           - (totals.manualExpensesGross || 0) - (totals.manualInvestmentsGross || 0);
         totals.estimatedNetWallet = (totals.walletCreditsGross || 0)
+          + (totals.manualDepositsGross || 0)
           - (totals.manualExpensesGross || 0) - (totals.manualInvestmentsGross || 0);
         await updateDoc(monthRef, { totals });
       } else {
@@ -306,9 +330,10 @@ export default function Finance() {
             withdrawalRequestedGross: 0,
             withdrawalCompletedGross: 0,
             manualExpensesGross: isExpenseType ? Math.max(0, delta) : 0,
+            manualDepositsGross: entryType === 'deposit' ? Math.max(0, delta) : 0,
             manualInvestmentsGross: 0,
-            estimatedNetWallet: isExpenseType ? -Math.max(0, delta) : 0,
-            bankNetAfterExpenses: isExpenseType ? -Math.max(0, delta) : 0,
+            estimatedNetWallet: entryType === 'deposit' ? Math.max(0, delta) : (isExpenseType ? -Math.max(0, delta) : 0),
+            bankNetAfterExpenses: entryType === 'deposit' ? Math.max(0, delta) : (isExpenseType ? -Math.max(0, delta) : 0),
             completedWithdrawals: 0,
             pendingWithdrawals: 0,
           },
@@ -436,6 +461,115 @@ export default function Finance() {
  }
  };
 
+ // ─── Depósitos / Ingresos ─────────────────────────────────────────
+
+ // Agregar depósito/ingreso
+ const handleAddDeposit = async (values) => {
+   const amount = parseFloat(values.amount);
+   if (!values.description?.trim() || isNaN(amount) || amount <= 0) return;
+
+   const today = new Date().toISOString().slice(0, 10);
+   const effectiveAt = values.effectiveAt || today;
+
+   const newEntry = {
+     entryId: `deposit:${effectiveAt}:${Date.now()}`,
+     type: 'deposit',
+     description: values.description.trim(),
+     amount,
+     effectiveAt,
+     status: 'confirmed',
+     createdAt: new Date().toISOString(),
+   };
+   if (values.bankAccount?.trim()) newEntry.bankAccount = values.bankAccount.trim();
+   if (values.note?.trim()) newEntry.notes = [values.note.trim()];
+
+   const ledgerRef = doc(db, 'finance', 'manual-ledger');
+   const currentEntries = ledger?.entries || [];
+   await updateDoc(ledgerRef, { entries: [...currentEntries, newEntry] });
+
+   const monthKey = getEntryMonthKey(effectiveAt);
+   await updateMonthTotals(monthKey, amount, 'deposit', 1);
+
+   const monthLabel = monthKey === currentMonthKey ? '' : ` (${monthKey})`;
+   showDepositToast(`Ingreso de ${formatMXN(amount)} registrado${monthLabel}`);
+
+   logManualChange('add_deposit', `Ingreso registrado: ${values.description.trim()} — ${formatMXN(amount)}`, {
+     collection: 'finance', documentId: 'manual-ledger',
+     after: { description: values.description.trim(), amount, bankAccount: values.bankAccount, effectiveAt },
+   });
+ };
+
+ // Editar depósito/ingreso
+ const handleEditDeposit = async (values) => {
+   if (!editDepositModal) return;
+   const { index, entry: oldEntry } = editDepositModal;
+   if (index < 0) return;
+   const amount = parseFloat(values.amount);
+   if (!values.description?.trim() || isNaN(amount) || amount <= 0) return;
+
+   const today = new Date().toISOString().slice(0, 10);
+   const effectiveAt = values.effectiveAt || today;
+
+   const updatedEntry = {
+     ...oldEntry,
+     type: 'deposit',
+     description: values.description.trim(),
+     amount,
+     effectiveAt,
+     updatedAt: new Date().toISOString(),
+   };
+   if (values.bankAccount?.trim()) updatedEntry.bankAccount = values.bankAccount.trim();
+   else delete updatedEntry.bankAccount;
+   if (values.note?.trim()) updatedEntry.notes = [values.note.trim()];
+   else delete updatedEntry.notes;
+
+   const ledgerRef = doc(db, 'finance', 'manual-ledger');
+   const currentEntries = ledger?.entries || [];
+   const updatedEntries = [...currentEntries];
+   updatedEntries[index] = updatedEntry;
+   await updateDoc(ledgerRef, { entries: updatedEntries });
+
+   const oldMonthKey = getEntryMonthKey(oldEntry.effectiveAt);
+   const newMonthKey = getEntryMonthKey(effectiveAt);
+   await updateMonthTotals(oldMonthKey, oldEntry.amount || 0, 'deposit', -1);
+   await updateMonthTotals(newMonthKey, amount, 'deposit', 1);
+
+   showDepositToast(`Ingreso actualizado: ${values.description.trim()}`);
+
+   logManualChange('edit_deposit', `Ingreso editado: ${values.description.trim()}`, {
+     collection: 'finance', documentId: 'manual-ledger',
+     before: { description: oldEntry.description, amount: oldEntry.amount },
+     after: { description: values.description.trim(), amount, bankAccount: values.bankAccount, effectiveAt },
+   });
+ };
+
+ // Eliminar depósito/ingreso
+ const handleRemoveDepositConfirm = async () => {
+   if (removeDepositConfirm === null) return;
+   const { index, entry } = removeDepositConfirm;
+   if (index < 0) return;
+   try {
+     const ledgerRef = doc(db, 'finance', 'manual-ledger');
+     const currentEntries = ledger?.entries || [];
+     const updatedEntries = currentEntries.filter((_, i) => i !== index);
+     await updateDoc(ledgerRef, { entries: updatedEntries });
+
+     const monthKey = getEntryMonthKey(entry.effectiveAt);
+     await updateMonthTotals(monthKey, entry.amount || 0, 'deposit', -1);
+
+     showDepositToast(`Ingreso eliminado: ${entry.description}`);
+     setRemoveDepositConfirm(null);
+
+     logManualChange('remove_deposit', `Ingreso eliminado: ${entry.description} — ${formatMXN(entry.amount)}`, {
+       collection: 'finance', documentId: 'manual-ledger',
+       before: { description: entry.description, amount: entry.amount, bankAccount: entry.bankAccount },
+     });
+   } catch (err) {
+     showDepositToast(`Error al eliminar: ${err.message}`, 'error');
+     throw err;
+   }
+ };
+
  if (loadingOverview || loadingLedger) return <div className="empty-state"><div className="loading-spinner" /></div>;
  if (!overview) return (
     <div className="empty-state">
@@ -455,16 +589,20 @@ export default function Finance() {
  const t = overview.totals || {};
  const allEntries = ledger?.entries || [];
  const entries = allEntries.filter(e => getEntryMonthKey(e.effectiveAt) === currentMonthKey);
+ const depositEntries = entries.filter(e => e.type === 'deposit');
+ const expenseEntries = entries.filter(e => e.type !== 'deposit');
 
  // Cálculos principales — solo del mes actual
  const pendingAmount = (t.withdrawalRequestedGross || 0) - (t.withdrawalCompletedGross || 0);
  const grossWithdrawn = t.withdrawalCompletedGross || 0;
+ const totalDeposits = t.manualDepositsGross || 0;
  const totalExpenses = (t.manualExpensesGross || 0) + (t.manualInvestmentsGross || 0);
- const netProfit = grossWithdrawn - totalExpenses;
+ const netProfit = grossWithdrawn + totalDeposits - totalExpenses;
 
  const kpis = [
  { label: 'Pendiente por retirar', value: pendingAmount, color: '#f59e0b', icon: <HourglassIcon size={16} />, isAmount: true },
  { label: 'Retirado bruto', value: grossWithdrawn, color: '#3b82f6', icon: <BankIcon size={16} />, isAmount: true },
+ { label: 'Ingresos / Depósitos', value: totalDeposits, color: '#10b981', icon: <DepositIcon size={16} />, isAmount: true },
  { label: 'Gastos totales', value: totalExpenses, color: '#ef4444', icon: <ExpenseIcon size={16} />, isAmount: true, negative: true },
  { label: 'Ganancia neta', value: netProfit, color: netProfit >= 0 ? '#10b981' : '#ef4444', icon: <TrendUpIcon size={16} />, isAmount: true, isNet: true },
  ];
@@ -620,8 +758,8 @@ export default function Finance() {
         </span>
       </div>
 
-      {/* 4 KPIs principales */}
-      <div className="finance-kpis-4">
+      {/* 5 KPIs principales */}
+      <div className="finance-kpis-5">
         {kpis.map((kpi, i) => (
           <div className="kpi-card" key={i} style={{ '--kpi-color': kpi.color }}>
             <div className="kpi-label">{kpi.icon} {kpi.label}</div>
@@ -965,9 +1103,9 @@ export default function Finance() {
           <div className="finance-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span>
               <ExpenseIcon size={16} /> Gastos
-              <span className="badge badge-danger" style={{ marginLeft: '8px' }}>{entries.length}</span>
-              {entries.filter(e => e.status === 'pending').length > 0 && (
-                <span className="badge badge-warning" style={{ marginLeft: '4px' }}>{entries.filter(e => e.status === 'pending').length} pendiente{entries.filter(e => e.status === 'pending').length !== 1 ? 's' : ''}</span>
+              <span className="badge badge-danger" style={{ marginLeft: '8px' }}>{expenseEntries.length}</span>
+              {expenseEntries.filter(e => e.status === 'pending').length > 0 && (
+                <span className="badge badge-warning" style={{ marginLeft: '4px' }}>{expenseEntries.filter(e => e.status === 'pending').length} pendiente{expenseEntries.filter(e => e.status === 'pending').length !== 1 ? 's' : ''}</span>
               )}
             </span>
             <button
@@ -979,17 +1117,17 @@ export default function Finance() {
             </button>
           </div>
 
-          {entries.length === 0 ? (
+          {expenseEntries.length === 0 ? (
             <div className="empty-state" style={{ padding: '20px' }}><p>Sin gastos registrados este mes</p></div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {/* Pendientes primero */}
-              {entries.filter(e => e.status === 'pending').length > 0 && (
+              {expenseEntries.filter(e => e.status === 'pending').length > 0 && (
                 <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent-warning)', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '4px 0' }}>
                   <HourglassIcon size={14} /> Cobros pendientes de confirmación
                 </div>
               )}
-              {entries.filter(e => e.status === 'pending').map((entry, i) => {
+              {expenseEntries.filter(e => e.status === 'pending').map((entry, i) => {
                 const globalIdx = allEntries.indexOf(entry);
                 const editedAmount = pendingAmounts[globalIdx];
                 const displayAmount = editedAmount !== undefined ? editedAmount : (entry.amount || '');
@@ -1076,12 +1214,12 @@ export default function Finance() {
                 );
               })}
               {/* Confirmados */}
-              {entries.filter(e => e.status !== 'pending').length > 0 && entries.filter(e => e.status === 'pending').length > 0 && (
+              {expenseEntries.filter(e => e.status !== 'pending').length > 0 && expenseEntries.filter(e => e.status === 'pending').length > 0 && (
                 <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '4px 0' }}>
                   <CheckCircleIcon size={14} /> Gastos confirmados
                 </div>
               )}
-              {entries.filter(e => e.status !== 'pending').map((entry, i) => {
+              {expenseEntries.filter(e => e.status !== 'pending').map((entry, i) => {
                 const typeLabels = { expense: <><ExpenseIcon size={16} /> Gasto</>, investment: <><ExpenseIcon size={16} /> Gasto (inversión)</>, income_adjustment: <><MoneyIcon size={16} /> Ajuste +</>, expense_refund: <><RefreshIcon size={16} /> Devolución</> };
                 const typeBadge = { expense: 'badge-danger', investment: 'badge-danger', income_adjustment: 'badge-success', expense_refund: 'badge-info' };
                 const globalIdx = allEntries.indexOf(entry);
@@ -1128,8 +1266,68 @@ export default function Finance() {
             </div>
           )}
         </div>
-      </div>
 
+        {/* ─── Depósitos / Ingresos ─── */}
+        <div className="finance-col">
+          <div className="finance-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>
+              <DepositIcon size={16} /> Ingresos
+              <span className="badge badge-success" style={{ marginLeft: '8px' }}>{depositEntries.length}</span>
+            </span>
+            <button
+              className="alert-action-btn edit"
+              onClick={() => setAddDepositModal(true)}
+              style={{ fontSize: '12px' }}
+            >
+              <PlusIcon size={16} /> Agregar ingreso
+            </button>
+          </div>
+
+          {depositEntries.length === 0 ? (
+            <div className="empty-state" style={{ padding: '20px' }}><p>Sin ingresos registrados este mes</p></div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {depositEntries.map((entry, i) => {
+                const globalIdx = allEntries.indexOf(entry);
+                return (
+                  <div className="ledger-entry" key={`deposit-${i}`} style={{ borderLeft: '3px solid #10b981' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: '14px' }}>{entry.description}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                          {entry.effectiveAt && <span><CalendarIcon size={16} /> {entry.effectiveAt}</span>}
+                          {entry.bankAccount && <span> | <BankIcon size={12} /> {entry.bankAccount}</span>}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div style={{ textAlign: 'right' }}>
+                          <span className="badge badge-success"><DepositIcon size={16} /> Ingreso</span>
+                          <div style={{ fontWeight: 700, fontSize: '17px', marginTop: '4px', color: '#10b981' }}>+{formatMXN(entry.amount)}</div>
+                        </div>
+                        <button
+                          className="clabe-remove-btn"
+                          onClick={() => setEditDepositModal({ index: globalIdx, entry })}
+                          title="Editar ingreso"
+                          style={{ marginLeft: '2px', fontSize: '11px' }}
+                        >
+                          <EditIcon size={16} />
+                        </button>
+                        <button
+                          className="clabe-remove-btn"
+                          onClick={() => setRemoveDepositConfirm({ index: globalIdx, entry })}
+                          title="Eliminar ingreso"
+                        >
+                          <TrashIcon size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* ═══ CUENTAS BANCARIAS (unificado: CLABEs + Retiros) ═══ */}
       <div className="finance-section" style={{ marginTop: '24px' }}>
@@ -1345,8 +1543,9 @@ export default function Finance() {
               const isRecent = isRecentMonth(mData.key);
               const isExpanded = expandedHistMonth === mData.key;
               const mt = mData.totals || {};
+              const histDeposits = mt.manualDepositsGross || 0;
               const histExpenses = (mt.manualExpensesGross || 0) + (mt.manualInvestmentsGross || 0);
-              const histNet = (mt.withdrawalCompletedGross || 0) - histExpenses;
+              const histNet = (mt.withdrawalCompletedGross || 0) + histDeposits - histExpenses;
               const histWds = historyWithdrawals[mData.key] || [];
               const histManualEntries = (() => {
                 const fromLedger = allEntries.filter(e => getEntryMonthKey(e.effectiveAt) === mData.key);
@@ -1387,6 +1586,12 @@ export default function Finance() {
                         <span className="history-kpi-label">Retirado</span>
                         <span className="history-kpi-value" style={{ color: '#3b82f6' }}>{formatMXN(mt.withdrawalCompletedGross || 0)}</span>
                       </div>
+                      {histDeposits > 0 && (
+                        <div className="history-kpi">
+                          <span className="history-kpi-label">Ingresos</span>
+                          <span className="history-kpi-value" style={{ color: '#10b981' }}>{formatMXN(histDeposits)}</span>
+                        </div>
+                      )}
                       <div className="history-kpi">
                         <span className="history-kpi-label">Gastos</span>
                         <span className="history-kpi-value" style={{ color: '#ef4444' }}>{formatMXN(histExpenses)}</span>
@@ -1418,6 +1623,12 @@ export default function Finance() {
                             <span className="history-detail-val" style={{ color: '#ef4444' }}>{formatMXN(mt.manualInvestmentsGross || 0)}</span>
                           </div>
                         )}
+                        {(mt.manualDepositsGross || 0) > 0 && (
+                          <div className="history-detail-item">
+                            <span className="history-detail-label"><DepositIcon size={16} /> Ingresos</span>
+                            <span className="history-detail-val" style={{ color: '#10b981' }}>{formatMXN(mt.manualDepositsGross || 0)}</span>
+                          </div>
+                        )}
                         <div className="history-detail-item">
                           <span className="history-detail-label"><CheckCircleIcon size={16} /> Retiros completados</span>
                           <span className="history-detail-val">{mt.completedWithdrawals || 0}</span>
@@ -1434,7 +1645,7 @@ export default function Finance() {
                       {histManualEntries.length > 0 && (
                         <div style={{ marginTop: '16px' }}>
                           <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '8px' }}>
-                            <ExpenseIcon size={16} /> Gastos del mes ({histManualEntries.length})
+                            <ExpenseIcon size={16} /> Movimientos del mes ({histManualEntries.length})
                           </div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                             {histManualEntries.map((e, ei) => {
@@ -1452,20 +1663,20 @@ export default function Finance() {
                                   {e.effectiveAt && <span style={{ color: 'var(--text-muted)', marginLeft: '6px', fontSize: '11px' }}><CalendarIcon size={12} /> {e.effectiveAt}</span>}
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <span style={{ fontWeight: 700, color: '#ef4444' }}>{formatMXN(e.amount)}</span>
+                                  <span style={{ fontWeight: 700, color: e.type === 'deposit' ? '#10b981' : '#ef4444' }}>{e.type === 'deposit' ? '+' : ''}{formatMXN(e.amount)}</span>
                                   {canEdit && (
                                     <>
                                       <button
                                         className="clabe-remove-btn"
-                                        onClick={() => setEditExpenseModal({ index: globalIdx, entry: e })}
-                                        title="Editar gasto"
+                                        onClick={() => e.type === 'deposit' ? setEditDepositModal({ index: globalIdx, entry: e }) : setEditExpenseModal({ index: globalIdx, entry: e })}
+                                        title={e.type === 'deposit' ? 'Editar ingreso' : 'Editar gasto'}
                                       >
                                         <EditIcon size={16} />
                                       </button>
                                       <button
                                         className="clabe-remove-btn"
-                                        onClick={() => setRemoveExpenseConfirm({ index: globalIdx, entry: e })}
-                                        title="Eliminar gasto"
+                                        onClick={() => e.type === 'deposit' ? setRemoveDepositConfirm({ index: globalIdx, entry: e }) : setRemoveExpenseConfirm({ index: globalIdx, entry: e })}
+                                        title={e.type === 'deposit' ? 'Eliminar ingreso' : 'Eliminar gasto'}
                                       >
                                         <TrashIcon size={16} />
                                       </button>
@@ -1666,6 +1877,78 @@ export default function Finance() {
 
       {/* Toast gastos */}
       <Toast {...expenseToast} onClose={() => setExpenseToast(prev => ({ ...prev, visible: false }))} />
+
+      {/* ═══ MODALES DE DEPÓSITOS ═══ */}
+
+      {/* Modal: Registrar depósito/ingreso */}
+      <EditModal
+        open={addDepositModal}
+        onClose={() => setAddDepositModal(false)}
+        onSave={handleAddDeposit}
+        validate={validateExpenseDate}
+        title="Registrar ingreso / depósito"
+        icon={<DepositIcon size={16} />}
+        fields={[
+          { key: 'description', label: 'Descripción', required: true, placeholder: 'Ej: Transferencia de nómina, Pago freelance...' },
+          { key: 'amount', label: 'Monto (MXN)', required: true, type: 'number', placeholder: '0.00' },
+          { key: 'bankAccount', label: 'Cuenta bancaria destino', type: 'select', options: bankAccountOptions.length > 0
+            ? bankAccountOptions
+            : [{ value: '', label: 'No hay cuentas registradas' }],
+            placeholder: 'Seleccionar banco' },
+          { key: 'effectiveAt', label: `Fecha efectiva (${minDate} a ${maxDate})`, type: 'date', hint: 'Dejar vacío = fecha de hoy. Si la fecha cae en otro mes, el ingreso se aplica a ese mes.' },
+          { key: 'note', label: 'Nota (opcional)', placeholder: 'Contexto adicional del ingreso' },
+        ]}
+        initialValues={{ description: '', amount: '', bankAccount: '', effectiveAt: '', note: '' }}
+        saveLabel={<><DepositIcon size={16} /> Registrar</>}
+        confirmMessage="Se registrará este ingreso y se actualizarán los totales del mes correspondiente."
+      />
+
+      {/* Modal: Editar depósito/ingreso existente */}
+      {editDepositModal && (
+        <EditModal
+          open={true}
+          onClose={() => setEditDepositModal(null)}
+          onSave={handleEditDeposit}
+          validate={validateExpenseDate}
+          title="Editar ingreso"
+          icon={<DepositIcon size={16} />}
+          resetKey={editDepositModal.entry.entryId || editDepositModal.index}
+          fields={[
+            { key: 'description', label: 'Descripción', required: true, placeholder: 'Ej: Transferencia de nómina...' },
+            { key: 'amount', label: 'Monto (MXN)', required: true, type: 'number', placeholder: '0.00' },
+            { key: 'bankAccount', label: 'Cuenta bancaria destino', type: 'select', options: bankAccountOptions.length > 0
+              ? bankAccountOptions
+              : [{ value: '', label: 'No hay cuentas registradas' }],
+              placeholder: 'Seleccionar banco' },
+            { key: 'effectiveAt', label: `Fecha efectiva (${minDate} a ${maxDate})`, type: 'date', hint: 'Si cambias a otro mes, el ingreso se mueve a ese mes.' },
+            { key: 'note', label: 'Nota (opcional)', placeholder: 'Contexto adicional del ingreso' },
+          ]}
+          initialValues={{
+            description: editDepositModal.entry.description || '',
+            amount: editDepositModal.entry.amount || '',
+            bankAccount: editDepositModal.entry.bankAccount || '',
+            effectiveAt: editDepositModal.entry.effectiveAt || '',
+            note: (editDepositModal.entry.notes || [])[0] || '',
+          }}
+          saveLabel="Guardar cambios"
+          confirmMessage="Se actualizará este ingreso y se recalcularán los totales."
+        />
+      )}
+
+      {/* Diálogo: Confirmar eliminación de depósito */}
+      <ConfirmDialog
+        open={!!removeDepositConfirm}
+        onClose={() => setRemoveDepositConfirm(null)}
+        onConfirm={handleRemoveDepositConfirm}
+        title="Eliminar ingreso"
+        message={removeDepositConfirm ? `¿Eliminar "${removeDepositConfirm.entry.description}" por ${formatMXN(removeDepositConfirm.entry.amount)}? Los totales del mes se actualizarán.` : ''}
+        confirmLabel={<><TrashIcon size={16} /> Sí, eliminar</>}
+        danger
+        icon={<WarningIcon size={16} />}
+      />
+
+      {/* Toast depósitos */}
+      <Toast {...depositToast} onClose={() => setDepositToast(prev => ({ ...prev, visible: false }))} />
 
       {/* ═══ MODALES DE CUENTAS DE CRÉDITO ═══ */}
 

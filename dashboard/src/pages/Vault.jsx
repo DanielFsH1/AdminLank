@@ -1389,7 +1389,15 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
                           )}
 
                           <div className="vault-card-header">
-                            <div className="vault-card-label">{acct.label || acct.serviceAccountRef}</div>
+                            <div
+                              className="vault-card-label cross-nav-link"
+                              onClick={() => onNavigate && onNavigate('subscriptions', { service: svc, accountRef: acct.serviceAccountRef || acct.id })}
+                              title="Ir a Suscripciones"
+                              style={{ cursor: 'pointer' }}
+                            >
+                              {acct.label || acct.serviceAccountRef}
+                              <LinkIcon size={14} style={{ marginLeft: '6px', opacity: 0.5 }} />
+                            </div>
                             <span className="vault-card-ref">{acct.serviceAccountRef}</span>
                           </div>
 
@@ -1469,7 +1477,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
                             </button>
                             <button
                               className="vault-action-btn view"
-                              onClick={() => onNavigate && onNavigate('subscriptions', { service: svc, accountRef: acct.id })}
+                              onClick={() => onNavigate && onNavigate('subscriptions', { service: svc, accountRef: acct.serviceAccountRef || acct.id })}
                             >
                               <LinkIcon size={16} /> Suscripciones
                             </button>

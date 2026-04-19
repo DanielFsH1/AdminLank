@@ -143,6 +143,9 @@ export const CashIcon = (p) => <S {...p}><rect x="2" y="6" width="20" height="12
 // 💸 Money flying / expense
 export const ExpenseIcon = (p) => <S {...p}><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/><path d="M18 8l3-3-3-3"/></S>;
 
+// 📥 Deposit / Income
+export const DepositIcon = p => <S {...p}><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></S>;
+
 // 🏦 Bank
 export const BankIcon = (p) => <S {...p}><path d="M3 21h18"/><path d="M3 10h18"/><path d="M5 6l7-3 7 3"/><path d="M4 10v11"/><path d="M20 10v11"/><path d="M8 14v3"/><path d="M12 14v3"/><path d="M16 14v3"/></S>;
 
@@ -381,7 +384,7 @@ export const ICON_MAP = {
   user: UserIcon, users: UsersIcon, pointUp: PointUpIcon,
   // Money
   money: MoneyIcon, dollar: DollarIcon, creditCard: CreditCardIcon,
-  cash: CashIcon, expense: ExpenseIcon, bank: BankIcon, atm: AtmIcon,
+  cash: CashIcon, expense: ExpenseIcon, deposit: DepositIcon, bank: BankIcon, atm: AtmIcon,
   trendUp: TrendUpIcon, barChart: BarChartIcon, receipt: ReceiptIcon,
   // Communication
   email: EmailIcon, inbox: InboxIcon, mailbox: MailboxIcon,

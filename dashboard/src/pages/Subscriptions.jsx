@@ -1280,7 +1280,15 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
                 >
                   <div className="real-account-header" style={{ borderLeft: `4px solid ${pwAlert ? '#ef4444' : m.color}` }}>
                     <div>
-                      <div className="real-account-title">{acct.label || acct.serviceAccountRef}</div>
+                      <div
+                        className="real-account-title cross-nav-link"
+                        onClick={() => onNavigate && onNavigate('vault', { serviceKey: selectedService, serviceAccountRef: acct.serviceAccountRef || acct.id })}
+                        title="Ir a Bóveda"
+                        style={{ cursor: 'pointer' }}
+                      >
+                        {acct.label || acct.serviceAccountRef}
+                        <LinkIcon size={14} style={{ marginLeft: '6px', opacity: 0.5 }} />
+                      </div>
                       {pwAlert && (
                         <div
                           className="password-change-banner"

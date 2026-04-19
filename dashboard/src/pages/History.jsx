@@ -55,6 +55,9 @@ const ACTION_COLOR = {
   chat_message:      '#06b6d4',
   restore:           '#f97316',
   correct_classification: '#eab308',
+  add_deposit:    '#10b981',
+  edit_deposit:   '#3b82f6',
+  remove_deposit: '#ef4444',
 };
 
 const ACTION_LABEL = {
@@ -74,6 +77,9 @@ const ACTION_LABEL = {
   chat_message:      'Mensaje chat',
   restore:           'Restauracion',
   correct_classification: 'Correccion',
+  add_deposit:    'Registrar ingreso',
+  edit_deposit:   'Editar ingreso',
+  remove_deposit: 'Eliminar ingreso',
 };
 
 const SOURCE_FILTER_OPTIONS = [

@@ -90,7 +90,7 @@ async function findVaultEmailByEmail(email, excludeId = null) {
  * @param {string} description - Descripción legible del cambio
  * @param {object} [opts] - { collection, documentId, field, before, after }
  */
-async function logManualChange(action, description, opts = {}) {
+export async function logManualChange(action, description, opts = {}) {
   try {
     const entry = {
       action,
