@@ -23,6 +23,7 @@ import google.cloud.firestore
 
 import lank_mail_core as core
 import lank_alerts
+import lank_agent_review
 import lank_audit
 import lank_telegram
 
@@ -247,6 +248,13 @@ def load_analysis_state(db):
     if doc.exists:
         return doc.to_dict()
     return {'lastRun': None, 'accounts': {}}
+
+
+def load_schedule_config(db):
+    doc = db.document('config/schedule').get()
+    if doc.exists:
+        return doc.to_dict() or {}
+    return {'enabled': False, 'frequencyHours': 6}
 
 
 def save_analysis_state(db, state):
@@ -593,10 +601,15 @@ def merge_actionable_events(db, new_events, generated_at):
 
 
 def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=None):
-    """Generate alerts for analyzed accounts. Returns (alerts_generated, updated_services, actionable_events)."""
+    """Generate alerts for analyzed accounts.
+
+    Returns:
+        (alerts_generated, updated_services, actionable_events, agent_findings)
+    """
     alerts_generated = 0
     updated_services = {}
     actionable = []
+    agent_findings = []
 
     for account_result in ok_accounts:
         if account_result['access'] != 'ok':
@@ -663,10 +676,19 @@ def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=N
 
                 # Update group state
                 leave_reason = 'Salida voluntaria.' if kind == 'user_left_self' else 'Transferido fuera del grupo.'
-                if update_group_on_leave(db, service, a_id, user_alias, leave_reason):
+                group_updated = update_group_on_leave(db, service, a_id, user_alias, leave_reason)
+                if group_updated:
                     if service not in updated_services:
                         updated_services[service] = set()
                     updated_services[service].add(a_id)
+
+                if not svc_ref:
+                    agent_findings.extend(
+                        lank_agent_review.resolve_join_alert_without_real_access(
+                            db, alerts_data, service, a_id, alias, user_alias,
+                            group_updated=group_updated,
+                        )
+                    )
 
                 # Check duplicates
                 if cat not in ('pending', 'review'):
@@ -715,7 +737,7 @@ def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=N
                     alerts_data['alerts'].append(new_alert)
                     alerts_generated += 1
 
-    return alerts_generated, updated_services, actionable
+    return alerts_generated, updated_services, actionable, agent_findings
 
 
 # â"€â"€â"€ IMAP ANALYSIS â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -1338,7 +1360,9 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
         ok_accounts = [a for a in report['accounts'] if a['access'] == 'ok']
 
         # Generate alerts and build actionable events using shared function
-        alerts_generated, updated_services, actionable = generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=services_config)
+        alerts_generated, updated_services, actionable, agent_findings = generate_alerts_for_accounts(
+            db, ok_accounts, alerts_data, services_config=services_config
+        )
 
         # Save analysis state AFTER alert generation so a crash during alerts
         # doesn't permanently skip unprocessed emails (UIDs not yet committed).
@@ -1445,6 +1469,20 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
         # Actualizar response_data con total final de alertas
         response_data['alertsGenerated'] = alerts_generated
 
+        schedule_config = load_schedule_config(db)
+        agent_review = lank_agent_review.build_review_document(
+            db,
+            trigger='manual',
+            report=report,
+            ok_accounts=ok_accounts,
+            failed_accounts=failed_accounts,
+            alerts_generated=alerts_generated,
+            extra_findings=agent_findings,
+            finance_records=finance_records,
+            schedule_config=schedule_config,
+        )
+        agent_review_text = lank_agent_review.build_notification_text(agent_review)
+
         # ─── Notificaciones de Telegram ─────────────────────────────────
         try:
             tg = lank_telegram.TelegramBot(db)
@@ -1512,6 +1550,9 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
                         'accountAlias': a.get('accountAlias', ''),
                         'error': a.get('error', 'Error desconocido'),
                     } for a in failed_accounts])
+
+                if agent_review.get('shouldNotify') and agent_review_text:
+                    tg.send_message(agent_review_text, parse_mode=None)
         except Exception as tg_err:
             print(f'[Telegram] Error no fatal enviando notificaciÃ³n: {tg_err}')
         # â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -2065,7 +2106,9 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
     ok_accounts = [a for a in report['accounts'] if a['access'] == 'ok']
 
     # Generate alerts and build actionable events using shared function
-    alerts_generated, _, actionable = generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=services_config)
+    alerts_generated, _, actionable, agent_findings = generate_alerts_for_accounts(
+        db, ok_accounts, alerts_data, services_config=services_config
+    )
 
     # Save analysis state AFTER alert generation so a crash during alerts
     # doesn't permanently skip unprocessed emails (UIDs not yet committed).
@@ -2170,6 +2213,20 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
 
     print(f'Scheduled analysis complete: {len(ok_accounts)} accounts, {alerts_generated} alerts.')
 
+    schedule_config = load_schedule_config(db)
+    agent_review = lank_agent_review.build_review_document(
+        db,
+        trigger='scheduled',
+        report=report,
+        ok_accounts=ok_accounts,
+        failed_accounts=failed_accounts,
+        alerts_generated=alerts_generated + renewal_count,
+        extra_findings=agent_findings,
+        finance_records=finance_records if 'finance_records' in locals() else 0,
+        schedule_config=schedule_config,
+    )
+    agent_review_text = lank_agent_review.build_notification_text(agent_review)
+
     # â"€â"€â"€ Notificaciones de Telegram (scheduled) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     try:
         tg = lank_telegram.TelegramBot(db)
@@ -2239,6 +2296,9 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
                     'accountAlias': a.get('accountAlias', ''),
                     'error': a.get('error', 'Error desconocido'),
                 } for a in failed_accounts])
+
+            if agent_review.get('shouldNotify') and agent_review_text:
+                tg.send_message(agent_review_text, parse_mode=None)
     except Exception as tg_err:
         print(f'[Telegram] Error no fatal en notificaciÃ³n scheduled: {tg_err}')
     # â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€

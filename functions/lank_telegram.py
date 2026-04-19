@@ -82,11 +82,13 @@ class TelegramBot:
         chunks = self._split_message(text, MAX_MESSAGE_LENGTH)
         results = []
         for chunk in chunks:
-            result = self._api_call('sendMessage', {
+            payload = {
                 'chat_id': cid,
                 'text': chunk,
-                'parse_mode': parse_mode,
-            })
+            }
+            if parse_mode:
+                payload['parse_mode'] = parse_mode
+            result = self._api_call('sendMessage', payload)
             # Si Markdown falla, reintentar sin parse_mode
             if not result.get('ok') and parse_mode == 'Markdown':
                 result = self._api_call('sendMessage', {
