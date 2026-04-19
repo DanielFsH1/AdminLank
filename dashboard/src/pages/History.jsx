@@ -115,7 +115,7 @@ function formatFull(iso) {
 
 // ─── Componente principal ────────────────────────────────────────────────────
 
-export default function History() {
+export default function History({ navData }) {
   const [allEntries, setAllEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(new Set());
@@ -125,6 +125,13 @@ export default function History() {
   const [filterActor, setFilterActor]   = useState('');
   const [searchQuery, setSearchQuery]   = useState('');
   const [displayLimit, setDisplayLimit] = useState(50);
+
+  // Pre-cargar búsqueda desde navegación (ej: desde EntityHistory → "Ver en Historial")
+  useEffect(() => {
+    if (navData?.historySearch) {
+      setSearchQuery(navData.historySearch);
+    }
+  }, [navData]);
 
   // Suscripción en tiempo real a Firestore directamente
   useEffect(() => {

@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dashboard/dist/
+dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Firebase
+.firebase/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

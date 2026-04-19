@@ -4,7 +4,7 @@ import { db } from '../firebase';
 import { useDocument } from '../hooks/useFirestore';
 import { SERVICES, BANKS, getServiceMeta, getBankMeta, getPoolServiceKeys, getAllServiceKeys } from '../config/services';
 import { encrypt, decrypt, encryptFields, decryptFields } from '../utils/crypto';
-import { completeAlert, createRealAccount, createLinkedRealAccount, deleteRealAccount, createVaultCard, deleteVaultCard, DEFAULT_MASTER_CONFIG, addRecurringCharge, removeRecurringCharge, toggleRecurringCharge, updateRecurringCharge, createVaultEmailAccount, updateVaultEmailAccount, syncVaultEmailPassword } from '../hooks/firestoreActions';
+import { completeAlert, createManualAlert, createRealAccount, createLinkedRealAccount, deleteRealAccount, createVaultCard, deleteVaultCard, DEFAULT_MASTER_CONFIG, addRecurringCharge, removeRecurringCharge, toggleRecurringCharge, updateRecurringCharge, createVaultEmailAccount, updateVaultEmailAccount, syncVaultEmailPassword } from '../hooks/firestoreActions';
 import { ConfirmDialog, Toast } from '../components/EditModal';
 import { seedGooglePasswords } from '../utils/seedGooglePasswords';
 import { BadgeIcon, BankIcon, CalendarIcon, CashIcon, CheckCircleIcon, ClipboardIcon, CloseIcon, CreditCardIcon, DotRed, EditIcon, EmailIcon, HashIcon, HourglassIcon, KeyIcon, LinkIcon, LockIcon, LockKeyIcon, NotesIcon, PhoneIcon, PlusIcon, ReceiptIcon, RefreshIcon, SaveIcon, SearchIcon, SeedlingIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, WarningIcon } from '../components/Icons';
@@ -677,6 +677,42 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
  }
  if (alertToComplete) {
       await completeAlert(alertToComplete.id, { resolvedVia: 'vault' });
+
+      // Generar alertas access_verify para usuarios restantes de esta cuenta real
+      try {
+        // Determinar el serviceKey desde el serviceAccountRef (ej: "chatgpt_1" → "chatgpt")
+        const svcKey = serviceAccountRef.replace(/_\d+$/, '');
+        const realAccountRef = doc(db, `service-pools/${svcKey}/real-accounts/${serviceAccountRef}`);
+        const realSnap = await getDoc(realAccountRef);
+
+        if (realSnap.exists()) {
+          const realData = realSnap.data();
+          const activeSlots = (realData.slots || []).filter(s => s.memberAlias && s.status === 'active');
+
+          if (activeSlots.length > 0) {
+            const svcMeta = getServiceMeta(svcKey);
+            const serviceName = svcMeta.name || svcKey;
+            const acctLabel = realData.email ? `${serviceAccountRef} (${realData.email})` : serviceAccountRef;
+            const userNames = activeSlots.map(s => s.memberAlias);
+
+            await createManualAlert({
+              service: serviceName,
+              serviceAccountRef,
+              realAccountEmail: realData.email || null,
+              source: 'password_changed',
+              type: 'access_verify',
+              priority: 'medium',
+              title: `Verificar acceso - ${serviceName}`,
+              description: `La contrasena de ${acctLabel} fue cambiada. Verificar que estos usuarios aun tengan acceso: ${userNames.join(', ')}`,
+              dependsOn: 'password_change',
+              affectedUsers: userNames,
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Error generando alertas access_verify:', err);
+      }
+
       showToast('Contraseña actualizada y alerta completada ');
  } else {
       showToast('Credencial guardada correctamente');

@@ -269,7 +269,7 @@ function App() {
       case 'status': return <Status />;
       case 'tools': return <Tools />;
       case 'vault': return <Vault onNavigate={handleNavigate} navData={navData} servicesConfig={servicesConfig} />;
-      case 'history': return <History />;
+      case 'history': return <History navData={navData} onNavigate={handleNavigate} />;
       default: return <Overview onNavigate={handleNavigate} servicesConfig={servicesConfig} />;
     }
   };

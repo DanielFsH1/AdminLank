@@ -6,12 +6,13 @@ import { SERVICES, getServiceMeta, getProfileImage, getPoolServiceKeys, getNonPo
 import {
   updateSlot, updateGroupUser, removeGroupUser, moveUserBetweenAccounts,
   updateServiceMasterConfig, updateServiceConfig, propagateSlotsToRealAccounts, DEFAULT_MASTER_CONFIG,
-  initSubscriptionMasterConfig, toggleSlotEnabled, updateGroupEnabledSlots,
+  initSubscriptionMasterConfig, toggleSlotEnabled, updateGroupEnabledSlots, createManualAlert,
 } from '../hooks/firestoreActions';
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
 import { BlockIcon, CalendarIcon, CashIcon, CheckCircleIcon, ClockIcon, CloseIcon, CreditCardIcon, DotGray, DotGreen, EditIcon, EmailIcon, FolderIcon, KeyIcon, LinkIcon, LockKeyIcon, NotesIcon, PlusIcon, PointUpIcon, RefreshIcon, SaveIcon, SearchIcon, SettingsIcon, SlidersIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, WarningIcon } from '../components/Icons';
 import { normalizeSearch, nMatch } from '../utils/normalize';
 import SearchBar from '../components/SearchBar';
+import EntityHistory from '../components/EntityHistory';
 
 // Campos esperados y editables se derivan dinámicamente desde config/services
 function getExpectedFieldsForService(svcId) {
@@ -85,6 +86,7 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  const [pendingUserAliases, setPendingUserAliases] = useState(new Set());
  const [searchQuery, setSearchQuery] = useState('');
  const [searchResults, setSearchResults] = useState(null);
+ const [pendingPasswordAlerts, setPendingPasswordAlerts] = useState([]); // alertas password_change pendientes (real-time)
 
  // Modal states para edición de slots
  const [editSlotModal, setEditSlotModal] = useState(null); // { serviceKey, accountRef, slotIndex, slot, allSlots }
@@ -175,6 +177,22 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  }
  loadPendingUsers();
  }, []);
+
+ // Listener en tiempo real de alertas password_change pendientes
+ useEffect(() => {
+   const unsub = onSnapshot(collection(db, 'alerts'), snap => {
+     const pwAlerts = snap.docs
+       .map(d => ({ id: d.id, ...d.data() }))
+       .filter(a => a.type === 'password_change' && a.status === 'pending');
+     setPendingPasswordAlerts(pwAlerts);
+   });
+   return () => unsub();
+ }, []);
+
+ // Helper: ¿tiene esta cuenta real una alerta de password_change pendiente?
+ const getPasswordAlert = useCallback((serviceAccountRef) => {
+   return pendingPasswordAlerts.find(a => a.serviceAccountRef === serviceAccountRef);
+ }, [pendingPasswordAlerts]);
 
  // Scroll a cuenta real
  useEffect(() => {
@@ -646,6 +664,61 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
       } catch (err) {
         console.error('Error limpiando serviceAccountRef en grupo Lank:', err);
       }
+ }
+
+ // --- Generar alertas de cambio de contraseña si aplica ---
+ if (oldSlot.memberAlias && oldSlot.status === 'active') {
+   const svcMeta = getServiceMeta(serviceKey);
+   const accessType = svcMeta.accessType || '';
+   const isPasswordShared = accessType === 'credentials' || accessType === 'profile_project';
+
+   if (isPasswordShared) {
+     try {
+       const serviceName = svcMeta.name || serviceKey;
+       const acctIdStr = oldSlot.assignedFrom?.accountId ? String(oldSlot.assignedFrom.accountId) : '';
+       // Buscar la cuenta real completa para obtener email
+       const realAccounts = poolDetails[serviceKey] || [];
+       const realAcct = realAccounts.find(a => a.id === accountRef);
+       const realEmail = realAcct?.email || null;
+
+       const otherUsers = allSlots
+         .filter((s, i) => i !== slotIndex && s.memberAlias && s.status === 'active')
+         .map(s => s.memberAlias);
+
+       const acctLabel = realEmail ? `${accountRef} (${realEmail})` : accountRef;
+
+       const baseAlert = {
+         service: serviceName,
+         accountId: acctIdStr,
+         userAlias: oldSlot.memberAlias,
+         serviceAccountRef: accountRef,
+         realAccountEmail: realEmail,
+         source: 'slot_cleared',
+       };
+
+       await createManualAlert({
+         ...baseAlert,
+         type: 'password_change',
+         priority: 'high',
+         title: `Cambiar contrasena - ${serviceName}`,
+         description: `Cambiar contrasena de ${acctLabel}. El cupo de ${oldSlot.memberAlias} fue liberado manualmente.`,
+       });
+
+       if (otherUsers.length > 0) {
+         await createManualAlert({
+           ...baseAlert,
+           type: 'access_verify',
+           priority: 'medium',
+           title: `Verificar acceso - ${serviceName}`,
+           description: `Despues de cambiar la contrasena de ${acctLabel}, verificar que estos usuarios aun tengan acceso: ${otherUsers.join(', ')}`,
+           dependsOn: 'password_change',
+           affectedUsers: otherUsers,
+         });
+       }
+     } catch (err) {
+       console.error('Error generando alertas de cambio de contraseña al liberar cupo:', err);
+     }
+   }
  }
 
  showToast(`Cupo #${slotIndex + 1} liberado de ${clearSlotConfirm.accountLabel}`);
@@ -1197,16 +1270,28 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
               const free = slots.filter(s => s.status === 'free').length;
               const m = getServiceMeta(selectedService);
               const isHighlighted = highlightRef && (acct.id === highlightRef || acct.serviceAccountRef === highlightRef);
+              const pwAlert = getPasswordAlert(acct.serviceAccountRef || acct.id);
 
               return (
                 <div
-                  className={`real-account-card ${isHighlighted ? 'highlight-pulse' : ''}`}
+                  className={`real-account-card ${isHighlighted ? 'highlight-pulse' : ''} ${pwAlert ? 'password-change-pending' : ''}`}
                   key={acct.id}
                   id={`real-account-${acct.id}`}
                 >
-                  <div className="real-account-header" style={{ borderLeft: `4px solid ${m.color}` }}>
+                  <div className="real-account-header" style={{ borderLeft: `4px solid ${pwAlert ? '#ef4444' : m.color}` }}>
                     <div>
                       <div className="real-account-title">{acct.label || acct.serviceAccountRef}</div>
+                      {pwAlert && (
+                        <div
+                          className="password-change-banner"
+                          onClick={() => onNavigate && onNavigate('vault', { service: selectedService, accountRef: acct.serviceAccountRef || acct.id })}
+                          style={{ cursor: 'pointer' }}
+                        >
+                          <LockKeyIcon size={14} />
+                          <span>Cambio de contraseña pendiente</span>
+                          <span style={{ fontSize: '10px', opacity: 0.8 }}>— Ir a Bóveda</span>
+                        </div>
+                      )}
                       <div className="real-account-meta">
                         <span><EmailIcon size={16} /> {acct.email || 'N/A'}</span>
                         {acct.billingDay && <span><CalendarIcon size={16} /> Día {acct.billingDay}</span>}
@@ -1231,6 +1316,7 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
                          {acct.notes.join(' | ')}
                       </div>
                     )}
+                    <EntityHistory history={acct.slotHistory} label="Historial de cupos" searchKey={acct.serviceAccountRef || acct.id} onNavigate={onNavigate} />
                   </div>
                 </div>
               );
@@ -1397,6 +1483,7 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
                         );
                       })}
                     </div>
+                    <EntityHistory history={group.userHistory} label="Historial de usuarios" searchKey={`${group.accountAlias || group.accountId}`} onNavigate={onNavigate} />
                   </div>
                 </div>
               );

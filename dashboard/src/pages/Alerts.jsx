@@ -454,7 +454,11 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  return (
       <div className="alert-actions" onClick={e => e.stopPropagation()}>
         {/* Botón completar */}
-        {alert.type === 'missing_phone' ? (
+        {alert.type === 'access_verify' ? (
+          <button className="alert-action-btn complete" onClick={() => handleComplete(alert)}>
+            <CheckCircleIcon size={16} /> Acceso verificado
+          </button>
+        ) : alert.type === 'missing_phone' ? (
           <button className="alert-action-btn assign" onClick={() => handleMissingPhone(alert)}>
             <PhoneIcon size={16} /> Escribir número
           </button>

@@ -8,6 +8,7 @@ import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
 import { BlockIcon, CalendarIcon, CashIcon, ClipboardIcon, CloseIcon, EditIcon, EmailIcon, FolderIcon, LinkIcon, PhoneIcon, PlusIcon, SaveIcon, SearchIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, UsersIcon, WarningIcon } from '../components/Icons';
 import { normalizeSearch, nMatch } from '../utils/normalize';
 import SearchBar from '../components/SearchBar';
+import EntityHistory from '../components/EntityHistory';
 
 // Cashback se lee directamente del campo `cashback` del documento del grupo en Firestore.
 
@@ -843,6 +844,7 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
                               }
                             })}
                           </div>
+                          <EntityHistory history={svc.data.userHistory} label="Historial" searchKey={`${alias} ${svc.id}`} onNavigate={onNavigate} />
                         </div>
                       );
                     })

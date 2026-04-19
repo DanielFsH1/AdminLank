@@ -128,6 +128,51 @@ async function logManualChange(action, description, opts = {}) {
   }
 }
 
+// --- Historial por entidad ---
+
+/**
+ * Recorta un array de historial:
+ * - Elimina entradas con más de `maxAgeDays` días de antigüedad
+ * - Limita a `maxEntries` registros más recientes
+ * @param {Array} history - Array de entradas con campo `timestamp`
+ * @param {number} [maxEntries=10] - Máximo de entradas a conservar
+ * @param {number} [maxAgeDays=30] - Máximo de días de antigüedad
+ * @returns {Array} Array recortado
+ */
+function trimHistory(history, maxEntries = 10, maxAgeDays = 30) {
+  if (!Array.isArray(history) || history.length === 0) return [];
+  const cutoff = Date.now() - maxAgeDays * 86400000;
+  const filtered = history.filter(e => {
+    if (!e.timestamp) return true;
+    return new Date(e.timestamp).getTime() > cutoff;
+  });
+  // Ordenar por timestamp desc y limitar
+  filtered.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+  return filtered.slice(0, maxEntries);
+}
+
+/**
+ * Agrega una entrada de historial al campo indicado de un documento Firestore.
+ * Mantiene máximo 10 entradas y elimina las mayores a 30 días.
+ * Se ejecuta de forma asíncrona (no bloquea la operación principal).
+ *
+ * @param {import('firebase/firestore').DocumentReference} docRef - Referencia al documento
+ * @param {string} fieldName - Nombre del campo array (ej: 'slotHistory', 'userHistory')
+ * @param {object} entry - Entrada de historial a agregar
+ */
+async function appendEntityHistory(docRef, fieldName, entry) {
+  try {
+    const { getDoc: getDocument } = await import('firebase/firestore');
+    const snap = await getDocument(docRef);
+    const data = snap.exists() ? snap.data() : {};
+    const current = Array.isArray(data[fieldName]) ? data[fieldName] : [];
+    const updated = trimHistory([{ ...entry, timestamp: nowISO() }, ...current]);
+    await updateDoc(docRef, { [fieldName]: updated });
+  } catch (_) {
+    // Silenciar — el historial es secundario, no debe romper la operación
+  }
+}
+
 // --- Alertas ---
 
 /**
@@ -225,10 +270,18 @@ export async function updateGroupUser(serviceKey, accountId, userIndex, updatedU
     collection: `groups/${serviceKey}/lank-accounts`, documentId: String(accountId),
     field: `users[${userIndex}]`, before: beforeUser, after: updatedUsers[userIndex],
   });
+  // Historial por entidad
+  appendEntityHistory(ref, 'userHistory', {
+    action: 'updated',
+    userAlias: alias,
+    details: Object.keys(updatedUser).join(', '),
+  });
 }
 
 /**
  * Elimina un usuario de un grupo Lank (baja manual).
+ * Si el usuario tenía un slot en una cuenta real con contraseña compartida,
+ * genera alertas de password_change y access_verify automáticamente.
  * @param {string} serviceKey - ej: 'f1tv', 'chatgpt'
  * @param {string|number} accountId - ID de cuenta Lank
  * @param {string} userAlias - Alias del usuario a eliminar
@@ -242,7 +295,7 @@ export async function removeGroupUser(serviceKey, accountId, userAlias, currentU
   );
   const dateStr = new Date().toLocaleDateString('es-MX', { day: '2-digit', month: 'short' });
   const noteText = `${dateStr}: ${userAlias} salió del grupo (manual). ${reason}`.trim();
-  
+
   await updateDoc(ref, {
     users: filteredUsers,
     hasUsers: filteredUsers.length > 0,
@@ -253,6 +306,93 @@ export async function removeGroupUser(serviceKey, accountId, userAlias, currentU
     collection: `groups/${serviceKey}/lank-accounts`, documentId: String(accountId),
     before: { userAlias, usersCount: currentUsers.length }, after: { usersCount: filteredUsers.length },
   });
+  // Historial por entidad
+  const removedUser = currentUsers.find(u => normalize(typeof u === 'string' ? u : u.userAlias) === normalize(userAlias));
+  appendEntityHistory(ref, 'userHistory', {
+    action: 'left',
+    userAlias,
+    reason: reason || 'Baja manual',
+    joinedAt: (typeof removedUser === 'object' ? removedUser?.addedAt : null) || null,
+  });
+
+  // --- Generar alertas de cambio de contraseña si aplica ---
+  const serviceMeta = getServiceMeta(serviceKey);
+  const accessType = serviceMeta.accessType || '';
+  const isPasswordShared = accessType === 'credentials' || accessType === 'profile_project';
+
+  if (!isPasswordShared) return; // No se necesitan alertas para servicios por invitación
+
+  // Buscar si el usuario tenía un slot activo en alguna cuenta real de este servicio
+  try {
+    const realAccountsSnap = await getDocs(collection(db, `service-pools/${serviceKey}/real-accounts`));
+    const serviceName = serviceMeta.name || serviceKey;
+    const acctIdStr = String(accountId);
+    const accountAlias = removedUser?.userAlias || userAlias;
+
+    for (const realDoc of realAccountsSnap.docs) {
+      const realData = realDoc.data();
+      const slots = realData.slots || [];
+      const accountStatus = realData.status || '';
+
+      if (accountStatus === 'legacy_in_use') continue;
+
+      // Buscar slots asignados a este usuario desde este grupo Lank
+      for (let idx = 0; idx < slots.length; idx++) {
+        const slot = slots[idx];
+        const slotMatchesGroup = String(slot.assignedFrom?.accountId) === acctIdStr;
+        const slotMatchesUser = normalize(slot.memberAlias) === normalize(userAlias);
+
+        if (slotMatchesGroup && slotMatchesUser && slot.status === 'active') {
+          // Otros usuarios activos en esta misma cuenta real
+          const otherUsers = slots
+            .filter((s, i) => i !== idx && s.memberAlias && s.status === 'active')
+            .map(s => s.memberAlias);
+
+          const acctLabel = realData.email
+            ? `${realDoc.id} (${realData.email})`
+            : realDoc.id;
+
+          const baseAlert = {
+            service: serviceName,
+            accountId: acctIdStr,
+            accountAlias,
+            userAlias,
+            serviceAccountRef: realDoc.id,
+            realAccountEmail: realData.email || null,
+            realAccountExpires: realData.expires || null,
+            source: 'user_removal',
+          };
+
+          // Alerta de cambio de contraseña
+          await createManualAlert({
+            ...baseAlert,
+            type: 'password_change',
+            priority: 'high',
+            title: `Cambiar contrasena - ${serviceName}`,
+            description: `Cambiar contrasena de ${acctLabel}. El usuario ${userAlias} fue dado de baja del grupo ${acctIdStr} y tenia acceso.`,
+          });
+
+          // Alerta de verificar acceso para usuarios restantes
+          if (otherUsers.length > 0) {
+            await createManualAlert({
+              ...baseAlert,
+              type: 'access_verify',
+              priority: 'medium',
+              title: `Verificar acceso - ${serviceName}`,
+              description: `Despues de cambiar la contrasena de ${acctLabel}, verificar que estos usuarios aun tengan acceso: ${otherUsers.join(', ')}`,
+              dependsOn: 'password_change',
+              affectedUsers: otherUsers,
+            });
+          }
+        }
+      }
+    }
+  } catch (err) {
+    // No bloquear la baja si falla la generación de alertas — loguear para debug
+    logManualChange('alert_generation_error', `Error generando alertas de cambio de contraseña al dar de baja a ${userAlias}: ${err.message}`, {
+      collection: `groups/${serviceKey}/lank-accounts`, documentId: String(accountId),
+    });
+  }
 }
 
 // --- Edición de slots en cuentas reales ---
@@ -273,10 +413,10 @@ export async function updateSlot(serviceKey, accountRef, slotIndex, updatedSlot,
   const updatedSlots = [...currentSlots];
   const beforeSlot = currentSlots[slotIndex];
   updatedSlots[slotIndex] = { ...updatedSlots[slotIndex], ...updatedSlot };
-  
+
   // Recalcular contadores
   const occupied = updatedSlots.filter(s => s.memberAlias && s.memberAlias.trim()).length;
-  
+
   await updateDoc(ref, {
     slots: updatedSlots,
     occupiedSlots: occupied,
@@ -288,6 +428,20 @@ export async function updateSlot(serviceKey, accountRef, slotIndex, updatedSlot,
   logManualChange('update_slot', desc, {
     collection: `service-pools/${serviceKey}/real-accounts`, documentId: accountRef,
     field: `slots[${slotIndex}]`, before: beforeSlot, after: updatedSlots[slotIndex],
+  });
+  // Historial por entidad
+  const wasFree = !beforeSlot?.memberAlias || !beforeSlot.memberAlias.trim();
+  const nowFree = !updatedSlot.memberAlias || !updatedSlot.memberAlias.trim();
+  let action = 'updated';
+  if (wasFree && !nowFree) action = 'assign';
+  else if (!wasFree && nowFree) action = 'release';
+  appendEntityHistory(ref, 'slotHistory', {
+    action,
+    slotNumber: slotIndex + 1,
+    memberAlias: updatedSlot.memberAlias || beforeSlot?.memberAlias || '',
+    previousUser: (!wasFree && action === 'assign') ? beforeSlot.memberAlias : null,
+    lankAccountId: updatedSlot.assignedFrom?.accountId || beforeSlot?.assignedFrom?.accountId || null,
+    projectName: updatedSlot.projectName || beforeSlot?.projectName || null,
   });
 }
 
@@ -364,6 +518,23 @@ export async function moveUserBetweenAccounts(serviceKey, source, dest, lankInfo
       await updateDoc(groupRef, { users: updatedUsers });
     }
   }
+
+  // Historial por entidad — origen (move_out)
+  appendEntityHistory(srcRef, 'slotHistory', {
+    action: 'move_out',
+    slotNumber: source.slotIndex + 1,
+    memberAlias: sourceSlot.memberAlias || '',
+    destination: dest.accountRef,
+    lankAccountId: lankInfo?.accountId || null,
+  });
+  // Historial por entidad — destino (move_in)
+  appendEntityHistory(dstRef, 'slotHistory', {
+    action: 'move_in',
+    slotNumber: dest.freeSlotIndex + 1,
+    memberAlias: sourceSlot.memberAlias || '',
+    origin: source.accountRef,
+    lankAccountId: lankInfo?.accountId || null,
+  });
 }
 
 // --- Edición de cuenta Lank (datos generales) ---
@@ -995,6 +1166,13 @@ export async function addGroupUser(serviceKey, accountId, newUser, currentUsers)
   logManualChange('add_user', `Usuario agregado: ${newUser.userAlias} en ${serviceKey} cuenta ${accountId}`, {
     collection: `groups/${serviceKey}/lank-accounts`, documentId: String(accountId),
     after: { userAlias: newUser.userAlias, serviceAccountRef: newUser.serviceAccountRef || null },
+  });
+  // Historial por entidad
+  appendEntityHistory(ref, 'userHistory', {
+    action: 'joined',
+    userAlias: newUser.userAlias,
+    serviceAccountRef: newUser.serviceAccountRef || null,
+    projectName: newUser.projectName || null,
   });
 }
 
