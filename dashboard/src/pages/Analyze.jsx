@@ -107,18 +107,15 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
  const [activeHoursStart, setActiveHoursStart] = useState(7);
  const [activeHoursEnd, setActiveHoursEnd] = useState(23);
  const [modalActiveHours, setModalActiveHours] = useState({ enabled: false, startHour: 7, endHour: 23 });
- // AI report
- const [aiReport, setAiReport] = useState(null);
 
  const fetchData = useCallback(async () => {
  try {
       setLoading(true);
-      const [reportSnap, eventsSnap, rawSnap, schedSnap, aiSnap] = await Promise.all([
+      const [reportSnap, eventsSnap, rawSnap, schedSnap] = await Promise.all([
         getDoc(doc(db, 'analysis', 'latest-report')),
         getDoc(doc(db, 'analysis', 'actionable-events')),
         getDoc(doc(db, 'analysis', 'raw-emails')),
         getDoc(doc(db, 'config', 'schedule')),
-        getDoc(doc(db, 'analysis', 'ai-report')),
       ]);
       if (reportSnap.exists()) {
         setReport(reportSnap.data());
@@ -126,7 +123,6 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
       }
       if (eventsSnap.exists()) setEvents(eventsSnap.data());
       if (rawSnap.exists()) setRawEmails(rawSnap.data());
-      if (aiSnap.exists()) setAiReport(aiSnap.data());
       if (schedSnap.exists()) {
         const sched = schedSnap.data();
         setScheduleEnabled(sched.enabled || false);
@@ -471,9 +467,6 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
             {analysisResult.type === 'success' ? (
               <>
               <p><CheckCircleIcon size={16} /> Análisis completado: <strong>{analysisResult.analyzedAccounts}</strong> cuentas, <strong>{analysisResult.totalRawEmails}</strong> correos, <strong>{analysisResult.alertsGenerated}</strong> alertas generadas</p>
-              {analysisResult.aiAnalysis?.enabled && !analysisResult.aiAnalysis?.error && (
-                <p style={{ marginTop: '6px', color: 'var(--text-secondary)', fontSize: '13px' }}>🤖 IA: {analysisResult.aiAnalysis.summary || 'Sin hallazgos adicionales'}{analysisResult.aiAnalysis.corrections > 0 && <> · <strong>{analysisResult.aiAnalysis.corrections}</strong> correcciones</>}{analysisResult.aiAnalysis.aiAlertsGenerated > 0 && <> · <strong>{analysisResult.aiAnalysis.aiAlertsGenerated}</strong> alertas IA</>}</p>
-              )}
               </>
             ) : (
               <p><XCircleIcon size={16} /> Error: {analysisResult.message}</p>
@@ -600,9 +593,6 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
           {analysisResult.type === 'success' ? (
             <>
             <p><CheckCircleIcon size={16} /> Análisis completado: <strong>{analysisResult.analyzedAccounts}</strong> cuentas, <strong>{analysisResult.totalRawEmails}</strong> correos, <strong>{analysisResult.alertsGenerated}</strong> alertas generadas</p>
-            {analysisResult.aiAnalysis?.enabled && !analysisResult.aiAnalysis?.error && (
-              <p style={{ marginTop: '6px', color: 'var(--text-secondary)', fontSize: '13px' }}>🤖 IA: {analysisResult.aiAnalysis.summary || 'Sin hallazgos adicionales'}{analysisResult.aiAnalysis.corrections > 0 && <> · <strong>{analysisResult.aiAnalysis.corrections}</strong> correcciones</>}{analysisResult.aiAnalysis.aiAlertsGenerated > 0 && <> · <strong>{analysisResult.aiAnalysis.aiAlertsGenerated}</strong> alertas IA</>}</p>
-            )}
             </>
           ) : (
             <p><XCircleIcon size={16} /> Error: {analysisResult.message}</p>
@@ -680,28 +670,6 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
       </div>
 
       {/* AI Analysis Summary */}
-      {aiReport && aiReport.naturalSummary && (
-        <div className="analyze-card" style={{ marginBottom: '16px', borderLeft: '3px solid #a78bfa', background: 'var(--card-bg)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-            <span style={{ fontSize: '18px' }}>🤖</span>
-            <strong style={{ color: 'var(--text-primary)' }}>Análisis de IA</strong>
-            <span style={{ color: 'var(--text-muted)', fontSize: '11px', marginLeft: 'auto' }}>
-              {aiReport.model} · {formatDate(aiReport.generatedAt)}
-            </span>
-          </div>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '13px', lineHeight: '1.5', margin: '0 0 8px 0' }}>
-            {aiReport.naturalSummary}
-          </p>
-          <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', fontSize: '12px', color: 'var(--text-muted)' }}>
-            {aiReport.corrections > 0 && <span>📝 {aiReport.corrections} correcciones</span>}
-            {aiReport.unrecognizedImportant > 0 && <span>🔍 {aiReport.unrecognizedImportant} no reconocidos</span>}
-            {aiReport.aiAlertsGenerated > 0 && <span>⚡ {aiReport.aiAlertsGenerated} alertas IA</span>}
-            {aiReport.emailsAnalyzed > 0 && <span>📧 {aiReport.emailsAnalyzed} correos analizados</span>}
-            {aiReport.overallConfidence > 0 && <span>🎯 {Math.round(aiReport.overallConfidence * 100)}% confianza</span>}
-          </div>
-        </div>
-      )}
-
       {/* NavTabs */}
       <div className="analyze-tabs">
         {[

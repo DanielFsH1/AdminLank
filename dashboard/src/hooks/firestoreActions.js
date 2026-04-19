@@ -2008,9 +2008,21 @@ export async function saveCreditStatement(accountId, statement, currentAccounts)
 // --- SIM Cards (Control de Recarga) ---
 
 /**
+ * Calcula la próxima fecha de recarga: suma 11 meses y redondea al día 15.
+ * @param {string} rechargeDate - Fecha de recarga (YYYY-MM-DD)
+ * @returns {string} YYYY-MM-DD con día 15
+ */
+function computeNextRechargeDate(rechargeDate) {
+  const d = new Date(rechargeDate + 'T12:00:00');
+  d.setMonth(d.getMonth() + 11);
+  d.setDate(15);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
  * Lee la configuración de SIM Cards desde Firestore.
  * Documento: config/sim-cards
- * @returns {object|null} - { groups: [...], updatedAt }
+ * @returns {object|null} - { sims: [...], updatedAt }
  */
 export async function getSimCardConfig() {
   const ref = doc(db, 'config', 'sim-cards');
@@ -2021,7 +2033,7 @@ export async function getSimCardConfig() {
 
 /**
  * Guarda la configuración completa de SIM Cards.
- * @param {object} configData - { groups: [...] }
+ * @param {object} configData - { sims: [...] }
  */
 export async function saveSimCardConfig(configData) {
   const ref = doc(db, 'config', 'sim-cards');
@@ -2035,116 +2047,43 @@ export async function saveSimCardConfig(configData) {
 }
 
 /**
- * Marca la recarga de un grupo completo como realizada.
- * Actualiza lastRechargeDate y nextRechargeDate de todas las SIMs del grupo.
- * @param {Array} groups - Array de grupos actual
- * @param {number} groupNumber - Número del grupo recargado
- * @param {string} rechargeDate - Fecha de recarga (ISO o YYYY-MM-DD), default hoy
- * @returns {Array} grupos actualizados
+ * Marca la recarga individual de una SIM como realizada.
+ * Suma 11 meses a la fecha de recarga y redondea al día 15.
+ * @param {Array} sims - Array de SIMs actual
+ * @param {number} lankAccountId - ID de la cuenta Lank
+ * @param {string} rechargeDate - Fecha de recarga (YYYY-MM-DD), default hoy
+ * @returns {Array} SIMs actualizadas
  */
-export async function markGroupRechargeComplete(groups, groupNumber, rechargeDate = null) {
+export async function markSimRechargeComplete(sims, lankAccountId, rechargeDate = null) {
   const date = rechargeDate || new Date().toISOString().slice(0, 10);
-  const d = new Date(date + 'T12:00:00');
-  d.setMonth(d.getMonth() + 11);
-  d.setDate(15);
-  const nextRecharge = d.toISOString().slice(0, 10);
+  const nextRecharge = computeNextRechargeDate(date);
 
-  const updatedGroups = groups.map(g => {
-    if (g.groupNumber !== groupNumber) return g;
+  const updatedSims = sims.map(sim => {
+    if (sim.lankAccountId !== lankAccountId) return sim;
     return {
-      ...g,
-      sims: g.sims.map(sim => ({
-        ...sim,
-        lastRechargeDate: date,
-        nextRechargeDate: nextRecharge,
-      })),
+      ...sim,
       lastRechargeDate: date,
       nextRechargeDate: nextRecharge,
     };
   });
 
-  await saveSimCardConfig({ groups: updatedGroups });
-  logManualChange('sim_recharge_group', `Recarga de grupo ${groupNumber} completada el ${date}`, {
-    collection: 'config', documentId: 'sim-cards',
-    after: { groupNumber, rechargeDate: date, nextRecharge },
-  });
-  return updatedGroups;
-}
-
-/**
- * Marca la recarga individual de una SIM como realizada.
- * Reasigna la SIM al grupo óptimo según su nueva fecha de próxima recarga.
- * @param {Array} groups - Array de grupos actual
- * @param {number} lankAccountId - ID de la cuenta Lank
- * @param {string} rechargeDate - Fecha de recarga (YYYY-MM-DD), default hoy
- * @returns {Array} grupos actualizados
- */
-export async function markSimRechargeComplete(groups, lankAccountId, rechargeDate = null) {
-  const date = rechargeDate || new Date().toISOString().slice(0, 10);
-  const d = new Date(date + 'T12:00:00');
-  d.setMonth(d.getMonth() + 11);
-  d.setDate(15);
-  const nextRecharge = d.toISOString().slice(0, 10);
-
-  let simData = null;
-  let updatedGroups = groups.map(g => ({
-    ...g,
-    sims: g.sims.filter(sim => {
-      if (sim.lankAccountId === lankAccountId) {
-        simData = { ...sim, lastRechargeDate: date, nextRechargeDate: nextRecharge };
-        return false;
-      }
-      return true;
-    }),
-  }));
-
-  if (!simData) return groups;
-
-  const nextMonth = parseInt(nextRecharge.slice(5, 7));
-  const nextYear = parseInt(nextRecharge.slice(0, 4));
-  let bestGroup = null;
-  let bestDiff = Infinity;
-
-  for (const g of updatedGroups) {
-    if (!g.nextRechargeDate || g.sims.length === 0) continue;
-    const gMonth = parseInt(g.nextRechargeDate.slice(5, 7));
-    const gYear = parseInt(g.nextRechargeDate.slice(0, 4));
-    const diff = Math.abs((gYear * 12 + gMonth) - (nextYear * 12 + nextMonth));
-    if (diff < bestDiff || (diff === bestDiff && bestGroup && g.sims.length < bestGroup.sims.length)) {
-      bestDiff = diff;
-      bestGroup = g;
-    }
-  }
-
-  if (bestGroup) {
-    updatedGroups = updatedGroups.map(g => {
-      if (g.groupNumber !== bestGroup.groupNumber) return g;
-      return { ...g, sims: [...g.sims, simData] };
-    });
-  }
-
-  updatedGroups = updatedGroups.filter(g => g.sims.length > 0);
-
-  await saveSimCardConfig({ groups: updatedGroups });
+  await saveSimCardConfig({ sims: updatedSims });
   logManualChange('sim_recharge_individual', `Recarga individual de cuenta Lank #${lankAccountId} el ${date}`, {
     collection: 'config', documentId: 'sim-cards',
-    after: { lankAccountId, rechargeDate: date, nextRecharge, newGroup: bestGroup?.groupNumber },
+    after: { lankAccountId, rechargeDate: date, nextRecharge },
   });
-  return updatedGroups;
+  return updatedSims;
 }
 
 /**
- * Agrega una nueva SIM Card al sistema, asignándola al grupo óptimo.
- * @param {Array} groups - Array de grupos actual
+ * Agrega una nueva SIM Card al sistema.
+ * @param {Array} sims - Array de SIMs actual
  * @param {object} simInfo - { lankAccountId, phone, fullName, canonicalAlias, lastRechargeDate }
- * @returns {Array} grupos actualizados
+ * @returns {Array} SIMs actualizadas
  */
-export async function addSimCard(groups, simInfo) {
+export async function addSimCard(sims, simInfo) {
   const { lankAccountId, phone, fullName, canonicalAlias, lastRechargeDate } = simInfo;
-  const d = new Date(lastRechargeDate + 'T12:00:00');
-  d.setMonth(d.getMonth() + 11);
-  d.setDate(15);
-  const nextRecharge = d.toISOString().slice(0, 10);
+  const nextRecharge = computeNextRechargeDate(lastRechargeDate);
 
   const newSim = {
     lankAccountId,
@@ -2155,50 +2094,12 @@ export async function addSimCard(groups, simInfo) {
     nextRechargeDate: nextRecharge,
   };
 
-  const nextMonth = parseInt(nextRecharge.slice(5, 7));
-  const nextYear = parseInt(nextRecharge.slice(0, 4));
-  let bestGroup = null;
-  let bestDiff = Infinity;
+  const updatedSims = [...sims, newSim];
 
-  for (const g of groups) {
-    if (!g.nextRechargeDate) continue;
-    const gMonth = parseInt(g.nextRechargeDate.slice(5, 7));
-    const gYear = parseInt(g.nextRechargeDate.slice(0, 4));
-    const diff = Math.abs((gYear * 12 + gMonth) - (nextYear * 12 + nextMonth));
-    if (diff < bestDiff || (diff === bestDiff && bestGroup && g.sims.length < bestGroup.sims.length)) {
-      bestDiff = diff;
-      bestGroup = g;
-    }
-  }
-
-  let updatedGroups;
-  if (bestGroup && bestDiff <= 1) {
-    updatedGroups = groups.map(g => {
-      if (g.groupNumber !== bestGroup.groupNumber) return g;
-      return { ...g, sims: [...g.sims, newSim] };
-    });
-  } else {
-    const smallest = [...groups].sort((a, b) => a.sims.length - b.sims.length)[0];
-    if (smallest && smallest.sims.length < 4) {
-      updatedGroups = groups.map(g => {
-        if (g.groupNumber !== smallest.groupNumber) return g;
-        return { ...g, sims: [...g.sims, newSim] };
-      });
-    } else {
-      const newGroupNum = Math.max(...groups.map(g => g.groupNumber), 0) + 1;
-      updatedGroups = [...groups, {
-        groupNumber: newGroupNum,
-        nextRechargeDate: nextRecharge,
-        lastRechargeDate,
-        sims: [newSim],
-      }];
-    }
-  }
-
-  await saveSimCardConfig({ groups: updatedGroups });
+  await saveSimCardConfig({ sims: updatedSims });
   logManualChange('add_sim_card', `SIM agregada: cuenta Lank #${lankAccountId} (${fullName})`, {
     collection: 'config', documentId: 'sim-cards',
     after: { lankAccountId, phone, nextRecharge },
   });
-  return updatedGroups;
+  return updatedSims;
 }

@@ -1,23 +1,198 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
-import { getSimCardConfig, markGroupRechargeComplete, markSimRechargeComplete, addSimCard, saveSimCardConfig } from '../hooks/firestoreActions';
-import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
+import { markSimRechargeComplete, addSimCard, saveSimCardConfig } from '../hooks/firestoreActions';
+import EditModal, { Toast } from '../components/EditModal';
 import {
-  BellIcon, CalendarIcon, CheckCircleIcon, ClockIcon, EditIcon,
-  PlusIcon, RefreshIcon, TrashIcon, WarningIcon, UsersIcon,
+  BellIcon, CalendarIcon, CheckCircleIcon, ClockIcon,
+  PlusIcon, WarningIcon,
 } from '../components/Icons';
 
 const MONTH_NAMES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 const MONTH_NAMES_FULL = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
-// SIM chip icon
-const SimIcon = (props) => (
-  <svg width={props.size || 16} height={props.size || 16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, verticalAlign: 'middle' }}>
-    <path d="M4 7V4a2 2 0 0 1 2-2h8.5L20 7.5V20a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7Z"/>
-    <path d="M8 12h8"/><path d="M8 16h8"/><path d="M12 12v4"/>
-  </svg>
-);
+/**
+ * Calcula la próxima fecha de recarga (espejo del back-end en firestoreActions.js).
+ * Suma 11 meses y fija el día al 15.
+ */
+function computeNextRechargeDate(rechargeDate) {
+  if (!rechargeDate) return null;
+  const d = new Date(rechargeDate + 'T12:00:00');
+  d.setMonth(d.getMonth() + 11);
+  d.setDate(15);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Modal custom de recarga con preview en vivo de la próxima fecha.
+ * Paso 1: selección de fecha + preview.
+ * Paso 2: confirmación con resumen completo.
+ */
+function RechargeModal({ sim, initialDate, onConfirm, onClose }) {
+  const [rechargeDate, setRechargeDate] = useState(initialDate);
+  const [step, setStep] = useState('date'); // 'date' | 'confirm'
+  const [saving, setSaving] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState('');
+
+  const nextDate = computeNextRechargeDate(rechargeDate);
+  const nextDateFormatted = nextDate ? formatDateShort(nextDate) : '—';
+  const currentDateFormatted = rechargeDate ? formatDateShort(rechargeDate) : '—';
+
+  // Mes y año destino
+  const targetMonth = nextDate ? MONTH_NAMES_FULL[parseInt(nextDate.slice(5, 7)) - 1] : '';
+  const targetYear = nextDate ? nextDate.slice(0, 4) : '';
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  const handleRequestConfirm = () => {
+    if (!rechargeDate) {
+      setError('Selecciona una fecha de recarga');
+      return;
+    }
+    if (rechargeDate > today) {
+      setError('No se pueden registrar recargas con fecha futura');
+      return;
+    }
+    setError('');
+    setStep('confirm');
+  };
+
+  const handleFinalConfirm = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      await onConfirm(rechargeDate);
+      setDone(true);
+      setTimeout(() => onClose(), 900);
+    } catch (err) {
+      setError(err.message || 'Error al registrar la recarga');
+      setSaving(false);
+      setStep('date');
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      if (step === 'confirm') setStep('date');
+      else onClose();
+    }
+  };
+
+  return (
+    <div className="edit-modal-overlay" onClick={onClose} onKeyDown={handleKeyDown}>
+      <div className="edit-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '460px' }}>
+        {done ? (
+          <div className="edit-modal-success">
+            <span className="edit-modal-success-icon"><CheckCircleIcon size={48} /></span>
+            <div className="edit-modal-success-text">Recarga registrada</div>
+          </div>
+        ) : step === 'confirm' ? (
+          /* ── Paso 2: Confirmación ── */
+          <div style={{ padding: '28px 24px', textAlign: 'center' }}>
+            <div style={{ marginBottom: '10px' }}><CheckCircleIcon size={40} /></div>
+            <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '6px' }}>Confirmar recarga</h3>
+            <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '20px' }}>
+              Revisa los datos antes de confirmar.
+            </p>
+
+            <div className="recharge-confirm-summary">
+              <div className="recharge-confirm-row">
+                <span className="recharge-confirm-label">SIM</span>
+                <span className="recharge-confirm-value">#{sim.lankAccountId} — {sim.canonicalAlias || sim.fullName}</span>
+              </div>
+              <div className="recharge-confirm-row">
+                <span className="recharge-confirm-label">Teléfono</span>
+                <span className="recharge-confirm-value">{sim.phone}</span>
+              </div>
+              <div className="recharge-confirm-divider" />
+              <div className="recharge-confirm-row">
+                <span className="recharge-confirm-label">Fecha de recarga</span>
+                <span className="recharge-confirm-value">{currentDateFormatted}</span>
+              </div>
+              <div className="recharge-confirm-row highlight">
+                <span className="recharge-confirm-label">Próxima recarga</span>
+                <span className="recharge-confirm-value accent">{nextDateFormatted}</span>
+              </div>
+              <div className="recharge-confirm-row">
+                <span className="recharge-confirm-label">Se ubicará en</span>
+                <span className="recharge-confirm-value">{targetMonth} {targetYear}</span>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '20px' }}>
+              <button
+                className="edit-modal-btn primary"
+                onClick={handleFinalConfirm}
+                disabled={saving}
+              >
+                {saving ? (
+                  <><span className="spinner" /> Guardando...</>
+                ) : (
+                  <><CheckCircleIcon size={16} /> Sí, confirmar recarga</>
+                )}
+              </button>
+              <button className="edit-modal-btn cancel" onClick={() => setStep('date')} disabled={saving}>
+                ← Volver a editar
+              </button>
+            </div>
+            {error && <div className="edit-modal-error" style={{ marginTop: '12px' }}><WarningIcon size={14} /> {error}</div>}
+          </div>
+        ) : (
+          /* ── Paso 1: Selección de fecha ── */
+          <>
+            <div className="edit-modal-header">
+              <h3 className="edit-modal-title">Recarga — {sim.canonicalAlias || sim.fullName}</h3>
+              <button className="edit-modal-close" onClick={onClose}><span style={{ fontSize: '18px', lineHeight: 1 }}>&times;</span></button>
+            </div>
+
+            <div className="edit-modal-body">
+              <div className="edit-modal-field">
+                <label className="edit-modal-label">Fecha de recarga<span className="edit-modal-required">*</span></label>
+                <input
+                  className="edit-modal-input"
+                  type="date"
+                  value={rechargeDate}
+                  max={today}
+                  onChange={e => { setRechargeDate(e.target.value); setError(''); }}
+                  autoFocus
+                />
+                <span className="edit-modal-hint">
+                  Selecciona la fecha en que se realizó la recarga.
+                </span>
+              </div>
+
+              {/* Preview en vivo */}
+              {rechargeDate && (
+                <div className="recharge-preview">
+                  <div className="recharge-preview-title"><CalendarIcon size={14} /> Próxima recarga calculada</div>
+                  <div className="recharge-preview-date">{nextDateFormatted}</div>
+                  <div className="recharge-preview-detail">
+                    Se ubicará en <strong>{targetMonth} {targetYear}</strong>
+                  </div>
+                  <div className="recharge-preview-formula">
+                    {currentDateFormatted} + 11 meses → día 15
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {error && <div className="edit-modal-error"><WarningIcon size={14} /> {error}</div>}
+
+            <div className="edit-modal-actions">
+              <button className="edit-modal-btn primary" onClick={handleRequestConfirm}>
+                <CheckCircleIcon size={14} /> Confirmar recarga
+              </button>
+              <button className="edit-modal-btn cancel" onClick={onClose}>
+                Cancelar
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 const PhoneIcon = (props) => (
   <svg width={props.size || 16} height={props.size || 16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, verticalAlign: 'middle' }}>
@@ -25,17 +200,12 @@ const PhoneIcon = (props) => (
   </svg>
 );
 
-const ChevronIcon = ({ open }) => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`sim-group-chevron${open ? ' open' : ''}`}>
-    <path d="M6 9l6 6 6-6"/>
+const SimIcon = (props) => (
+  <svg width={props.size || 16} height={props.size || 16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, verticalAlign: 'middle' }}>
+    <path d="M4 7V4a2 2 0 0 1 2-2h8.5L20 7.5V20a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7Z"/>
+    <path d="M8 12h8"/><path d="M8 16h8"/><path d="M12 12v4"/>
   </svg>
 );
-
-function formatDate(dateStr) {
-  if (!dateStr) return '—';
-  const d = new Date(dateStr + 'T12:00:00');
-  return `${d.getDate()} ${MONTH_NAMES_FULL[d.getMonth()]} ${d.getFullYear()}`;
-}
 
 function formatDateShort(dateStr) {
   if (!dateStr) return '—';
@@ -53,9 +223,9 @@ function daysUntil(dateStr) {
 
 function getUrgencyLevel(daysLeft) {
   if (daysLeft <= 0) return 'overdue';
-  if (daysLeft <= 15) return 'critical';
-  if (daysLeft <= 30) return 'warning';
-  if (daysLeft <= 60) return 'soon';
+  if (daysLeft <= 7) return 'critical';
+  if (daysLeft <= 15) return 'warning';
+  if (daysLeft <= 30) return 'soon';
   return 'ok';
 }
 
@@ -70,53 +240,83 @@ function getUrgencyColor(level) {
 }
 
 function getUrgencyLabel(daysLeft) {
-  if (daysLeft < 0) return `Vencida hace ${Math.abs(daysLeft)} día${Math.abs(daysLeft) !== 1 ? 's' : ''}`;
-  if (daysLeft === 0) return 'Vence hoy';
-  if (daysLeft === 1) return 'Vence mañana';
-  if (daysLeft <= 7) return `${daysLeft} días — Urgente`;
-  if (daysLeft <= 30) return `${daysLeft} días`;
-  return `${daysLeft} días`;
+  if (daysLeft < 0) return `Vencida ${Math.abs(daysLeft)}d`;
+  if (daysLeft === 0) return 'Hoy';
+  if (daysLeft === 1) return 'Mañana';
+  if (daysLeft <= 7) return `${daysLeft}d — Urgente`;
+  if (daysLeft <= 30) return `${daysLeft}d`;
+  return `${daysLeft}d`;
 }
 
-function getBadgeClass(level) {
-  switch (level) {
-    case 'overdue': return 'badge badge-danger';
-    case 'critical': return 'badge badge-warning';
-    case 'warning': return 'badge badge-high';
-    case 'soon': return 'badge badge-info';
-    default: return 'badge badge-success';
+/**
+ * Corrige fechas legacy: suma 1 mes a nextRechargeDate y lastRechargeDate.
+ * Aplica a todos los SIMs excepto #1 (Daniel Silva) que ya fue corregido manualmente.
+ */
+function fixLegacyDate(dateStr) {
+  if (!dateStr) return dateStr;
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setMonth(d.getMonth() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Migra estructura legacy (groups) a lista plana de SIMs.
+ * Solo se ejecuta si detecta el campo 'groups' en los datos.
+ * Corrige el desfase de 1 mes en las fechas de todos los SIMs excepto #1.
+ */
+function migrateGroupsToFlat(data) {
+  if (!data?.groups || data.sims) return data?.sims || [];
+  const sims = [];
+  for (const group of data.groups) {
+    for (const sim of (group.sims || [])) {
+      const isAccount1 = sim.lankAccountId === 1;
+      sims.push({
+        lankAccountId: sim.lankAccountId,
+        phone: sim.phone,
+        fullName: sim.fullName,
+        canonicalAlias: sim.canonicalAlias,
+        lastRechargeDate: isAccount1 ? sim.lastRechargeDate : fixLegacyDate(sim.lastRechargeDate),
+        nextRechargeDate: isAccount1 ? sim.nextRechargeDate : fixLegacyDate(sim.nextRechargeDate),
+      });
+    }
   }
+  return sims;
 }
 
-export default function SimCards({ onNavigate }) {
-  const [groups, setGroups] = useState([]);
+export default function SimCards() {
+  const [sims, setSims] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
-  const [confirmDialog, setConfirmDialog] = useState(null);
   const [addModal, setAddModal] = useState(null);
-  const [individualRechargeModal, setIndividualRechargeModal] = useState(null);
-  const [expandedGroup, setExpandedGroup] = useState(null);
+  const [rechargeModal, setRechargeModal] = useState(null);
+  const [selectedYear, setSelectedYear] = useState(null);
   const [lankRegistry, setLankRegistry] = useState([]);
 
   const showToast = useCallback((msg, type = 'success') => {
     setToast({ message: msg, type });
   }, []);
 
-  // Cargar SIM config en tiempo real
+  // Real-time SIM config
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'config', 'sim-cards'), (snap) => {
       if (snap.exists()) {
         const data = snap.data();
-        setGroups(data.groups || []);
+        // Migrate from groups to flat if needed
+        const flatSims = data.sims || migrateGroupsToFlat(data);
+        setSims(flatSims);
+        // Auto-migrate to new structure if still using groups
+        if (data.groups && !data.sims) {
+          saveSimCardConfig({ sims: flatSims }).catch(() => {});
+        }
       } else {
-        setGroups([]);
+        setSims([]);
       }
       setLoading(false);
     });
     return () => unsub();
   }, []);
 
-  // Cargar account registry para agregar nuevas SIMs
+  // Account registry for adding new SIMs
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'config', 'account-registry'), (snap) => {
       if (snap.exists()) {
@@ -132,81 +332,98 @@ export default function SimCards({ onNavigate }) {
     return () => unsub();
   }, []);
 
-  // IDs de cuentas ya registradas en SIM cards
-  const registeredIds = useMemo(() => {
-    const ids = new Set();
-    for (const g of groups) {
-      for (const sim of g.sims || []) {
-        ids.add(sim.lankAccountId);
-      }
-    }
-    return ids;
-  }, [groups]);
+  // Set default year to earliest year with pending/overdue sims, or current year
+  useEffect(() => {
+    if (selectedYear || sims.length === 0) return;
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    // Find earliest year that has SIMs needing attention
+    const years = [...new Set(sims.map(s => {
+      if (!s.nextRechargeDate) return currentYear;
+      return parseInt(s.nextRechargeDate.slice(0, 4));
+    }))].sort();
+    // Default to current year if available, else first year
+    setSelectedYear(years.includes(currentYear) ? currentYear : years[0] || currentYear);
+  }, [sims, selectedYear]);
 
-  // Cuentas no registradas
+  // Registered IDs
+  const registeredIds = useMemo(() => new Set(sims.map(s => s.lankAccountId)), [sims]);
+
+  // Unregistered accounts
   const unregisteredAccounts = useMemo(() =>
     lankRegistry.filter(a => !registeredIds.has(a.id)),
   [lankRegistry, registeredIds]);
 
-  // Estadísticas
+  // Available years
+  const availableYears = useMemo(() => {
+    const years = new Set();
+    for (const sim of sims) {
+      if (sim.nextRechargeDate) {
+        years.add(parseInt(sim.nextRechargeDate.slice(0, 4)));
+      }
+    }
+    if (years.size === 0) years.add(new Date().getFullYear());
+    return [...years].sort();
+  }, [sims]);
+
+  // SIMs grouped by month for selected year
+  const monthData = useMemo(() => {
+    const months = [];
+    for (let m = 0; m < 12; m++) {
+      const monthSims = sims
+        .filter(sim => {
+          if (!sim.nextRechargeDate) return false;
+          const y = parseInt(sim.nextRechargeDate.slice(0, 4));
+          const mo = parseInt(sim.nextRechargeDate.slice(5, 7)) - 1;
+          return y === selectedYear && mo === m;
+        })
+        .sort((a, b) => daysUntil(a.nextRechargeDate) - daysUntil(b.nextRechargeDate));
+
+      months.push({
+        month: m,
+        label: MONTH_NAMES_FULL[m],
+        shortLabel: MONTH_NAMES[m],
+        sims: monthSims,
+      });
+    }
+    return months;
+  }, [sims, selectedYear]);
+
+  // Stats
   const stats = useMemo(() => {
-    const totalSims = groups.reduce((sum, g) => sum + (g.sims?.length || 0), 0);
-    const dueSoon = groups.filter(g => {
-      const days = daysUntil(g.nextRechargeDate);
-      return days <= 30 && days > 0;
+    const totalSims = sims.length;
+    const overdue = sims.filter(s => daysUntil(s.nextRechargeDate) <= 0).length;
+    const dueSoon = sims.filter(s => {
+      const d = daysUntil(s.nextRechargeDate);
+      return d > 0 && d <= 30;
     }).length;
-    const overdue = groups.filter(g => daysUntil(g.nextRechargeDate) <= 0).length;
-    // Next group to recharge
-    const sorted = [...groups].sort((a, b) => daysUntil(a.nextRechargeDate) - daysUntil(b.nextRechargeDate));
-    const nextGroup = sorted.find(g => daysUntil(g.nextRechargeDate) > 0);
-    const nextDays = nextGroup ? daysUntil(nextGroup.nextRechargeDate) : null;
-    return { totalSims, totalGroups: groups.length, dueSoon, overdue, nextDays };
-  }, [groups]);
+    const sorted = [...sims].sort((a, b) => daysUntil(a.nextRechargeDate) - daysUntil(b.nextRechargeDate));
+    const nextSim = sorted.find(s => daysUntil(s.nextRechargeDate) > 0);
+    const nextDays = nextSim ? daysUntil(nextSim.nextRechargeDate) : null;
+    return { totalSims, overdue, dueSoon, nextDays };
+  }, [sims]);
 
-  // Ordenar grupos por urgencia (más urgente primero)
-  const sortedGroups = useMemo(() =>
-    [...groups].sort((a, b) => daysUntil(a.nextRechargeDate) - daysUntil(b.nextRechargeDate)),
-  [groups]);
+  // Current month/year for highlighting
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
 
-  // --- Handlers ---
-
-  const handleGroupRecharge = async (groupNumber) => {
-    try {
-      const updated = await markGroupRechargeComplete(groups, groupNumber);
-      setGroups(updated);
-      showToast(`Grupo ${groupNumber} recargado correctamente`);
-    } catch (err) {
-      showToast(`Error: ${err.message}`, 'error');
-    }
-    setConfirmDialog(null);
-  };
-
-  const handleIndividualRecharge = async () => {
-    if (!individualRechargeModal) return;
-    const { lankAccountId, rechargeDate } = individualRechargeModal;
-    try {
-      const updated = await markSimRechargeComplete(groups, lankAccountId, rechargeDate || null);
-      setGroups(updated);
-      showToast('Recarga individual registrada');
-    } catch (err) {
-      showToast(`Error: ${err.message}`, 'error');
-    }
-    setIndividualRechargeModal(null);
-  };
+  // Handlers
 
   const handleAddSim = async () => {
     if (!addModal?.lankAccountId || !addModal?.lastRechargeDate) return;
     const account = lankRegistry.find(a => a.id === addModal.lankAccountId);
     if (!account) return;
     try {
-      const updated = await addSimCard(groups, {
+      const updated = await addSimCard(sims, {
         lankAccountId: account.id,
         phone: account.whatsapp,
         fullName: account.fullName,
         canonicalAlias: account.canonicalAlias,
         lastRechargeDate: addModal.lastRechargeDate,
       });
-      setGroups(updated);
+      setSims(updated);
       showToast(`SIM de ${account.canonicalAlias} agregada`);
     } catch (err) {
       showToast(`Error: ${err.message}`, 'error');
@@ -214,49 +431,18 @@ export default function SimCards({ onNavigate }) {
     setAddModal(null);
   };
 
-  // --- Timeline visual: 12 meses ---
-  const timelineMonths = useMemo(() => {
-    const months = [];
-    const now = new Date();
-    // Start 2 months back to show overdue groups
-    for (let i = -2; i < 12; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-      months.push({
-        key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
-        label: MONTH_NAMES[d.getMonth()],
-        year: d.getFullYear(),
-        month: d.getMonth(),
-      });
-    }
-    return months;
-  }, []);
-
-  // Agrupar por mes de recarga
-  const groupsByMonth = useMemo(() => {
-    const map = {};
-    for (const g of groups) {
-      if (!g.nextRechargeDate) continue;
-      const key = g.nextRechargeDate.slice(0, 7);
-      if (!map[key]) map[key] = [];
-      map[key].push(g);
-    }
-    return map;
-  }, [groups]);
-
   if (loading) {
     return <div className="loading-container"><div className="loading-spinner"></div></div>;
   }
 
-  const currentMonthKey = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
-
   return (
     <>
-      {/* --- KPIs --- */}
+      {/* KPIs */}
       <div className="sim-kpis">
         <div className="kpi-card" style={{ '--kpi-color': 'var(--accent-primary)' }}>
           <div className="kpi-label"><SimIcon size={14} /> Total SIMs</div>
           <div className="kpi-value">{stats.totalSims}</div>
-          <div className="kpi-sub">{stats.totalGroups} grupos activos</div>
+          <div className="kpi-sub">Números registrados</div>
         </div>
         <div className="kpi-card" style={{ '--kpi-color': stats.overdue > 0 ? 'var(--accent-danger)' : 'var(--accent-success)' }}>
           <div className="kpi-label"><WarningIcon size={14} /> Vencidas</div>
@@ -264,21 +450,31 @@ export default function SimCards({ onNavigate }) {
           <div className="kpi-sub">{stats.overdue > 0 ? 'Requieren atención' : 'Todo al día'}</div>
         </div>
         <div className="kpi-card" style={{ '--kpi-color': stats.dueSoon > 0 ? 'var(--accent-warning)' : 'var(--accent-info)' }}>
-          <div className="kpi-label"><ClockIcon size={14} /> Próximas</div>
+          <div className="kpi-label"><ClockIcon size={14} /> Próximas 30d</div>
           <div className="kpi-value">{stats.dueSoon}</div>
-          <div className="kpi-sub">En los próximos 30 días</div>
+          <div className="kpi-sub">Próximos 30 días</div>
         </div>
         <div className="kpi-card" style={{ '--kpi-color': 'var(--accent-info)' }}>
           <div className="kpi-label"><CalendarIcon size={14} /> Siguiente</div>
           <div className="kpi-value">{stats.nextDays != null ? `${stats.nextDays}d` : '—'}</div>
-          <div className="kpi-sub">{stats.nextDays != null ? 'Para próxima recarga' : 'Sin recargas pendientes'}</div>
+          <div className="kpi-sub">{stats.nextDays != null ? 'Para próxima recarga' : 'Sin pendientes'}</div>
         </div>
       </div>
 
-      {/* --- Timeline visual --- */}
+      {/* Year Tabs + Add Button */}
       <div className="finance-section">
-        <div className="finance-section-title" style={{ justifyContent: 'space-between' }}>
-          <span><CalendarIcon size={16} /> Calendario de Recargas</span>
+        <div className="sim-header-bar">
+          <div className="sim-year-tabs">
+            {availableYears.map(year => (
+              <button
+                key={year}
+                className={`sim-year-tab${selectedYear === year ? ' active' : ''}`}
+                onClick={() => setSelectedYear(year)}
+              >
+                {year}
+              </button>
+            ))}
+          </div>
           <button
             className="alert-action-btn edit"
             onClick={() => setAddModal({ lankAccountId: null, lastRechargeDate: '' })}
@@ -287,188 +483,88 @@ export default function SimCards({ onNavigate }) {
           </button>
         </div>
 
-        <div className="sim-timeline">
-          {timelineMonths.map(m => {
-            const monthGroups = groupsByMonth[m.key] || [];
-            const isCurrent = m.key === currentMonthKey;
-            const totalSims = monthGroups.reduce((s, g) => s + (g.sims?.length || 0), 0);
-            const bestUrgency = monthGroups.length > 0
-              ? getUrgencyLevel(Math.min(...monthGroups.map(g => daysUntil(g.nextRechargeDate))))
-              : null;
+        {/* Month Grid */}
+        <div className="sim-month-grid">
+          {monthData.map(({ month, label, shortLabel, sims: monthSims }) => {
+            const isCurrent = selectedYear === currentYear && month === currentMonth;
+            const isPast = selectedYear < currentYear || (selectedYear === currentYear && month < currentMonth);
+            const hasOverdue = monthSims.some(s => daysUntil(s.nextRechargeDate) <= 0);
+            const hasUrgent = monthSims.some(s => {
+              const d = daysUntil(s.nextRechargeDate);
+              return d > 0 && d <= 15;
+            });
+
+            let monthStatus = '';
+            if (hasOverdue) monthStatus = 'overdue';
+            else if (hasUrgent) monthStatus = 'urgent';
+            else if (isCurrent) monthStatus = 'current';
+            else if (isPast && monthSims.length === 0) monthStatus = 'past';
 
             return (
-              <div key={m.key} className={`sim-timeline-month${isCurrent ? ' current' : ''}`}>
-                <div className="sim-timeline-label">{m.label}</div>
-                {monthGroups.length > 0 ? (
-                  <>
-                    <div className="sim-timeline-count" style={{ color: getUrgencyColor(bestUrgency) }}>
-                      {totalSims}
-                    </div>
-                    <div className="sim-timeline-sub">
-                      {monthGroups.map(g => `G${g.groupNumber}`).join(', ')}
-                    </div>
-                  </>
-                ) : (
-                  <div className="sim-timeline-count" style={{ opacity: 0.15 }}>—</div>
-                )}
-                <div className="sim-timeline-sub" style={{ opacity: 0.5 }}>{m.year}</div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* --- Lista de Grupos --- */}
-      <div className="finance-section">
-        <div className="finance-section-title">
-          <span><UsersIcon size={16} /> Grupos de Recarga</span>
-        </div>
-
-        <div className="sim-groups">
-          {sortedGroups.map(group => {
-            const daysLeft = daysUntil(group.nextRechargeDate);
-            const urgency = getUrgencyLevel(daysLeft);
-            const isExpanded = expandedGroup === group.groupNumber;
-            const simCount = group.sims?.length || 0;
-
-            return (
-              <div key={group.groupNumber} className={`sim-group-card ${urgency}`}>
-                {/* Header del grupo */}
-                <div
-                  className="sim-group-header"
-                  onClick={() => setExpandedGroup(isExpanded ? null : group.groupNumber)}
-                >
-                  <div className="sim-group-info">
-                    <span
-                      className="sim-group-number"
-                      style={{
-                        background: `${getUrgencyColor(urgency)}18`,
-                        color: getUrgencyColor(urgency),
-                      }}
-                    >
-                      {group.groupNumber}
-                    </span>
-                    <div className="sim-group-meta">
-                      <div className="sim-group-title">
-                        Grupo {group.groupNumber}
-                        <span className="count">{simCount} número{simCount !== 1 ? 's' : ''}</span>
-                      </div>
-                      <div className="sim-group-date">
-                        Próxima recarga: {formatDate(group.nextRechargeDate)}
-                      </div>
-                    </div>
+              <div key={month} className={`sim-month-section ${monthStatus}`}>
+                {/* Month Header */}
+                <div className="sim-month-header">
+                  <div className="sim-month-name">
+                    <span className="sim-month-full">{label}</span>
+                    <span className="sim-month-short">{shortLabel}</span>
+                    {isCurrent && <span className="sim-month-badge current">Actual</span>}
+                    {hasOverdue && <span className="sim-month-badge overdue">{monthSims.filter(s => daysUntil(s.nextRechargeDate) <= 0).length} vencida{monthSims.filter(s => daysUntil(s.nextRechargeDate) <= 0).length !== 1 ? 's' : ''}</span>}
                   </div>
-
-                  <div className="sim-group-actions">
-                    <span className={getBadgeClass(urgency)}>
-                      {daysLeft !== Infinity ? getUrgencyLabel(daysLeft) : 'Sin fecha'}
-                    </span>
-                    <button
-                      className="alert-action-btn complete"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setConfirmDialog({
-                          title: `Confirmar recarga — Grupo ${group.groupNumber}`,
-                          message: `¿Confirmas que se recargaron los ${simCount} números del grupo ${group.groupNumber}?\n\nPróxima recarga programada: 11 meses después.`,
-                          onConfirm: () => handleGroupRecharge(group.groupNumber),
-                        });
-                      }}
-                    >
-                      <CheckCircleIcon size={13} /> Recarga hecha
-                    </button>
-                    <ChevronIcon open={isExpanded} />
-                  </div>
+                  <span className="sim-month-count">
+                    {monthSims.length > 0 ? `${monthSims.length} SIM${monthSims.length !== 1 ? 's' : ''}` : '—'}
+                  </span>
                 </div>
 
-                {/* Detalle expandido */}
-                {isExpanded && (
-                  <div className="sim-group-body">
-                    {/* Desktop: table */}
-                    <table className="sim-table">
-                      <thead>
-                        <tr>
-                          <th>#</th>
-                          <th>Nombre</th>
-                          <th>Teléfono</th>
-                          <th>Última recarga</th>
-                          <th>Próxima recarga</th>
-                          <th style={{ textAlign: 'center', width: 60 }}>Acción</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(group.sims || []).map((sim, idx) => {
-                          const simDays = daysUntil(sim.nextRechargeDate);
-                          const simUrgency = getUrgencyLevel(simDays);
-                          return (
-                            <tr key={sim.lankAccountId || idx}>
-                              <td><span className="sim-account-id">#{sim.lankAccountId}</span></td>
-                              <td style={{ fontWeight: 500 }}>{sim.canonicalAlias || sim.fullName}</td>
-                              <td><span className="sim-phone">{sim.phone}</span></td>
-                              <td><span className="sim-date">{formatDateShort(sim.lastRechargeDate)}</span></td>
-                              <td>
-                                <span className="sim-next-date" style={{ color: getUrgencyColor(simUrgency) }}>
-                                  {formatDateShort(sim.nextRechargeDate)}
-                                </span>
-                              </td>
-                              <td style={{ textAlign: 'center' }}>
-                                <button
-                                  className="alert-action-btn"
-                                  title="Recarga individual anticipada"
-                                  style={{ padding: '4px 8px' }}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setIndividualRechargeModal({
-                                      lankAccountId: sim.lankAccountId,
-                                      name: sim.canonicalAlias || sim.fullName,
-                                      rechargeDate: new Date().toISOString().slice(0, 10),
-                                    });
-                                  }}
-                                >
-                                  <RefreshIcon size={13} />
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-
-                    {/* Mobile: card list */}
-                    <div className="sim-card-list">
-                      {(group.sims || []).map((sim, idx) => {
-                        const simDays = daysUntil(sim.nextRechargeDate);
-                        const simUrgency = getUrgencyLevel(simDays);
-                        return (
-                          <div key={sim.lankAccountId || idx} className="sim-card-item">
-                            <div className="sim-card-item-info">
-                              <div className="sim-card-item-name">
-                                <span className="sim-account-id" style={{ marginRight: 6 }}>#{sim.lankAccountId}</span>
-                                {sim.canonicalAlias || sim.fullName}
-                              </div>
-                              <div className="sim-card-item-details">
-                                <span><PhoneIcon size={11} /> {sim.phone}</span>
-                                <span style={{ color: getUrgencyColor(simUrgency), fontWeight: 600 }}>
-                                  Prox: {formatDateShort(sim.nextRechargeDate)}
-                                </span>
-                              </div>
+                {/* SIM Cards */}
+                {monthSims.length > 0 && (
+                  <div className="sim-number-list">
+                    {monthSims.map(sim => {
+                      const dLeft = daysUntil(sim.nextRechargeDate);
+                      const urgency = getUrgencyLevel(dLeft);
+                      return (
+                        <div key={sim.lankAccountId} className={`sim-number-card ${urgency}`}>
+                          <div className="sim-number-info">
+                            <div className="sim-number-top">
+                              <span className="sim-number-id">#{sim.lankAccountId}</span>
+                              <span className="sim-number-alias">{sim.canonicalAlias || sim.fullName}</span>
                             </div>
+                            <div className="sim-number-details">
+                              <span className="sim-number-phone">
+                                <PhoneIcon size={11} /> {sim.phone}
+                              </span>
+                              <span className="sim-number-dates">
+                                Últ: {formatDateShort(sim.lastRechargeDate)}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="sim-number-right">
+                            <span
+                              className="sim-number-urgency"
+                              style={{ color: getUrgencyColor(urgency) }}
+                            >
+                              {dLeft !== Infinity ? getUrgencyLabel(dLeft) : '—'}
+                            </span>
                             <button
-                              className="alert-action-btn"
-                              title="Recarga individual"
-                              style={{ padding: '6px 8px', flexShrink: 0 }}
-                              onClick={() => setIndividualRechargeModal({
+                              className="sim-recharge-btn"
+                              title="Registrar recarga"
+                              onClick={() => setRechargeModal({
                                 lankAccountId: sim.lankAccountId,
                                 name: sim.canonicalAlias || sim.fullName,
                                 rechargeDate: new Date().toISOString().slice(0, 10),
                               })}
                             >
-                              <RefreshIcon size={13} />
+                              <CheckCircleIcon size={13} />
+                              <span>Recarga</span>
                             </button>
                           </div>
-                        );
-                      })}
-                    </div>
+                        </div>
+                      );
+                    })}
                   </div>
+                )}
+
+                {monthSims.length === 0 && (
+                  <div className="sim-month-empty">Sin recargas programadas</div>
                 )}
               </div>
             );
@@ -476,9 +572,9 @@ export default function SimCards({ onNavigate }) {
         </div>
       </div>
 
-      {/* --- Cuentas sin SIM registrada --- */}
+      {/* Unregistered accounts */}
       {unregisteredAccounts.length > 0 && (
-        <div className="sim-group-card soon" style={{ marginTop: '8px' }}>
+        <div className="finance-section" style={{ marginTop: '8px' }}>
           <div className="sim-notice">
             <BellIcon size={16} className="sim-notice-icon" />
             <div>
@@ -490,7 +586,7 @@ export default function SimCards({ onNavigate }) {
         </div>
       )}
 
-      {/* --- Modal: Agregar SIM --- */}
+      {/* Modal: Add SIM */}
       {addModal && (
         <EditModal
           open
@@ -506,7 +602,7 @@ export default function SimCards({ onNavigate }) {
             {
               key: 'lastRechargeDate', label: 'Fecha de última recarga', type: 'date',
               required: true,
-              hint: 'Selecciona la fecha de la última recarga de este número (máximo 12 meses atrás)',
+              hint: 'Se sumará 11 meses y se asignará al día 15 del mes resultante',
             },
           ]}
           values={addModal}
@@ -515,34 +611,17 @@ export default function SimCards({ onNavigate }) {
         />
       )}
 
-      {/* --- Modal: Recarga individual --- */}
-      {individualRechargeModal && (
-        <EditModal
-          open
-          onClose={() => setIndividualRechargeModal(null)}
-          onSave={handleIndividualRecharge}
-          title={`Recarga anticipada — ${individualRechargeModal.name}`}
-          fields={[
-            {
-              key: 'rechargeDate', label: 'Fecha de recarga', type: 'date',
-              required: true,
-            },
-          ]}
-          values={individualRechargeModal}
-          onChange={(key, val) => setIndividualRechargeModal(prev => ({ ...prev, [key]: val }))}
-          saveLabel={<><CheckCircleIcon size={14} /> Confirmar recarga</>}
-        />
-      )}
-
-      {/* --- Confirm Dialog --- */}
-      {confirmDialog && (
-        <ConfirmDialog
-          open
-          onClose={() => setConfirmDialog(null)}
-          onConfirm={confirmDialog.onConfirm}
-          title={confirmDialog.title}
-          message={confirmDialog.message}
-          confirmLabel={<><CheckCircleIcon size={14} /> Confirmar</>}
+      {/* Modal: Individual recharge */}
+      {rechargeModal && (
+        <RechargeModal
+          sim={sims.find(s => s.lankAccountId === rechargeModal.lankAccountId) || rechargeModal}
+          initialDate={rechargeModal.rechargeDate}
+          onConfirm={async (rechargeDate) => {
+            const updated = await markSimRechargeComplete(sims, rechargeModal.lankAccountId, rechargeDate);
+            setSims(updated);
+            showToast('Recarga registrada correctamente');
+          }}
+          onClose={() => setRechargeModal(null)}
         />
       )}
 

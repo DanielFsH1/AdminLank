@@ -18,7 +18,6 @@ const S = ({ size = 14, color = 'currentColor', children, ...p }) => (
   </svg>
 );
 
-const AIIcon = p => <S {...p}><path d="M12 2a5 5 0 0 1 5 5v3a5 5 0 0 1-10 0V7a5 5 0 0 1 5-5z"/><path d="M15 13a6 6 0 0 1-6 0"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></S>;
 const SystemIcon = p => <S {...p}><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></S>;
 const AdminIcon = p => <S {...p}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></S>;
 const ChevronDownIcon = p => <S {...p}><polyline points="6 9 12 15 18 9"/></S>;
@@ -36,7 +35,6 @@ const SOURCE_META = {
 
 const ACTOR_META = {
   admin:  { label: 'Admin',   Icon: AdminIcon,  color: '#10b981' },
-  ai:     { label: 'IA',      Icon: AIIcon,     color: '#8b5cf6' },
   system: { label: 'Sistema', Icon: SystemIcon, color: '#64748b' },
 };
 
@@ -89,7 +87,6 @@ const SOURCE_FILTER_OPTIONS = [
 const ACTOR_FILTER_OPTIONS = [
   { value: '', label: 'Todos los actores' },
   { value: 'admin',  label: 'Admin' },
-  { value: 'ai',     label: 'IA' },
   { value: 'system', label: 'Sistema' },
 ];
 

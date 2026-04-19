@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
 import { useCollection, useDocument } from '../hooks/useFirestore';
-import { BarChartIcon, KeyIcon, UsersIcon, BellIcon, MoneyIcon, AnalyzeIcon, LockIcon, ToolboxIcon, DoorIcon, SparkleIcon } from './Icons';
+import { BarChartIcon, KeyIcon, UsersIcon, BellIcon, MoneyIcon, AnalyzeIcon, LockIcon, ToolboxIcon, DoorIcon } from './Icons';
 
 // SIM Card icon for sidebar
 const SimCardIcon = (props) => (
@@ -36,7 +36,6 @@ const NAV_ITEMS = [
   { id: 'finance', icon: MoneyIcon, label: 'Finanzas' },
   { id: 'sim-cards', icon: SimCardIcon, label: 'SIM Cards' },
   { id: 'analyze', icon: AnalyzeIcon, label: 'Analizar' },
-  { id: 'chat-ai', icon: SparkleIcon, label: 'Chat IA' },
 ];
 
 const SYSTEM_ITEMS = [

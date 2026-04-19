@@ -16,13 +16,12 @@ import Analyze from './pages/Analyze';
 import Status from './pages/Status';
 import Tools from './pages/Tools';
 import Vault from './pages/Vault';
-import ChatAI from './pages/ChatAI';
 import History from './pages/History';
 import SimCards from './pages/SimCards';
 import { MenuIcon, SunIcon, MoonIcon, WarningIcon, CheckCircleIcon } from './components/Icons';
 import './index.css';
 
-const TAB_ORDER = ['overview','subscriptions','accounts','alerts','finance','sim-cards','analyze','chat-ai','history','vault','status','tools'];
+const TAB_ORDER = ['overview','subscriptions','accounts','alerts','finance','sim-cards','analyze','history','vault','status','tools'];
 
 const TAB_TITLES = {
   overview: 'Resumen General',
@@ -35,7 +34,6 @@ const TAB_TITLES = {
   status: 'Estado del Sistema',
   tools: 'Herramientas',
   vault: 'Bóveda',
-  'chat-ai': 'Chat IA',
   history: 'Historial',
 };
 
@@ -50,7 +48,6 @@ const TAB_SHORT = {
   vault: 'Bóveda',
   status: 'Estado',
   tools: 'Herramientas',
-  'chat-ai': 'Chat IA',
   history: 'Historial',
 };
 
@@ -65,7 +62,6 @@ const TAB_SUBTITLES = {
   status: 'Salud y monitoreo de servicios',
   tools: 'Exportación, estadísticas y mantenimiento',
   vault: 'Credenciales, contraseñas y tarjetas',
-  'chat-ai': 'Asistente inteligente con Gemini',
   history: 'Registro de todos los cambios del sistema',
 };
 
@@ -273,7 +269,6 @@ function App() {
       case 'status': return <Status />;
       case 'tools': return <Tools />;
       case 'vault': return <Vault onNavigate={handleNavigate} navData={navData} servicesConfig={servicesConfig} />;
-      case 'chat-ai': return <ChatAI />;
       case 'history': return <History />;
       default: return <Overview onNavigate={handleNavigate} servicesConfig={servicesConfig} />;
     }
