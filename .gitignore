@@ -29,6 +29,10 @@ Thumbs.db
 *.log
 npm-debug.log*
 
+# Runtime / local agent artifacts
+.claude/scheduled_tasks.lock
+docs/superpowers/
+
 # Python
 __pycache__/
 *.pyc
