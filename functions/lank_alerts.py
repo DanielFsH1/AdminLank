@@ -4,6 +4,7 @@ Usa Firestore directamente en lugar de archivos locales.
 """
 import uuid
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 
 # Servicios que requieren cambio de contraseña al salir un usuario (fallback)
@@ -36,6 +37,24 @@ def _alert_id():
 
 def _now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def _email_date_fields(event):
+    raw_date = None
+    if isinstance(event, dict):
+        raw_date = event.get('emailDateRaw') or event.get('date') or event.get('emailDate')
+    if not raw_date:
+        return {}
+    try:
+        dt = parsedate_to_datetime(raw_date)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return {
+            'emailDateRaw': raw_date,
+            'emailDate': dt.astimezone(timezone.utc).isoformat(),
+        }
+    except Exception:
+        return {'emailDateRaw': raw_date}
 
 
 def find_duplicate(alerts, alert_type, service, account_id, user_alias):
@@ -104,6 +123,7 @@ def generate_user_left_alerts(event, service, account_id, account_alias,
         'accountExpired': expired,
         'createdAt': now,
         'source': 'cloud_analysis',
+        **_email_date_fields(event),
     }
 
     if expired:
@@ -166,6 +186,7 @@ def generate_user_joined_alert(event, service, account_id, account_alias):
         'title': f'Dar acceso a {user_alias}',
         'description': f'{user_alias} se unió al grupo de {service} (cuenta Lank #{account_id} {account_alias}). Necesita recibir acceso.',
         'createdAt': _now(), 'completedAt': None, 'source': 'cloud_analysis',
+        **_email_date_fields(event),
     }
 
 
@@ -178,6 +199,7 @@ def generate_group_deactivated_alert(event, service, account_id, account_alias):
         'title': f'Grupo desactivado — {service}',
         'description': f'Lank desactivó el grupo de {service} de la cuenta #{account_id} {account_alias}. Revisar accesos y pagos.',
         'createdAt': _now(), 'completedAt': None, 'source': 'cloud_analysis',
+        **_email_date_fields(event),
     }
 
 
@@ -491,11 +513,10 @@ def generate_missing_phone_alerts(db, services_config=None):
 
 def generate_sim_recharge_alerts(db):
     """
-    Revisa config/sim-cards en Firestore. Para cada grupo cuyo
+    Revisa config/sim-cards en Firestore. Para cada SIM cuyo
     nextRechargeDate caiga dentro de los próximos 7 días (o ya haya pasado),
-    genera una alerta por cada SIM del grupo indicando que necesita recarga.
-    Se ejecuta en scheduled_analysis; las alertas se generan el día 8 del mes
-    de recarga (7 días antes del 15) o después si se perdió.
+    genera una alerta indicando que necesita recarga.
+    Usa la estructura plana sims[] (post-migración).
     Retorna el número de alertas generadas.
     """
     from datetime import date, timedelta, timezone as tz
@@ -512,12 +533,12 @@ def generate_sim_recharge_alerts(db):
         return 0
 
     sim_data = sim_snap.to_dict()
-    groups = sim_data.get('groups', [])
-    if not groups:
-        print('[SIM Alerts] No groups found in config/sim-cards')
+    sims = sim_data.get('sims', [])
+    if not sims:
+        print('[SIM Alerts] No SIMs found in config/sim-cards')
         return 0
 
-    print(f'[SIM Alerts] Found {len(groups)} groups, today={today}')
+    print(f'[SIM Alerts] Found {len(sims)} SIMs, today={today}')
 
     # Cargar alertas pendientes para evitar duplicados
     existing_alerts = []
@@ -529,77 +550,73 @@ def generate_sim_recharge_alerts(db):
     alerts_generated = 0
     now = _now()
 
-    for group in groups:
-        group_num = group.get('groupNumber', 0)
-        next_date_str = group.get('nextRechargeDate', '')
+    for sim in sims:
+        lank_id = sim.get('lankAccountId', '')
+        next_date_str = sim.get('nextRechargeDate', '')
         if not next_date_str:
             continue
+
+        phone = sim.get('phone', '')
+        name = sim.get('canonicalAlias') or sim.get('fullName') or f'Cuenta #{lank_id}'
 
         try:
             next_date = date.fromisoformat(next_date_str)
         except (ValueError, TypeError):
-            print(f'[SIM Alerts] Group {group_num}: invalid date "{next_date_str}"')
+            print(f'[SIM Alerts] SIM #{lank_id}: invalid date "{next_date_str}"')
             continue
 
         days_until = (next_date - today).days
-        print(f'[SIM Alerts] Group {group_num}: nextRecharge={next_date_str}, daysUntil={days_until}')
+        print(f'[SIM Alerts] SIM #{lank_id} ({name}): nextRecharge={next_date_str}, daysUntil={days_until}')
 
-        # Generar alerta si faltan 7 días o menos (o ya venció)
         if days_until > 7:
             continue
 
-        sims = group.get('sims', [])
-        for sim in sims:
-            lank_id = sim.get('lankAccountId', '')
-            phone = sim.get('phone', '')
-            name = sim.get('canonicalAlias') or sim.get('fullName') or f'Cuenta #{lank_id}'
-            month_key = next_date_str[:7]  # YYYY-MM
+        month_key = next_date_str[:7]  # YYYY-MM
 
-            # Evitar duplicados: buscar por tipo + lank_id + monthKey
-            is_dup = any(
-                a.get('type') == 'sim_recharge'
-                and str(a.get('lankAccountId', '')) == str(lank_id)
-                and a.get('monthKey') == month_key
-                and a.get('status') == 'pending'
-                for a in existing_alerts
-            )
-            if is_dup:
-                print(f'[SIM Alerts] Skipping duplicate: {name} ({phone}), monthKey={month_key}')
-                continue
+        # Evitar duplicados: buscar por tipo + lank_id + monthKey
+        is_dup = any(
+            a.get('type') == 'sim_recharge'
+            and str(a.get('lankAccountId', '')) == str(lank_id)
+            and a.get('monthKey') == month_key
+            and a.get('status') == 'pending'
+            for a in existing_alerts
+        )
+        if is_dup:
+            print(f'[SIM Alerts] Skipping duplicate: {name} ({phone}), monthKey={month_key}')
+            continue
 
-            print(f'[SIM Alerts] Creating alert: {name} ({phone}), group={group_num}, days={days_until}')
-            urgency = 'critical' if days_until <= 0 else ('high' if days_until <= 3 else 'medium')
-            days_label = (
-                'HOY' if days_until == 0
-                else f'VENCIDA ({abs(days_until)} día(s))' if days_until < 0
-                else f'en {days_until} día(s)'
-            )
+        print(f'[SIM Alerts] Creating alert: {name} ({phone}), days={days_until}')
+        urgency = 'critical' if days_until <= 0 else ('high' if days_until <= 3 else 'medium')
+        days_label = (
+            'HOY' if days_until == 0
+            else f'VENCIDA ({abs(days_until)} día(s))' if days_until < 0
+            else f'en {days_until} día(s)'
+        )
 
-            alert = {
-                'id': _alert_id(),
-                'type': 'sim_recharge',
-                'status': 'pending',
-                'priority': urgency,
-                'service': 'SIM Cards',
-                'lankAccountId': str(lank_id),
-                'phoneNumber': phone,
-                'groupNumber': group_num,
-                'monthKey': month_key,
-                'nextRechargeDate': next_date_str,
-                'userAlias': name,
-                'title': f'Recargar SIM — {name} ({phone})',
-                'description': (
-                    f'Recarga pendiente {days_label} para {name} (Tel: {phone}). '
-                    f'Grupo {group_num}, fecha límite: {next_date_str}. '
-                    f'Recargar para evitar desactivación del número.'
-                ),
-                'createdAt': now,
-                'completedAt': None,
-                'source': 'cloud_scheduled',
-            }
-            db.collection('alerts').document(alert['id']).set(alert)
-            existing_alerts.append(alert)
-            alerts_generated += 1
+        alert = {
+            'id': _alert_id(),
+            'type': 'sim_recharge',
+            'status': 'pending',
+            'priority': urgency,
+            'service': 'SIM Cards',
+            'lankAccountId': str(lank_id),
+            'phoneNumber': phone,
+            'monthKey': month_key,
+            'nextRechargeDate': next_date_str,
+            'userAlias': name,
+            'title': f'Recargar SIM — {name} ({phone})',
+            'description': (
+                f'Recarga pendiente {days_label} para {name} (Tel: {phone}). '
+                f'Fecha límite: {next_date_str}. '
+                f'Recargar para evitar desactivación del número.'
+            ),
+            'createdAt': now,
+            'completedAt': None,
+            'source': 'cloud_scheduled',
+        }
+        db.collection('alerts').document(alert['id']).set(alert)
+        existing_alerts.append(alert)
+        alerts_generated += 1
 
     print(f'[SIM Alerts] Finished. Total alerts generated: {alerts_generated}')
     return alerts_generated
