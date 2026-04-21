@@ -46,8 +46,8 @@ const SYSTEM_ITEMS = [
 ];
 
 export default function Sidebar({ activeTab, onTabChange, mobileOpen, onClose }) {
-  const { data: alerts } = useCollection('alerts');
-  const { data: actionableDoc } = useDocument('analysis', 'actionable-events');
+  const { data: alerts } = useCollection('alerts', { realtime: false });
+  const { data: actionableDoc } = useDocument('analysis', 'actionable-events', { realtime: false });
   const analysisEvents = actionableDoc?.events || [];
 
   // Conteo unificado: alertas de Firestore + actionable-events (sin duplicados)

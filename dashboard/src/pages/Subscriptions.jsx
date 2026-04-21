@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { collection, onSnapshot, doc, getDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, getDoc, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useCollection, useDocument } from '../hooks/useFirestore';
 import { SERVICES, getServiceMeta, getProfileImage, getPoolServiceKeys, getNonPoolServiceKeys, getAllServiceKeys, getSlotFields, getExpectedSlotFields, getUserFields } from '../config/services';
@@ -75,8 +75,8 @@ function getMissingFields(svcId, slot) {
 }
 
 export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
- const { data: pools } = useCollection('service-pools');
- const { data: masterConfigDoc, loading: masterConfigLoading } = useDocument('config', 'services');
+ const { data: pools } = useCollection('service-pools', { realtime: false });
+ const { data: masterConfigDoc, loading: masterConfigLoading } = useDocument('config', 'services', { realtime: false });
  const [poolDetails, setPoolDetails] = useState({});
  const [groupDetails, setGroupDetails] = useState({});
  const [selectedService, setSelectedService] = useState(null);
@@ -86,7 +86,6 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  const [pendingUserAliases, setPendingUserAliases] = useState(new Set());
  const [searchQuery, setSearchQuery] = useState('');
  const [searchResults, setSearchResults] = useState(null);
- const [pendingPasswordAlerts, setPendingPasswordAlerts] = useState([]); // alertas password_change pendientes (real-time)
 
  // Modal states para edición de slots
  const [editSlotModal, setEditSlotModal] = useState(null); // { serviceKey, accountRef, slotIndex, slot, allSlots }
@@ -178,16 +177,10 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  loadPendingUsers();
  }, []);
 
- // Listener en tiempo real de alertas password_change pendientes
- useEffect(() => {
-   const unsub = onSnapshot(collection(db, 'alerts'), snap => {
-     const pwAlerts = snap.docs
-       .map(d => ({ id: d.id, ...d.data() }))
-       .filter(a => a.type === 'password_change' && a.status === 'pending');
-     setPendingPasswordAlerts(pwAlerts);
-   });
-   return () => unsub();
- }, []);
+ // Alertas password_change pendientes — query filtrada en lugar de descargar todas
+ const { data: pendingPasswordAlerts } = useCollection('alerts', {
+   constraints: [where('type', '==', 'password_change'), where('status', '==', 'pending')],
+ });
 
  // Helper: ¿tiene esta cuenta real una alerta de password_change pendiente?
  const getPasswordAlert = useCallback((serviceAccountRef) => {

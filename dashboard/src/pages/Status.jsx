@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { limit } from 'firebase/firestore';
 import { useCollection, useDocument } from '../hooks/useFirestore';
 import { AnalyzeIcon, BarChartIcon, BellIcon, BuildIcon, CheckIcon, ClipboardIcon, ClockIcon, CloseIcon, DotGray, DotGreen, DotRed, DotYellow, EmailIcon, GlobeIcon, InboxIcon, KeyIcon, LightningIcon, LockKeyIcon, MailboxIcon, RefreshIcon, SatelliteIcon, SaveIcon, ServerIcon, TrendUpIcon, WarningIcon } from '../components/Icons';
 
@@ -279,8 +280,14 @@ export default function Status() {
  const [expandedService, setExpandedService] = useState(null);
 
  const { data: scheduleDoc } = useDocument('config/schedule');
- const { data: alerts } = useCollection('alerts');
- const { data: notifications } = useCollection('notifications');
+ const { data: alerts } = useCollection('alerts', {
+  constraints: [limit(100)],
+  deps: [],
+ });
+ const { data: notifications } = useCollection('notifications', {
+  constraints: [limit(50)],
+  deps: [],
+ });
 
  const runHealthCheck = useCallback(async () => {
  setLoading(true);
