@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { collection, query, orderBy, limit, onSnapshot, writeBatch } from 'firebase/firestore';
-import { db } from '../firebase';
+import { orderBy, limit } from 'firebase/firestore';
+import { useCollection } from '../hooks/useFirestore';
 import { RefreshIcon, SearchIcon, ClockIcon, EditIcon, TrashIcon, CheckIcon, PlusIcon } from '../components/Icons';
 
 // ─── Iconos locales (SVG inline, misma base S que Icons.jsx) ─────────────────
@@ -122,8 +122,6 @@ function formatFull(iso) {
 // ─── Componente principal ────────────────────────────────────────────────────
 
 export default function History({ navData }) {
-  const [allEntries, setAllEntries] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(new Set());
 
   // Filtros — todos locales (sin llamadas al servidor)
@@ -131,6 +129,11 @@ export default function History({ navData }) {
   const [filterActor, setFilterActor]   = useState('');
   const [searchQuery, setSearchQuery]   = useState('');
   const [displayLimit, setDisplayLimit] = useState(50);
+  const { data: allEntries, loading } = useCollection('audit-log', {
+    realtime: false,
+    constraints: [orderBy('timestamp', 'desc'), limit(displayLimit)],
+    deps: [displayLimit],
+  });
 
   // Pre-cargar búsqueda desde navegación (ej: desde EntityHistory → "Ver en Historial")
   useEffect(() => {
@@ -139,20 +142,6 @@ export default function History({ navData }) {
     }
   }, [navData]);
 
-  // Suscripción en tiempo real a Firestore directamente
-  useEffect(() => {
-    setLoading(true);
-    const q = query(
-      collection(db, 'audit-log'),
-      orderBy('timestamp', 'desc'),
-      limit(200),
-    );
-    const unsub = onSnapshot(q, snap => {
-      setAllEntries(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setLoading(false);
-    }, () => setLoading(false));
-    return () => unsub();
-  }, []);
 
   const toggleExpand = id => {
     setExpanded(prev => {

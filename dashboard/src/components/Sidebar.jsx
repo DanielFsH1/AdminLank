@@ -46,19 +46,18 @@ const SYSTEM_ITEMS = [
 ];
 
 export default function Sidebar({ activeTab, onTabChange, mobileOpen, onClose }) {
-  const { data: alerts } = useCollection('alerts');
-  const { data: actionableDoc } = useDocument('analysis', 'actionable-events');
+  const { data: alerts } = useCollection('alerts', { realtime: false });
+  const { data: actionableDoc } = useDocument('analysis', 'actionable-events', { realtime: false });
   const analysisEvents = actionableDoc?.events || [];
 
   // Conteo unificado: alertas de Firestore + actionable-events (sin duplicados)
   const pendingCount = useMemo(() => {
-    const TERMINAL = ['completed', 'done', 'discarded', 'cancelled_by_ai', 'cancelled_by_system', 'resolved'];
-    const norm = (v) => (!v || v === '?' || v === 'usuario no informado' || v === 'desconocido') ? '' : v.toLowerCase();
+    const TERMINAL = ['completed', 'done', 'discarded', 'cancelled_by_ai', 'resolved'];
     const firestorePending = alerts.filter(a => a.status === 'pending');
     const resolvedAlerts = alerts.filter(a => TERMINAL.includes(a.status));
     const extraFromAnalysis = analysisEvents.filter(ae => {
       const hasAlert = [...firestorePending, ...resolvedAlerts].some(a =>
-        norm(a.userAlias) === norm(ae.userName) &&
+        a.userAlias === ae.userName &&
         String(a.accountId) === String(ae.accountId) &&
         a.service === ae.subscription
       );

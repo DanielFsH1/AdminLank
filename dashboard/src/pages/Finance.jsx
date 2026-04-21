@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useDocument } from '../hooks/useFirestore';
-import { collection, onSnapshot, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, onSnapshot, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { formatMXN, getBankMeta, getProfileImage, BANKS } from '../config/services';
 import { confirmRecurringExpense, saveCreditAccount, deleteCreditAccount, addCreditInstallment, removeCreditInstallment, saveCreditStatement, logManualChange } from '../hooks/firestoreActions';
@@ -28,7 +28,7 @@ function formatDateTime(dateStr) {
 }
 
 export default function Finance() {
- const { data: overview, loading: loadingOverview, error: errorOverview } = useDocument('finance', 'overview');
+ const { data: overview, loading: loadingOverview, error: errorOverview } = useDocument('finance', 'overview', { realtime: false });
  const { data: ledger, loading: loadingLedger } = useDocument('finance', 'manual-ledger');
  const [withdrawals, setWithdrawals] = useState([]);
  const [wTab, setWTab] = useState('all');
@@ -167,22 +167,20 @@ export default function Finance() {
  // Cargar retiros de un mes histórico cuando se expande
  useEffect(() => {
  if (!expandedHistMonth) return;
- if (historyWithdrawals[expandedHistMonth]) return; // ya cargados
+ if (historyWithdrawals[expandedHistMonth]) return;
 
  const [year, monthStr] = expandedHistMonth.split('-');
  const monthIndex = parseInt(monthStr, 10) - 1;
  const monthName = MONTH_NAMES_EN[monthIndex];
  const colRef = collection(db, `finance/withdrawals-${monthName}/records`);
 
- const unsub = onSnapshot(colRef, snap => {
+ getDocs(colRef).then(snap => {
       const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setHistoryWithdrawals(prev => ({
         ...prev,
         [expandedHistMonth]: docs.sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || '')),
       }));
  });
-
- return () => unsub();
  }, [expandedHistMonth]);
 
  // Cargar CLABEs bancarias
@@ -220,15 +218,14 @@ export default function Finance() {
 
  // Cargar vault-cards (para vincular tarjetas con cuentas de crédito)
  useEffect(() => {
-   const unsub = onSnapshot(collection(db, 'vault-cards'), snap => {
+   getDocs(collection(db, 'vault-cards')).then(snap => {
      const cards = {};
      snap.docs.forEach(d => { cards[d.id] = { id: d.id, ...d.data() }; });
      setVaultCards(cards);
-   }, (err) => {
-     console.warn('vault-cards listener error:', err);
+   }).catch(err => {
+     console.warn('vault-cards fetch error:', err);
      setVaultCards({});
    });
-   return () => unsub();
  }, []);
 
  // CLABE handlers

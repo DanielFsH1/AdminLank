@@ -1,36 +1,33 @@
 import { useCollection, useDocument } from '../hooks/useFirestore';
-import { useState, useEffect, useRef, useMemo } from 'react';
-import { collection, onSnapshot, doc } from 'firebase/firestore';
+import { useState, useEffect, useMemo } from 'react';
+import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SERVICES, getServiceMeta, formatMXN, getPoolServiceKeys } from '../config/services';
 import { UsersIcon, CheckCircleIcon, KeyIcon, BellIcon, AtmIcon, ClipboardIcon, InboxIcon } from '../components/Icons';
 
 export default function Overview({ onNavigate, servicesConfig }) {
   const SERVICE_KEYS = useMemo(() => getPoolServiceKeys(), [servicesConfig]);
-  const { data: accounts, loading: loadingAccounts } = useCollection('accounts');
-  const { data: groups, loading: loadingGroups } = useCollection('groups');
-  const { data: pools } = useCollection('service-pools');
-  const { data: alerts } = useCollection('alerts');
-  const { data: finOverview } = useDocument('finance', 'overview');
-  const { data: actionableDoc } = useDocument('analysis', 'actionable-events');
+  const { data: accounts, loading: loadingAccounts } = useCollection('accounts', { realtime: false });
+  const { data: groups, loading: loadingGroups } = useCollection('groups', { realtime: false });
+  const { data: pools } = useCollection('service-pools', { realtime: false });
+  const { data: alerts } = useCollection('alerts', { realtime: false });
+  const { data: finOverview } = useDocument('finance', 'overview', { realtime: false });
+  const { data: actionableDoc } = useDocument('analysis', 'actionable-events', { realtime: false });
   const analysisEvents = actionableDoc?.events || [];
   const [serviceStats, setServiceStats] = useState({});
   const [statsReady, setStatsReady] = useState(false);
-  const loadedServicesRef = useRef(new Set());
 
   // ─── Notificaciones (solo conteo) ───
   const [notifications, setNotifications] = useState([]);
   const [readUids, setReadUids] = useState(new Set());
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'notifications'), snap => {
-      const notifs = snap.docs.map(d => ({ docId: d.id, ...d.data() }));
-      setNotifications(notifs);
+    getDocs(collection(db, 'notifications')).then(snap => {
+      setNotifications(snap.docs.map(d => ({ docId: d.id, ...d.data() })));
     });
-    const unsubReads = onSnapshot(doc(db, 'config', 'notification-reads'), snap => {
+    getDoc(doc(db, 'config', 'notification-reads')).then(snap => {
       if (snap.exists()) setReadUids(new Set(snap.data().readUids || []));
     });
-    return () => { unsub(); unsubReads(); };
   }, []);
 
   const totalNotifs = useMemo(() =>
@@ -40,35 +37,33 @@ export default function Overview({ onNavigate, servicesConfig }) {
       sum + (n.items || []).filter(i => !readUids.has(String(i.uid))).length, 0),
     [notifications, readUids]);
 
-  // Service stats
+  // Service stats — one-time batch fetch
   useEffect(() => {
     if (groups.length === 0) return;
-    loadedServicesRef.current = new Set();
     setStatsReady(false);
-    const unsubs = [];
-    groups.forEach(group => {
-      const colRef = collection(db, `groups/${group.id}/lank-accounts`);
-      const unsub = onSnapshot(colRef, snap => {
+    let cancelled = false;
+
+    async function loadStats() {
+      const results = {};
+      await Promise.all(groups.map(async (group) => {
+        const snap = await getDocs(collection(db, `groups/${group.id}/lank-accounts`));
         const docs = snap.docs.map(d => d.data());
         const active = docs.filter(d => d.groupStatus === 'active');
         const totalUsers = active.reduce((s, d) => s + (d.users?.length || 0), 0);
-        setServiceStats(prev => ({
-          ...prev,
-          [group.id]: {
-            serviceName: getServiceMeta(group.id).name,
-            activeAccounts: active.length,
-            totalUsers,
-            totalAccounts: docs.length,
-          }
-        }));
-        loadedServicesRef.current.add(group.id);
-        if (loadedServicesRef.current.size >= groups.length) {
-          setStatsReady(true);
-        }
-      });
-      unsubs.push(unsub);
-    });
-    return () => unsubs.forEach(u => u());
+        results[group.id] = {
+          serviceName: getServiceMeta(group.id).name,
+          activeAccounts: active.length,
+          totalUsers,
+          totalAccounts: docs.length,
+        };
+      }));
+      if (!cancelled) {
+        setServiceStats(results);
+        setStatsReady(true);
+      }
+    }
+    loadStats();
+    return () => { cancelled = true; };
   }, [groups]);
 
   if (loadingAccounts || loadingGroups) {
@@ -78,15 +73,14 @@ export default function Overview({ onNavigate, servicesConfig }) {
   const totalActiveUsers = Object.values(serviceStats).reduce((s, v) => s + v.totalUsers, 0);
 
   // Conteo unificado: alertas de Firestore + actionable-events (sin duplicados)
-  const TERMINAL_STATUSES = ['completed', 'done', 'discarded', 'cancelled_by_ai', 'cancelled_by_system', 'resolved'];
-  const norm = (v) => (!v || v === '?' || v === 'usuario no informado' || v === 'desconocido') ? '' : v.toLowerCase();
+  const TERMINAL_STATUSES = ['completed', 'done', 'discarded', 'cancelled_by_ai', 'resolved'];
   const firestorePending = alerts.filter(a => a.status === 'pending');
   // Alertas resueltas: todas las que tienen un status terminal
   const resolvedAlerts = alerts.filter(a => TERMINAL_STATUSES.includes(a.status));
   const extraFromAnalysis = analysisEvents.filter(ae => {
     // Excluir si ya tiene una alerta (cualquier estado) para el mismo usuario/cuenta/servicio
     const hasAlert = [...firestorePending, ...resolvedAlerts].some(a =>
-      norm(a.userAlias) === norm(ae.userName) &&
+      a.userAlias === ae.userName &&
       String(a.accountId) === String(ae.accountId) &&
       a.service === ae.subscription
     );

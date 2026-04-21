@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, onSnapshot, doc as firestoreDoc } from 'firebase/firestore';
+import { onSnapshot, doc as firestoreDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
-import { SERVICES, setDynamicServices, getPoolServiceKeys } from './config/services';
-import { generateRecurringExpenses } from './hooks/firestoreActions';
+import { SERVICES, setDynamicServices } from './config/services';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import Login from './components/Login';
 import Sidebar from './components/Sidebar';
@@ -73,7 +72,6 @@ function App() {
   const [navData, setNavData] = useState(null); // cross-linking data
   const [appToast, setAppToast] = useState(null);
   const [slideDir, setSlideDir] = useState(null); // 'left' | 'right' | null — animación de transición
-  const recurringGenDayRef = useRef(null); // guarda el día en que ya se generó
   const activeTabRef = useRef(activeTab); // ref para acceder desde event handlers nativos
   const { isOnline, wasOffline } = useOnlineStatus();
 
@@ -166,73 +164,6 @@ function App() {
     });
     return () => unsub();
   }, []);
-
-  // Auto-generación de cobros recurrentes a nivel de App
-  useEffect(() => {
-    if (!user) return; // Solo si hay sesión activa
-    const serviceKeys = getPoolServiceKeys();
-    const pools = {};
-    const cards = {};
-    let poolsReady = false;
-    let cardsReady = false;
-
-    const tryGenerate = () => {
-      if (!poolsReady || !cardsReady) return;
-      // Permitir re-generar si cambia el día (para cobros cuyo billingDay cae en otro día del mes)
-      const todayKey = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-      if (recurringGenDayRef.current === todayKey) return;
-
-      const hasCards = Object.keys(cards).length > 0;
-      const hasPools = Object.keys(pools).length > 0;
-      if (!hasCards && !hasPools) return;
-      const hasAnyBillingDay = Object.values(pools).some(accts =>
-        accts.some(a => a.billingDay)
-      );
-      const hasAnyRecurring = Object.values(cards).some(c => (c.recurringCharges || []).length > 0);
-      if (!hasAnyRecurring && !hasAnyBillingDay) { recurringGenDayRef.current = todayKey; return; }
-
-      recurringGenDayRef.current = todayKey;
-      generateRecurringExpenses(cards, pools).then(result => {
-        if (result.generated > 0) {
-          const msg = `${result.generated} cobro${result.generated !== 1 ? 's' : ''} recurrente${result.generated !== 1 ? 's' : ''} pendiente${result.generated !== 1 ? 's' : ''} de confirmación`;
-          setAppToast(msg);
-        }
-      }).catch(err => {
-        console.error('Error generando cobros recurrentes:', err);
-        recurringGenDayRef.current = null; // Reintentar si falla
-      });
-    };
-
-    // Listener para vault-cards
-    const unsubCards = onSnapshot(collection(db, 'vault-cards'), snap => {
-      snap.docs.forEach(d => { cards[d.id] = { id: d.id, ...d.data() }; });
-      cardsReady = true;
-      tryGenerate();
-    });
-
-    // Listeners para service-pools real-accounts
-    const unsubPools = serviceKeys.map(svc =>
-      onSnapshot(collection(db, `service-pools/${svc}/real-accounts`), snap => {
-        pools[svc] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        poolsReady = Object.keys(pools).length >= serviceKeys.length;
-        tryGenerate();
-      })
-    );
-
-    // Re-chequear cada hora por si el día cambió mientras la app está abierta
-    const interval = setInterval(() => {
-      const todayKey = new Date().toISOString().slice(0, 10);
-      if (recurringGenDayRef.current !== todayKey) {
-        tryGenerate();
-      }
-    }, 60 * 60 * 1000); // cada 1 hora
-
-    return () => {
-      unsubCards();
-      unsubPools.forEach(u => u());
-      clearInterval(interval);
-    };
-  }, [user]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
