@@ -257,6 +257,58 @@ def load_schedule_config(db):
     return {'enabled': False, 'frequencyHours': 6}
 
 
+def load_system_flags(db):
+    doc = db.document('config/system-flags').get()
+    if doc.exists:
+        return doc.to_dict() or {}
+    return {}
+
+
+def emit_pending_event(db, event_data, enrichment=None):
+    """Write an enriched event to pending-events/ for AdminBot to process.
+
+    Args:
+        db: Firestore client.
+        event_data: Dict with kind, accountId, accountAlias, userName, userEmail,
+                    service, category, action, reason, date, etc.
+        enrichment: Optional dict with serviceAccountRef, otherUsers,
+                    realAccountEmail, realAccountExpires, realAccountStatus,
+                    groupStatus, matchesCurrent, matchesStale.
+    Returns:
+        The document ID of the created pending event.
+    """
+    import uuid as _uuid
+    event_id = f'evt_{_uuid.uuid4().hex[:12]}'
+    now = datetime.now(timezone.utc).isoformat()
+
+    doc = {
+        'eventId': event_id,
+        'kind': event_data.get('kind'),
+        'accountId': event_data.get('accountId'),
+        'accountAlias': event_data.get('accountAlias'),
+        'userName': event_data.get('userName'),
+        'userEmail': event_data.get('userEmail'),
+        'service': event_data.get('service'),
+        'serviceKey': event_data.get('serviceKey'),
+        'category': event_data.get('category'),
+        'action': event_data.get('action'),
+        'reason': event_data.get('reason'),
+        'emailDate': event_data.get('date'),
+        'emailUid': event_data.get('uid'),
+        'messageId': event_data.get('messageId'),
+        'analysisGeneratedAt': event_data.get('analysisGeneratedAt'),
+        'status': 'new',
+        'source': 'cloud_function',
+        'createdAt': now,
+    }
+
+    if enrichment:
+        doc['enrichment'] = enrichment
+
+    db.collection('pending-events').document(event_id).set(doc)
+    return event_id
+
+
 def save_analysis_state(db, state):
     db.document('analysis/state').set(state)
 
@@ -600,16 +652,30 @@ def merge_actionable_events(db, new_events, generated_at):
     return kept
 
 
-def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=None):
+def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=None,
+                                  system_flags=None, generated_at=None):
     """Generate alerts for analyzed accounts.
 
+    When system_flags['useNewEventPipeline'] is truthy, operational events
+    (user_left, user_join, group_deactivated) are emitted as pending-events
+    for AdminBot instead of generating legacy alerts.  Group-state updates and
+    agent findings are also skipped so AdminBot handles them.
+
+    Pending events are ALWAYS emitted regardless of the flag, enabling a
+    dual-mode transition period.
+
     Returns:
-        (alerts_generated, updated_services, actionable_events, agent_findings)
+        (alerts_generated, updated_services, actionable_events, agent_findings,
+         pending_events_emitted)
     """
+    flags = system_flags or {}
+    skip_legacy = flags.get('useNewEventPipeline', False)
+
     alerts_generated = 0
     updated_services = {}
     actionable = []
     agent_findings = []
+    pending_events_emitted = 0
 
     for account_result in ok_accounts:
         if account_result['access'] != 'ok':
@@ -628,7 +694,8 @@ def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=N
             cat = evt_row.get('dbReview', {}).get('category', '')
 
             # Build event entry (pending, review, and info -  all non-ignored events)
-            if cat in ('pending', 'review', 'info'):
+            # Skip kinds that already generate formal alerts to avoid duplicates
+            if cat in ('pending', 'review', 'info') and kind not in ('group_deactivated',):
                 actionable.append({
                     'accountId': a_id,
                     'accountAlias': alias,
@@ -674,7 +741,39 @@ def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=N
                             real_status = pacc.get('status', '')
                             break
 
-                # Update group state
+                # ── Emit pending event (always) ──
+                enrichment = {
+                    'serviceAccountRef': svc_ref,
+                    'otherUsers': other_users,
+                    'realAccountEmail': real_email,
+                    'realAccountExpires': real_expires,
+                    'realAccountStatus': real_status,
+                    'groupStatus': evt_row.get('dbReview', {}).get('dbGroupStatus'),
+                    'matchesCurrent': evt_row.get('dbReview', {}).get('matchesCurrent', []),
+                    'matchesStale': evt_row.get('dbReview', {}).get('matchesStale', []),
+                }
+                emit_pending_event(db, {
+                    'kind': kind,
+                    'accountId': a_id,
+                    'accountAlias': alias,
+                    'userName': user_alias,
+                    'userEmail': evt.get('userEmail'),
+                    'service': service,
+                    'serviceKey': fs_key,
+                    'category': cat,
+                    'action': evt_row.get('dbReview', {}).get('action', ''),
+                    'reason': evt_row.get('dbReview', {}).get('reason', ''),
+                    'date': evt_row.get('date', ''),
+                    'uid': evt_row.get('uid'),
+                    'messageId': evt_row.get('messageId'),
+                    'analysisGeneratedAt': generated_at,
+                }, enrichment=enrichment)
+                pending_events_emitted += 1
+
+                if skip_legacy:
+                    continue
+
+                # ── Legacy: update group state ──
                 leave_reason = 'Salida voluntaria.' if kind == 'user_left_self' else 'Transferido fuera del grupo.'
                 group_updated = update_group_on_leave(db, service, a_id, user_alias, leave_reason)
                 if group_updated:
@@ -690,7 +789,7 @@ def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=N
                         )
                     )
 
-                # Check duplicates
+                # ── Legacy: generate alerts ──
                 if cat not in ('pending', 'review'):
                     continue
                 if (lank_alerts.find_duplicate(alerts_data['alerts'], 'profile_delete', service, a_id, user_alias)
@@ -712,6 +811,34 @@ def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=N
                 alerts_generated += len(new_alerts)
 
             elif kind in ('user_join_direct', 'user_join_transferred'):
+                # ── Emit pending event (always) ──
+                fs_key = SERVICE_TO_FS.get(service)
+                emit_pending_event(db, {
+                    'kind': kind,
+                    'accountId': a_id,
+                    'accountAlias': alias,
+                    'userName': user_alias if user_alias and user_alias != '?' else 'usuario no informado',
+                    'userEmail': evt.get('userEmail'),
+                    'service': service,
+                    'serviceKey': fs_key,
+                    'category': cat,
+                    'action': evt_row.get('dbReview', {}).get('action', ''),
+                    'reason': evt_row.get('dbReview', {}).get('reason', ''),
+                    'date': evt_row.get('date', ''),
+                    'uid': evt_row.get('uid'),
+                    'messageId': evt_row.get('messageId'),
+                    'analysisGeneratedAt': generated_at,
+                }, enrichment={
+                    'groupStatus': evt_row.get('dbReview', {}).get('dbGroupStatus'),
+                    'matchesCurrent': evt_row.get('dbReview', {}).get('matchesCurrent', []),
+                    'matchesStale': evt_row.get('dbReview', {}).get('matchesStale', []),
+                })
+                pending_events_emitted += 1
+
+                if skip_legacy:
+                    continue
+
+                # ── Legacy: generate alerts ──
                 if cat in ('pending', 'review'):
                     user_alias_join = user_alias if user_alias and user_alias != '?' else 'usuario no informado'
                     if not lank_alerts.find_duplicate(alerts_data['alerts'], 'user_needs_access', service, a_id, user_alias_join):
@@ -731,13 +858,37 @@ def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=N
                         alerts_generated += 1
 
             elif kind == 'group_deactivated':
+                # ── Emit pending event (always) ──
+                fs_key = SERVICE_TO_FS.get(service)
+                emit_pending_event(db, {
+                    'kind': kind,
+                    'accountId': a_id,
+                    'accountAlias': alias,
+                    'userName': user_alias,
+                    'userEmail': evt.get('userEmail'),
+                    'service': service,
+                    'serviceKey': fs_key,
+                    'category': cat,
+                    'action': evt_row.get('dbReview', {}).get('action', ''),
+                    'reason': evt_row.get('dbReview', {}).get('reason', ''),
+                    'date': evt_row.get('date', ''),
+                    'uid': evt_row.get('uid'),
+                    'messageId': evt_row.get('messageId'),
+                    'analysisGeneratedAt': generated_at,
+                })
+                pending_events_emitted += 1
+
+                if skip_legacy:
+                    continue
+
+                # ── Legacy: generate alerts ──
                 if not lank_alerts.find_duplicate(alerts_data['alerts'], 'group_deactivated', service, a_id, None):
                     new_alert = lank_alerts.generate_group_deactivated_alert(evt, service, a_id, alias)
                     save_alert_to_firestore(db, new_alert)
                     alerts_data['alerts'].append(new_alert)
                     alerts_generated += 1
 
-    return alerts_generated, updated_services, actionable, agent_findings
+    return alerts_generated, updated_services, actionable, agent_findings, pending_events_emitted
 
 
 # â"€â"€â"€ IMAP ANALYSIS â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -1243,6 +1394,43 @@ def update_group_on_leave(db, service, account_id, user_alias, reason=''):
             'notes': notes,
         })
 
+        # Registrar en audit-log para que aparezca en Historial
+        account_alias = data.get('accountAlias') or data.get('fullName') or str(account_id)
+        try:
+            lank_audit.log_change(
+                db,
+                source='ai_analysis',
+                action='remove_user',
+                description=f'{user_alias} dado de baja del grupo #{account_id} ({account_alias}) - {service}. {reason}'.strip(),
+                collection=f'groups/{fs_key}/lank-accounts/{account_id}',
+                document_id=str(account_id),
+                field='users',
+                before={'userAlias': user_alias, 'totalUsers': original_count},
+                after={'totalUsers': len(users)},
+                actor='system',
+                ai_involved=True,
+                metadata={'service': service, 'accountAlias': account_alias, 'reason': reason},
+            )
+        except Exception:
+            pass
+
+        # Si el grupo quedo vacio, registrar la desactivacion
+        if len(users) == 0:
+            try:
+                lank_audit.log_change(
+                    db,
+                    source='ai_analysis',
+                    action='delete_lank_group',
+                    description=f'Grupo #{account_id} ({account_alias}) quedo vacio en {service}. Ultimo usuario: {user_alias}.',
+                    collection=f'groups/{fs_key}/lank-accounts/{account_id}',
+                    document_id=str(account_id),
+                    actor='system',
+                    ai_involved=True,
+                    metadata={'service': service, 'accountAlias': account_alias, 'lastUser': user_alias},
+                )
+            except Exception:
+                pass
+
         # Cancelar alertas pending de este usuario (renovaciÃ³n, telÃ©fono faltante, etc.)
         try:
             alias_lower = normalize_alias(user_alias)
@@ -1295,6 +1483,7 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
         rates = load_rates(db)
         db_context = load_current_state_context(db, name_to_key)
         state = load_analysis_state(db)
+        system_flags = load_system_flags(db)
 
         cred_by_id = {int(a['accountId']): a for a in credentials}
         days = 3
@@ -1360,8 +1549,9 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
         ok_accounts = [a for a in report['accounts'] if a['access'] == 'ok']
 
         # Generate alerts and build actionable events using shared function
-        alerts_generated, updated_services, actionable, agent_findings = generate_alerts_for_accounts(
-            db, ok_accounts, alerts_data, services_config=services_config
+        alerts_generated, updated_services, actionable, agent_findings, pending_events_emitted = generate_alerts_for_accounts(
+            db, ok_accounts, alerts_data, services_config=services_config,
+            system_flags=system_flags, generated_at=report['generatedAt'],
         )
 
         # Save analysis state AFTER alert generation so a crash during alerts
@@ -1433,6 +1623,7 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
             'alertsGenerated': alerts_generated,
             'financeRecordsUpdated': finance_records,
             'generatedAt': report['generatedAt'],
+            'pendingEventsEmitted': pending_events_emitted,
         }
 
         # Detectar usuarios sin fecha de renovaciÃ³n en servicios renewal-based
@@ -2025,6 +2216,7 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
 
     # Check if we already ran for this slot (prevent double execution)
     state = load_analysis_state(db)
+    system_flags = load_system_flags(db)
     last_run = state.get('lastRun')
     if last_run:
         try:
@@ -2106,8 +2298,9 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
     ok_accounts = [a for a in report['accounts'] if a['access'] == 'ok']
 
     # Generate alerts and build actionable events using shared function
-    alerts_generated, _, actionable, agent_findings = generate_alerts_for_accounts(
-        db, ok_accounts, alerts_data, services_config=services_config
+    alerts_generated, _, actionable, agent_findings, pending_events_emitted = generate_alerts_for_accounts(
+        db, ok_accounts, alerts_data, services_config=services_config,
+        system_flags=system_flags, generated_at=report['generatedAt'],
     )
 
     # Save analysis state AFTER alert generation so a crash during alerts
@@ -2211,7 +2404,7 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
         print(f'SIM recharge alerts generated: {sim_alert_count}')
         alerts_generated += sim_alert_count
 
-    print(f'Scheduled analysis complete: {len(ok_accounts)} accounts, {alerts_generated} alerts.')
+    print(f'Scheduled analysis complete: {len(ok_accounts)} accounts, {alerts_generated} alerts, {pending_events_emitted} pending events emitted.')
 
     schedule_config = load_schedule_config(db)
     agent_review = lank_agent_review.build_review_document(
