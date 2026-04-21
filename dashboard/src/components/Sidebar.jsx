@@ -52,12 +52,13 @@ export default function Sidebar({ activeTab, onTabChange, mobileOpen, onClose })
 
   // Conteo unificado: alertas de Firestore + actionable-events (sin duplicados)
   const pendingCount = useMemo(() => {
-    const TERMINAL = ['completed', 'done', 'discarded', 'cancelled_by_ai', 'resolved'];
+    const TERMINAL = ['completed', 'done', 'discarded', 'cancelled_by_ai', 'cancelled_by_system', 'resolved'];
+    const norm = (v) => (!v || v === '?' || v === 'usuario no informado' || v === 'desconocido') ? '' : v.toLowerCase();
     const firestorePending = alerts.filter(a => a.status === 'pending');
     const resolvedAlerts = alerts.filter(a => TERMINAL.includes(a.status));
     const extraFromAnalysis = analysisEvents.filter(ae => {
       const hasAlert = [...firestorePending, ...resolvedAlerts].some(a =>
-        a.userAlias === ae.userName &&
+        norm(a.userAlias) === norm(ae.userName) &&
         String(a.accountId) === String(ae.accountId) &&
         a.service === ae.subscription
       );

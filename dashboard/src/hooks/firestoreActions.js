@@ -3,7 +3,7 @@
  * Solo el admin (UID Ls1vtEv0rvY8DIyKKKmQY5SlOOQ2) puede escribir,
  * garantizado por las Firestore Security Rules.
  */
-import { doc, updateDoc, setDoc, deleteDoc, deleteField, arrayUnion, Timestamp, getDoc as firestoreGetDoc, collection, addDoc, query, orderBy, getDocs, limit, writeBatch } from 'firebase/firestore';
+import { doc, updateDoc, setDoc, deleteDoc, deleteField, arrayUnion, Timestamp, getDoc as firestoreGetDoc, collection, addDoc, query, orderBy, getDocs, limit, writeBatch, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SERVICES, getServiceMeta, getServiceKeyByName } from '../config/services';
 import { encrypt } from '../utils/crypto';
@@ -315,8 +315,72 @@ export async function removeGroupUser(serviceKey, accountId, userAlias, currentU
     joinedAt: (typeof removedUser === 'object' ? removedUser?.addedAt : null) || null,
   });
 
-  // --- Generar alertas de cambio de contraseña si aplica ---
+  // --- Cancelar alertas pendientes de "dar acceso" si el usuario nunca tuvo acceso ---
+  // También cancela alertas de renovación, teléfono faltante, etc. que ya no aplican
   const serviceMeta = getServiceMeta(serviceKey);
+  const serviceName = serviceMeta.name || serviceKey;
+  const acctIdStr = String(accountId);
+
+  try {
+    const alertsSnap = await getDocs(collection(db, 'alerts'));
+    const batch = writeBatch(db);
+    const cancelableTypes = [
+      'user_needs_access',
+      'missing_phone',
+      `${serviceKey}_renewal`,
+      `${serviceKey}_missing_renewal`,
+    ];
+    let cancelledCount = 0;
+
+    for (const alertDoc of alertsSnap.docs) {
+      const a = alertDoc.data();
+      if (a.status !== 'pending') continue;
+      // Match por userAlias + accountId (evitar cancelar alertas de otro grupo)
+      if (normalize(a.userAlias || '') !== normalize(userAlias)) continue;
+      if (String(a.accountId || '') !== acctIdStr) continue;
+      // Solo cancelar tipos que ya no aplican tras la baja
+      const matchesType = cancelableTypes.some(t => a.type === t || (a.type || '').includes(t));
+      if (!matchesType) continue;
+
+      batch.update(alertDoc.ref, {
+        status: 'cancelled_by_system',
+        completedAt: nowISO(),
+        resolution: `Usuario ${userAlias} dado de baja del grupo ${acctIdStr}. Alerta ya no aplica.`,
+      });
+      cancelledCount++;
+    }
+
+    if (cancelledCount > 0) {
+      await batch.commit();
+      logManualChange('alerts_auto_cancelled', `${cancelledCount} alerta(s) cancelada(s) automáticamente al dar de baja a ${userAlias} de ${serviceKey} grupo ${acctIdStr}`, {
+        collection: 'alerts', documentId: acctIdStr,
+        before: { cancelledCount }, after: { status: 'cancelled_by_system' },
+      });
+    }
+
+    // --- Limpiar eventos pendientes de analysis/actionable-events ---
+    const analysisRef = doc(db, 'analysis', 'actionable-events');
+    const analysisSnap = await firestoreGetDoc(analysisRef);
+    if (analysisSnap.exists()) {
+      const events = analysisSnap.data().events || [];
+      const filtered = events.filter(evt => {
+        if (String(evt.accountId || '') !== acctIdStr) return true;
+        if (normalize(evt.userName || '') !== normalize(userAlias)) return true;
+        // Limpiar eventos de ingreso de este usuario a este grupo
+        return !['user_join_direct', 'user_join_transferred'].includes(evt.kind);
+      });
+      if (filtered.length < events.length) {
+        await updateDoc(analysisRef, { events: filtered, count: filtered.length });
+      }
+    }
+  } catch (err) {
+    // No bloquear la baja si falla la limpieza de alertas
+    logManualChange('alert_cleanup_error', `Error limpiando alertas al dar de baja a ${userAlias}: ${err.message}`, {
+      collection: `groups/${serviceKey}/lank-accounts`, documentId: acctIdStr,
+    });
+  }
+
+  // --- Generar alertas de cambio de contraseña si aplica ---
   const accessType = serviceMeta.accessType || '';
   const isPasswordShared = accessType === 'credentials' || accessType === 'profile_project';
 
@@ -325,8 +389,6 @@ export async function removeGroupUser(serviceKey, accountId, userAlias, currentU
   // Buscar si el usuario tenía un slot activo en alguna cuenta real de este servicio
   try {
     const realAccountsSnap = await getDocs(collection(db, `service-pools/${serviceKey}/real-accounts`));
-    const serviceName = serviceMeta.name || serviceKey;
-    const acctIdStr = String(accountId);
     const accountAlias = removedUser?.userAlias || userAlias;
 
     for (const realDoc of realAccountsSnap.docs) {
@@ -390,7 +452,7 @@ export async function removeGroupUser(serviceKey, accountId, userAlias, currentU
   } catch (err) {
     // No bloquear la baja si falla la generación de alertas — loguear para debug
     logManualChange('alert_generation_error', `Error generando alertas de cambio de contraseña al dar de baja a ${userAlias}: ${err.message}`, {
-      collection: `groups/${serviceKey}/lank-accounts`, documentId: String(accountId),
+      collection: `groups/${serviceKey}/lank-accounts`, documentId: acctIdStr,
     });
   }
 }
@@ -1089,6 +1151,27 @@ export async function updateLankMasterAccount(accountId, fields) {
     before: { canonicalAlias: before.canonicalAlias, fullName: before.fullName, lankGmailAddress: before.lankGmailAddress, whatsapp: before.whatsapp },
     after: { ...payload },
   });
+
+  // Sync identity/phone changes to the linked SIM card entry
+  const simFields = {};
+  if (fields.canonicalAlias !== undefined) simFields.canonicalAlias = fields.canonicalAlias;
+  if (fields.fullName !== undefined) simFields.fullName = fields.fullName;
+  if (fields.whatsapp !== undefined) simFields.phone = fields.whatsapp;
+  if (Object.keys(simFields).length > 0) {
+    try {
+      const simSnap = await firestoreGetDoc(doc(db, 'config', 'sim-cards'));
+      if (simSnap.exists()) {
+        const currentSims = simSnap.data().sims || [];
+        const numId = typeof accountId === 'string' ? parseInt(accountId, 10) : accountId;
+        const updatedSims = currentSims.map(sim =>
+          sim.lankAccountId === numId ? { ...sim, ...simFields } : sim
+        );
+        await saveSimCardConfig({ sims: updatedSims });
+      }
+    } catch (_) {
+      // SIM sync is best-effort
+    }
+  }
 }
 
 /**
@@ -1121,6 +1204,23 @@ export async function createLankMasterAccount(accountData) {
   };
 
   await setDoc(ref, payload);
+
+  // Auto-add SIM card entry for the new account
+  try {
+    const simSnap = await firestoreGetDoc(doc(db, 'config', 'sim-cards'));
+    const currentSims = simSnap.exists() ? (simSnap.data().sims || []) : [];
+    const newSim = {
+      lankAccountId: newId,
+      phone: accountData.whatsapp || '',
+      fullName: accountData.fullName || '',
+      canonicalAlias: accountData.canonicalAlias || accountData.fullName || '',
+      lastRechargeDate: null,
+      nextRechargeDate: null,
+    };
+    await saveSimCardConfig({ sims: [...currentSims, newSim] });
+  } catch (_) {
+    // SIM auto-add is best-effort; account creation already succeeded
+  }
 
   logManualChange('create_lank_master_account', `Cuenta Lank #${newId} creada: ${payload.canonicalAlias}`, {
     collection: 'accounts', documentId: String(newId),
@@ -2233,7 +2333,9 @@ export async function saveSimCardConfig(configData) {
  * @returns {Array} SIMs actualizadas
  */
 export async function markSimRechargeComplete(sims, lankAccountId, rechargeDate = null) {
-  const date = rechargeDate || new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const date = rechargeDate || localToday;
   const nextRecharge = computeNextRechargeDate(date);
 
   const updatedSims = sims.map(sim => {
@@ -2246,10 +2348,32 @@ export async function markSimRechargeComplete(sims, lankAccountId, rechargeDate 
   });
 
   await saveSimCardConfig({ sims: updatedSims });
-  logManualChange('sim_recharge_individual', `Recarga individual de cuenta Lank #${lankAccountId} el ${date}`, {
+
+  const sim = updatedSims.find(s => s.lankAccountId === lankAccountId);
+  const simName = sim?.canonicalAlias || sim?.fullName || '';
+  const simPhone = sim?.phone || '';
+  logManualChange('sim_recharge_individual', `Recarga número telefónico cuenta #${lankAccountId} ${simName} ${simPhone} el ${date}`, {
     collection: 'config', documentId: 'sim-cards',
     after: { lankAccountId, rechargeDate: date, nextRecharge },
   });
+
+  // Auto-complete pending sim_recharge alerts for this account
+  try {
+    const alertsQuery = query(
+      collection(db, 'alerts'),
+      where('type', '==', 'sim_recharge'),
+      where('status', '==', 'pending'),
+      where('lankAccountId', '==', String(lankAccountId)),
+    );
+    const alertSnaps = await getDocs(alertsQuery);
+    const completedAt = nowISO();
+    for (const alertDoc of alertSnaps.docs) {
+      await updateDoc(alertDoc.ref, { status: 'completed', completedAt });
+    }
+  } catch (_) {
+    // Alert auto-completion is best-effort
+  }
+
   return updatedSims;
 }
 
@@ -2280,4 +2404,55 @@ export async function addSimCard(sims, simInfo) {
     after: { lankAccountId, phone, nextRecharge },
   });
   return updatedSims;
+}
+
+/**
+ * Elimina la SIM Card asociada a una cuenta Lank.
+ * @param {Array} sims - Array de SIMs actual
+ * @param {number} lankAccountId - ID de la cuenta Lank
+ * @returns {Array} SIMs actualizadas (sin la eliminada)
+ */
+export async function removeSimCard(sims, lankAccountId) {
+  const updatedSims = sims.filter(sim => sim.lankAccountId !== lankAccountId);
+  await saveSimCardConfig({ sims: updatedSims });
+  logManualChange('remove_sim_card', `SIM eliminada: cuenta Lank #${lankAccountId}`, {
+    collection: 'config', documentId: 'sim-cards',
+    after: { lankAccountId, removed: true },
+  });
+  return updatedSims;
+}
+
+/**
+ * Elimina una cuenta Lank y su SIM asociada.
+ * @param {number|string} accountId - ID de la cuenta Lank
+ */
+export async function deleteLankMasterAccount(accountId) {
+  const numId = typeof accountId === 'string' ? parseInt(accountId, 10) : accountId;
+  const ref = doc(db, 'accounts', String(numId));
+  const snap = await firestoreGetDoc(ref);
+  if (!snap.exists()) {
+    throw new Error(`La cuenta Lank #${numId} no existe`);
+  }
+  const before = snap.data();
+
+  await deleteDoc(ref);
+
+  // Auto-remove linked SIM card entry
+  try {
+    const simSnap = await firestoreGetDoc(doc(db, 'config', 'sim-cards'));
+    if (simSnap.exists()) {
+      const currentSims = simSnap.data().sims || [];
+      const filtered = currentSims.filter(s => s.lankAccountId !== numId);
+      if (filtered.length !== currentSims.length) {
+        await saveSimCardConfig({ sims: filtered });
+      }
+    }
+  } catch (_) {
+    // SIM removal is best-effort
+  }
+
+  logManualChange('delete_lank_master_account', `Cuenta Lank #${numId} eliminada: ${before.canonicalAlias}`, {
+    collection: 'accounts', documentId: String(numId),
+    before,
+  });
 }

@@ -391,7 +391,7 @@ export default function Tools() {
         const thirtyDays = 30 * 24 * 60 * 60 * 1000;
         let deleted = 0;
         for (const d of docs) {
-          if (d.status === 'completed' || d.status === 'done' || d.status === 'discarded' || d.status === 'cancelled_by_ai' || d.status === 'resolved') {
+          if (d.status === 'completed' || d.status === 'done' || d.status === 'discarded' || d.status === 'cancelled_by_ai' || d.status === 'cancelled_by_system' || d.status === 'resolved') {
             const doneAt = (d.completedAt || d.discardedAt);
             const doneTime = doneAt?.toDate?.() ? doneAt.toDate().getTime() :
                             doneAt ? new Date(doneAt).getTime() : 0;

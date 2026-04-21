@@ -11,6 +11,11 @@ import {
 const MONTH_NAMES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 const MONTH_NAMES_FULL = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
+function todayLocal() {
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+}
+
 /**
  * Calcula la próxima fecha de recarga (espejo del back-end en firestoreActions.js).
  * Suma 11 meses y fija el día al 15.
@@ -43,7 +48,7 @@ function RechargeModal({ sim, initialDate, onConfirm, onClose }) {
   const targetMonth = nextDate ? MONTH_NAMES_FULL[parseInt(nextDate.slice(5, 7)) - 1] : '';
   const targetYear = nextDate ? nextDate.slice(0, 4) : '';
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayLocal();
 
   const handleRequestConfirm = () => {
     if (!rechargeDate) {
@@ -390,19 +395,28 @@ export default function SimCards() {
     return months;
   }, [sims, selectedYear]);
 
+  // SIMs pending first recharge (auto-created without dates)
+  const pendingSims = useMemo(() =>
+    sims.filter(s => !s.nextRechargeDate),
+  [sims]);
+
+  // Stats (exclude SIMs without dates)
+  const activeSims = useMemo(() => sims.filter(s => s.nextRechargeDate), [sims]);
+
   // Stats
   const stats = useMemo(() => {
     const totalSims = sims.length;
-    const overdue = sims.filter(s => daysUntil(s.nextRechargeDate) <= 0).length;
-    const dueSoon = sims.filter(s => {
+    const pending = pendingSims.length;
+    const overdue = activeSims.filter(s => daysUntil(s.nextRechargeDate) <= 0).length;
+    const dueSoon = activeSims.filter(s => {
       const d = daysUntil(s.nextRechargeDate);
       return d > 0 && d <= 30;
     }).length;
-    const sorted = [...sims].sort((a, b) => daysUntil(a.nextRechargeDate) - daysUntil(b.nextRechargeDate));
+    const sorted = [...activeSims].sort((a, b) => daysUntil(a.nextRechargeDate) - daysUntil(b.nextRechargeDate));
     const nextSim = sorted.find(s => daysUntil(s.nextRechargeDate) > 0);
     const nextDays = nextSim ? daysUntil(nextSim.nextRechargeDate) : null;
-    return { totalSims, overdue, dueSoon, nextDays };
-  }, [sims]);
+    return { totalSims, pending, overdue, dueSoon, nextDays };
+  }, [sims, activeSims, pendingSims]);
 
   // Current month/year for highlighting
   const now = new Date();
@@ -550,7 +564,7 @@ export default function SimCards() {
                               onClick={() => setRechargeModal({
                                 lankAccountId: sim.lankAccountId,
                                 name: sim.canonicalAlias || sim.fullName,
-                                rechargeDate: new Date().toISOString().slice(0, 10),
+                                rechargeDate: todayLocal(),
                               })}
                             >
                               <CheckCircleIcon size={13} />
@@ -572,7 +586,61 @@ export default function SimCards() {
         </div>
       </div>
 
-      {/* Unregistered accounts */}
+      {/* Pending first recharge */}
+      {pendingSims.length > 0 && (
+        <div className="finance-section" style={{ marginTop: '8px' }}>
+          <div className="sim-month-section" style={{ borderLeft: '3px solid var(--accent-warning, #f59e0b)' }}>
+            <div className="sim-month-header">
+              <div className="sim-month-name">
+                <span className="sim-month-full">Pendientes de primera recarga</span>
+                <span className="sim-month-badge overdue">{pendingSims.length} sin fecha</span>
+              </div>
+              <span className="sim-month-count">
+                {pendingSims.length} SIM{pendingSims.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+            <div className="sim-number-list">
+              {pendingSims.map(sim => (
+                <div key={sim.lankAccountId} className="sim-number-card warning">
+                  <div className="sim-number-info">
+                    <div className="sim-number-top">
+                      <span className="sim-number-id">#{sim.lankAccountId}</span>
+                      <span className="sim-number-alias">{sim.canonicalAlias || sim.fullName}</span>
+                    </div>
+                    <div className="sim-number-details">
+                      <span className="sim-number-phone">
+                        <PhoneIcon size={11} /> {sim.phone || '—'}
+                      </span>
+                      <span className="sim-number-dates" style={{ color: 'var(--accent-warning)' }}>
+                        Sin recarga registrada
+                      </span>
+                    </div>
+                  </div>
+                  <div className="sim-number-right">
+                    <span className="sim-number-urgency" style={{ color: 'var(--accent-warning)' }}>
+                      Pendiente
+                    </span>
+                    <button
+                      className="sim-recharge-btn"
+                      title="Registrar primera recarga"
+                      onClick={() => setRechargeModal({
+                        lankAccountId: sim.lankAccountId,
+                        name: sim.canonicalAlias || sim.fullName,
+                        rechargeDate: todayLocal(),
+                      })}
+                    >
+                      <CheckCircleIcon size={13} />
+                      <span>1ª Recarga</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Unregistered accounts (legacy — accounts created before auto-add) */}
       {unregisteredAccounts.length > 0 && (
         <div className="finance-section" style={{ marginTop: '8px' }}>
           <div className="sim-notice">

@@ -457,6 +457,15 @@ body {
 }
 .alert-tab.active-tint img,
 .alert-tab.active-tint span { filter: none; opacity: 1; }
+.alert-priority-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; border-radius: 9px;
+  background: rgba(255,255,255,0.25); color: inherit;
+  font-size: 11px; font-weight: 700; padding: 0 5px; margin-left: 4px;
+}
+.alert-tab:not(.active-tint):not(.active) .alert-priority-count {
+  background: var(--bg-card-hover); color: var(--text-secondary);
+}
 .filter-btn-logo { width: 22px; height: 22px; border-radius: 4px; object-fit: cover; vertical-align: middle; }
 
 /* Badge cashback */

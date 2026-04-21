@@ -5,7 +5,9 @@ import { db } from '../firebase';
 import { getServiceMeta, getServiceKeyByName, getPoolServiceKeys, getAllServiceKeys } from '../config/services';
 import { completeAlert, discardAlert, completeUnidentifiedAlert, removeGroupUser, completeM365Renewal, completeMissingPhone, removeAnalysisEvent } from '../hooks/firestoreActions';
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
-import { BellIcon, CalendarIcon, CelebrationIcon, ChatIcon, CheckCircleIcon, ClipboardIcon, CreditCardIcon, DotBlue, DotOrange, DotRed, DotYellow, EditIcon, EmailIcon, EmptyMailIcon, HourglassIcon, KeyIcon, LinkIcon, LockKeyIcon, PhoneIcon, PinIcon, SparkleIcon, TargetIcon, TrashIcon, WarningIcon, XCircleIcon } from '../components/Icons';
+import { BellIcon, CalendarIcon, CelebrationIcon, ChatIcon, CheckCircleIcon, ClipboardIcon, CreditCardIcon, DotBlue, DotOrange, DotRed, DotYellow, EditIcon, EmailIcon, EmptyMailIcon, HourglassIcon, KeyIcon, LinkIcon, LockKeyIcon, PhoneIcon, PinIcon, SearchIcon, SparkleIcon, TargetIcon, TrashIcon, WarningIcon, XCircleIcon } from '../components/Icons';
+import SearchBar from '../components/SearchBar';
+import { normalizeSearch, nMatch } from '../utils/normalize';
 
 // Mapeo dinámico de serviceAccountRef → servicio interno para navegación
 function parseServiceKey(ref) {
@@ -76,9 +78,11 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  const { data: alerts, loading } = useCollection('alerts');
  const [activeTab, setActiveTab] = useState('pending');
  const [filterPriority, setFilterPriority] = useState('all');
+ const [searchQuery, setSearchQuery] = useState('');
  const [analysisEvents, setAnalysisEvents] = useState([]);
  const [realAccounts, setRealAccounts] = useState({});
  const [groupUsers, setGroupUsers] = useState({}); // {serviceKey_accountId: [users]}
+ const [liveAccountNames, setLiveAccountNames] = useState({}); // {accountId: currentAlias}
 
  // Modal states
  const [discardModal, setDiscardModal] = useState(null); // { alertId, title }
@@ -144,6 +148,35 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  if (alerts.length > 0 || analysisEvents.length > 0) fetchGroupUsers();
  }, [alerts, analysisEvents]);
 
+ // Resolver nombres actuales de cuentas Lank (evitar alias stale en alertas)
+ useEffect(() => {
+   async function fetchLiveAccountNames() {
+     const accountIds = new Set();
+     for (const a of alerts) {
+       if (a.accountId != null && a.accountId !== '') accountIds.add(String(a.accountId));
+     }
+     for (const evt of analysisEvents) {
+       if (evt.accountId != null && evt.accountId !== '') accountIds.add(String(evt.accountId));
+     }
+     if (accountIds.size === 0) return;
+     const namesMap = {};
+     for (const accId of accountIds) {
+       if (liveAccountNames[accId]) { namesMap[accId] = liveAccountNames[accId]; continue; }
+       try {
+         const snap = await getDoc(doc(db, 'accounts', accId));
+         if (snap.exists()) {
+           const d = snap.data();
+           namesMap[accId] = d.canonicalAlias || d.alias || d.fullName || '';
+         }
+       } catch { /* non-blocking */ }
+     }
+     if (Object.keys(namesMap).length > 0) {
+       setLiveAccountNames(prev => ({ ...prev, ...namesMap }));
+     }
+   }
+   fetchLiveAccountNames();
+ }, [alerts, analysisEvents]);
+
  // Obtener cuentas reales disponibles para asignación
  const getAvailableRealAccounts = useCallback((serviceKey) => {
  const accounts = realAccounts[serviceKey] || [];
@@ -191,20 +224,22 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  });
  }, [analysisEvents, realAccounts]);
 
+ // Normalizar alias para dedup: null/undefined/?/usuario no informado → ''
+ const normalizeAlias = (v) => (!v || v === '?' || v === 'usuario no informado' || v === 'desconocido') ? '' : v.toLowerCase();
+
  const categorized = useMemo(() => {
  const allPending = [
       ...alerts.filter(a => a.status === 'pending'),
       ...analysisAlerts.filter(ae => {
         return !alerts.some(a =>
-          a.userAlias === ae.userAlias &&
+          normalizeAlias(a.userAlias) === normalizeAlias(ae.userAlias) &&
           String(a.accountId) === String(ae.accountId) &&
-          a.service === ae.service &&
-          true  // match any status to detect duplicates
+          a.service === ae.service
         );
       }),
  ];
  const completed = alerts.filter(a => a.status === 'completed' || a.status === 'done');
- const discarded = alerts.filter(a => a.status === 'discarded' || a.status === 'cancelled_by_ai' || a.status === 'resolved');
+ const discarded = alerts.filter(a => a.status === 'discarded' || a.status === 'cancelled_by_ai' || a.status === 'cancelled_by_system' || a.status === 'resolved');
  return { pending: allPending, completed, discarded };
  }, [alerts, analysisAlerts]);
 
@@ -213,19 +248,39 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  if (filterPriority !== 'all') {
       list = list.filter(a => a.priority === filterPriority);
  }
+ // Filtro de búsqueda
+ const q = normalizeSearch(searchQuery);
+ if (q.length >= 2) {
+      list = list.filter(a => {
+        const liveAlias = a.accountId != null ? (liveAccountNames[String(a.accountId)] || '') : '';
+        return nMatch(a.title || '', q) ||
+        nMatch(a.description || '', q) ||
+        nMatch(a.userAlias || '', q) ||
+        nMatch(a.service || '', q) ||
+        nMatch(a.accountAlias || '', q) ||
+        nMatch(liveAlias, q) ||
+        nMatch(a.serviceAccountRef || '', q) ||
+        nMatch(a.realAccountEmail || '', q) ||
+        nMatch(String(a.accountId || ''), q);
+      });
+ }
  const groups = {};
  const ungrouped = [];
  for (const alert of list) {
       const accId = alert.accountId;
       if (accId != null && accId !== '') {
         const key = String(accId);
+        const liveName = liveAccountNames[key];
+        const displayAlias = liveName || alert.accountAlias || `Cuenta #${accId}`;
         if (!groups[key]) {
           groups[key] = {
-            accountId: accId, accountAlias: alert.accountAlias || `Cuenta #${accId}`,
+            accountId: accId, accountAlias: displayAlias,
             alerts: [], highestPriority: 4,
           };
         }
-        if (alert.accountAlias && alert.accountAlias !== `Cuenta #${accId}`) {
+        if (liveName) {
+          groups[key].accountAlias = liveName;
+        } else if (alert.accountAlias && alert.accountAlias !== `Cuenta #${accId}`) {
           groups[key].accountAlias = alert.accountAlias;
         }
         groups[key].alerts.push(alert);
@@ -243,11 +298,21 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
       return b.alerts.length - a.alerts.length;
  });
  return { groups: sortedGroups, ungrouped };
- }, [categorized, activeTab, filterPriority]);
+ }, [categorized, activeTab, filterPriority, searchQuery, liveAccountNames]);
 
  const totalCount = useMemo(() => {
  return groupedAlerts.groups.reduce((s, g) => s + g.alerts.length, 0) + groupedAlerts.ungrouped.length;
  }, [groupedAlerts]);
+
+ // Contadores por prioridad (sobre la pestaña activa, sin filtros de prioridad ni búsqueda)
+ const priorityCounts = useMemo(() => {
+   const list = categorized[activeTab] || [];
+   const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+   for (const a of list) {
+     if (counts[a.priority] !== undefined) counts[a.priority]++;
+   }
+   return counts;
+ }, [categorized, activeTab]);
 
  useEffect(() => {
  if (!navData || !navData.focusUser) return;
@@ -292,7 +357,7 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  const isClickable = (alert) => {
  if (!(alert.accountId || alert.service || alert.serviceAccountRef)) return false;
  // Alertas completadas/descartadas de remoción: el usuario ya no existe, no tiene sentido navegar
- if (alert.status === 'completed' || alert.status === 'done' || alert.status === 'discarded' || alert.status === 'cancelled_by_ai' || alert.status === 'resolved') {
+ if (alert.status === 'completed' || alert.status === 'done' || alert.status === 'discarded' || alert.status === 'cancelled_by_ai' || alert.status === 'cancelled_by_system' || alert.status === 'resolved') {
       const removalTypes = ['profile_delete', 'user_left_expired', 'group_deactivated', 'revoke_invitation'];
       if (removalTypes.includes(alert.type)) return false;
  }
@@ -449,7 +514,7 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
 
  // Renderizar botones de acción según el estado de la alerta
  const renderActions = (alert) => {
- if (alert.status === 'completed' || alert.status === 'done' || alert.status === 'discarded' || alert.status === 'cancelled_by_ai' || alert.status === 'resolved') return null;
+ if (alert.status === 'completed' || alert.status === 'done' || alert.status === 'discarded' || alert.status === 'cancelled_by_ai' || alert.status === 'cancelled_by_system' || alert.status === 'resolved') return null;
 
  return (
       <div className="alert-actions" onClick={e => e.stopPropagation()}>
@@ -465,6 +530,10 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
         ) : alert.type === 'm365_renewal' || alert.type?.endsWith('_renewal') || alert.type?.endsWith('_missing_renewal') ? (
           <button className="alert-action-btn complete" onClick={() => handleM365Renewal(alert)}>
             <CalendarIcon size={16} /> {alert.type?.endsWith('_missing_renewal') ? 'Asignar fecha' : 'Renovar'}
+          </button>
+        ) : alert.type === 'sim_recharge' ? (
+          <button className="alert-action-btn complete" onClick={() => onNavigate?.('sim-cards')}>
+            <CheckCircleIcon size={16} /> Ir a SIM Cards
           </button>
         ) : isUnidentified(alert) ? (
           <button className="alert-action-btn assign" onClick={() => handleEditUnidentified(alert)}>
@@ -588,10 +657,11 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  <>
       <div className="section-header">
         <div className="section-title"> Centro de Alertas</div>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
           {['all', 'critical', 'high', 'medium', 'low'].map(p => {
             const meta = PRIORITY_META[p];
             const isActive = filterPriority === p;
+            const count = p === 'all' ? null : priorityCounts[p];
             return (
               <button
                 key={p}
@@ -600,11 +670,22 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
                 style={isActive && p !== 'all' ? { '--tint-color': meta?.color, filter: 'none', background: meta?.color } : {}}
               >
                 {p === 'all' ? 'Todas' : <>{meta?.icon} {meta?.label}</>}
+                {count != null && count > 0 && (
+                  <span className="alert-priority-count">{count}</span>
+                )}
               </button>
             );
           })}
         </div>
       </div>
+
+      {/* Buscador */}
+      <SearchBar
+        value={searchQuery}
+        onChange={setSearchQuery}
+        placeholder="Buscar por usuario, servicio, cuenta, descripción..."
+        resultCount={searchQuery.length >= 2 ? totalCount : undefined}
+      />
 
       {/* Tabs */}
       <div className="alerts-tabs">
