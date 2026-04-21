@@ -800,8 +800,10 @@ def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=N
                 if real_status and real_status.startswith('legacy'):
                     continue
 
+                evt_with_date = dict(evt)
+                evt_with_date['date'] = evt_row.get('date', '')
                 new_alerts = lank_alerts.generate_user_left_alerts(
-                    evt, service, a_id, alias, svc_ref, other_users,
+                    evt_with_date, service, a_id, alias, svc_ref, other_users,
                     real_account_email=real_email, real_account_expires=real_expires,
                     services_config=services_config
                 )
@@ -843,6 +845,7 @@ def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=N
                     user_alias_join = user_alias if user_alias and user_alias != '?' else 'usuario no informado'
                     if not lank_alerts.find_duplicate(alerts_data['alerts'], 'user_needs_access', service, a_id, user_alias_join):
                         evt_copy = dict(evt)
+                        evt_copy['date'] = evt_row.get('date', '')
                         if not evt_copy.get('userName'):
                             evt_copy['userName'] = 'usuario no informado'
                         new_alert = lank_alerts.generate_user_joined_alert(evt_copy, service, a_id, alias)
@@ -883,7 +886,9 @@ def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=N
 
                 # ── Legacy: generate alerts ──
                 if not lank_alerts.find_duplicate(alerts_data['alerts'], 'group_deactivated', service, a_id, None):
-                    new_alert = lank_alerts.generate_group_deactivated_alert(evt, service, a_id, alias)
+                    evt_with_date = dict(evt)
+                    evt_with_date['date'] = evt_row.get('date', '')
+                    new_alert = lank_alerts.generate_group_deactivated_alert(evt_with_date, service, a_id, alias)
                     save_alert_to_firestore(db, new_alert)
                     alerts_data['alerts'].append(new_alert)
                     alerts_generated += 1
