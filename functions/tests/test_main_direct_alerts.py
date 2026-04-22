@@ -1,0 +1,612 @@
+import sys
+import types
+from pathlib import Path
+
+import pytest
+
+
+FUNCTIONS_DIR = Path(__file__).resolve().parents[1]
+if str(FUNCTIONS_DIR) not in sys.path:
+    sys.path.insert(0, str(FUNCTIONS_DIR))
+
+
+class _DecoratorFactory:
+    def __call__(self, *args, **kwargs):
+        def decorator(fn):
+            return fn
+
+        return decorator
+
+
+class _CorsOptions:
+    def __init__(self, *args, **kwargs):
+        pass
+
+
+class _MemoryOption:
+    MB_256 = "MB_256"
+    MB_512 = "MB_512"
+    GB_1 = "GB_1"
+
+
+class _FakeResponse:
+    def __init__(self, body=None, status=200, content_type=None):
+        self.body = body
+        self.status = status
+        self.content_type = content_type
+
+
+firebase_functions = types.ModuleType("firebase_functions")
+firebase_functions.https_fn = types.SimpleNamespace(
+    on_request=_DecoratorFactory(),
+    Response=_FakeResponse,
+    Request=object,
+)
+firebase_functions.scheduler_fn = types.SimpleNamespace(
+    on_schedule=_DecoratorFactory(),
+    ScheduledEvent=object,
+)
+firebase_functions.options = types.SimpleNamespace(
+    CorsOptions=_CorsOptions,
+    MemoryOption=_MemoryOption,
+)
+sys.modules.setdefault("firebase_functions", firebase_functions)
+
+firebase_admin = types.ModuleType("firebase_admin")
+firebase_admin.initialize_app = lambda: object()
+firebase_admin.firestore = types.SimpleNamespace(client=lambda: None)
+sys.modules.setdefault("firebase_admin", firebase_admin)
+
+google_module = types.ModuleType("google")
+google_cloud = types.ModuleType("google.cloud")
+google_firestore = types.ModuleType("google.cloud.firestore")
+google_cloud.firestore = google_firestore
+google_module.cloud = google_cloud
+sys.modules.setdefault("google", google_module)
+sys.modules.setdefault("google.cloud", google_cloud)
+sys.modules.setdefault("google.cloud.firestore", google_firestore)
+
+import main
+
+
+class FakeDocSnapshot:
+    def __init__(self, data=None, exists=True, reference=None, doc_id=None):
+        self._data = data or {}
+        self.exists = exists
+        self.reference = reference
+        self.id = doc_id
+
+    def to_dict(self):
+        return dict(self._data)
+
+
+class FakeDocRef:
+    def __init__(self, collection, doc_id):
+        self.collection = collection
+        self.id = doc_id
+        self.deleted = False
+        self.updated = []
+
+    def set(self, data, merge=False):
+        current = self.collection.store.get(self.id, {}) if merge else {}
+        current.update(data)
+        self.collection.store[self.id] = current
+
+    def update(self, data):
+        current = self.collection.store.get(self.id, {})
+        current.update(data)
+        self.collection.store[self.id] = current
+        self.updated.append(data)
+
+    def get(self):
+        if self.id in self.collection.store:
+            return FakeDocSnapshot(self.collection.store[self.id], exists=True, reference=self, doc_id=self.id)
+        return FakeDocSnapshot({}, exists=False, reference=self, doc_id=self.id)
+
+    def delete(self):
+        self.deleted = True
+        self.collection.store.pop(self.id, None)
+
+
+class FakeQuery:
+    def __init__(self, collection):
+        self.collection = collection
+
+    def where(self, *args, **kwargs):
+        return self
+
+    def stream(self):
+        return self.collection.stream()
+
+
+class FakeCollection:
+    def __init__(self, store=None):
+        self.store = store or {}
+
+    def document(self, doc_id):
+        return FakeDocRef(self, doc_id)
+
+    def where(self, *args, **kwargs):
+        return FakeQuery(self)
+
+    def stream(self):
+        return [FakeDocSnapshot(data, reference=FakeDocRef(self, doc_id), doc_id=doc_id) for doc_id, data in self.store.items()]
+
+
+class FakeBatch:
+    def __init__(self):
+        self.deleted_refs = []
+        self.commit_calls = 0
+
+    def delete(self, reference):
+        self.deleted_refs.append(reference)
+        reference.delete()
+
+    def commit(self):
+        self.commit_calls += 1
+
+
+class FakeDb:
+    def __init__(self, groups=None, pending_events=None, alerts=None):
+        self.groups = groups or {}
+        self.collections = {
+            "alerts": FakeCollection(alerts or {}),
+            "pending-events": FakeCollection(pending_events or {}),
+        }
+        self.deleted_docs = []
+        self.batch_instances = []
+
+    def collection(self, name):
+        return self.collections.setdefault(name, FakeCollection({}))
+
+    def document(self, path):
+        if path.startswith("groups/"):
+            data = self.groups.get(path)
+            return types.SimpleNamespace(get=lambda: FakeDocSnapshot(data or {}, exists=data is not None))
+        return types.SimpleNamespace(delete=lambda: self.deleted_docs.append(path))
+
+    def batch(self):
+        batch = FakeBatch()
+        self.batch_instances.append(batch)
+        return batch
+
+
+def test_generate_alerts_for_accounts_creates_direct_alerts_and_external_notices(monkeypatch):
+    db = FakeDb(
+        groups={
+            "groups/chatgpt/lank-accounts/12": {
+                "users": [
+                    {"userAlias": "Mario", "serviceAccountRef": "Perfil 1"},
+                    {"userAlias": "Luigi", "serviceAccountRef": "Perfil 1"},
+                ]
+            }
+        }
+    )
+    ok_accounts = [
+        {
+            "access": "ok",
+            "accountId": 12,
+            "accountAlias": "Cuenta 12",
+            "events": [
+                {
+                    "event": {
+                        "kind": "user_left_self",
+                        "subscription": "ChatGPT Plus",
+                        "userName": "Mario",
+                        "userEmail": "mario@example.com",
+                    },
+                    "uid": 101,
+                    "messageId": "msg-101",
+                    "date": "2026-04-22T10:00:00+00:00",
+                    "dbReview": {
+                        "service": "ChatGPT Plus",
+                        "category": "pending",
+                        "action": "revocar acceso",
+                        "reason": "salió del grupo",
+                        "dbGroupStatus": "active",
+                        "matchesCurrent": [{"alias": "Mario"}],
+                        "matchesStale": [],
+                    },
+                },
+                {
+                    "event": {
+                        "kind": "unknown",
+                        "subscription": "ChatGPT Plus",
+                        "userName": "Mario",
+                    },
+                    "uid": 102,
+                    "messageId": "msg-102",
+                    "date": "2026-04-22T11:00:00+00:00",
+                    "dbReview": {
+                        "service": "ChatGPT Plus",
+                        "category": "info",
+                        "action": "revisar correo relevante",
+                        "reason": "correo relevante sin acción operativa",
+                        "notifyExternally": True,
+                    },
+                },
+            ],
+        }
+    ]
+    alerts_data = {"alerts": [], "completedAlerts": []}
+    captured_direct_calls = []
+
+    def fake_build_direct_alerts(**kwargs):
+        captured_direct_calls.append(kwargs)
+        event = kwargs["event"]
+        if event["kind"] != "user_left_self":
+            return []
+        return [
+            {
+                "type": "profile_delete",
+                "status": "pending",
+                "priority": "high",
+                "service": kwargs["review"]["service"],
+                "accountId": str(event["accountId"]),
+                "accountAlias": event["accountAlias"],
+                "userAlias": event["userName"],
+                "serviceAccountRef": kwargs["enrichment"]["serviceAccountRef"],
+                "businessKey": "profile_delete|ChatGPT Plus|12|mario",
+                "title": "Eliminar perfil",
+                "description": "Eliminar perfil de Mario",
+            }
+        ]
+
+    monkeypatch.setattr(main, "build_direct_alerts", fake_build_direct_alerts)
+    monkeypatch.setattr(main, "update_group_on_leave", lambda *args, **kwargs: False)
+    monkeypatch.setattr(
+        main,
+        "load_pool_data",
+        lambda _db, _service: {
+            "accounts": [
+                {
+                    "serviceAccountRef": "Perfil 1",
+                    "email": "perfil1@example.com",
+                    "expiresAt": "2026-05-01T00:00:00+00:00",
+                    "status": "active",
+                }
+            ]
+        },
+    )
+
+    alerts_generated, updated_services, external_notices, agent_findings = main.generate_alerts_for_accounts(
+        db,
+        ok_accounts,
+        alerts_data,
+        services_config={"chatgpt": {"name": "ChatGPT Plus", "accessType": "credentials"}},
+        generated_at="2026-04-22T12:00:00+00:00",
+    )
+
+    assert alerts_generated == 1
+    assert updated_services == {}
+    assert agent_findings == []
+    assert len(alerts_data["alerts"]) == 1
+    saved_alert = alerts_data["alerts"][0]
+    assert saved_alert["serviceAccountRef"] == "Perfil 1"
+    assert saved_alert["id"].startswith("alert_")
+    assert saved_alert["createdAt"] == "2026-04-22T12:00:00+00:00"
+    assert db.collection("alerts").store[saved_alert["id"]]["businessKey"] == "profile_delete|ChatGPT Plus|12|mario"
+
+    assert len(captured_direct_calls) == 2
+    leave_call = captured_direct_calls[0]
+    assert leave_call["event"]["accountId"] == 12
+    assert leave_call["event"]["accountAlias"] == "Cuenta 12"
+    assert leave_call["enrichment"]["serviceAccountRef"] == "Perfil 1"
+    assert leave_call["enrichment"]["otherUsers"] == ["Luigi"]
+    assert leave_call["enrichment"]["realAccountEmail"] == "perfil1@example.com"
+    assert leave_call["enrichment"]["realAccountExpires"] == "2026-05-01T00:00:00+00:00"
+    assert leave_call["enrichment"]["realAccountStatus"] == "active"
+    assert leave_call["enrichment"]["groupStatus"] == "active"
+
+    assert external_notices == [
+        {
+            "accountId": 12,
+            "accountAlias": "Cuenta 12",
+            "userName": "Mario",
+            "subscription": "ChatGPT Plus",
+            "kind": "unknown",
+            "category": "info",
+            "action": "revisar correo relevante",
+            "reason": "correo relevante sin acción operativa",
+            "date": "2026-04-22T11:00:00+00:00",
+        }
+    ]
+
+
+def test_generate_alerts_for_accounts_skips_unmanaged_info_notices(monkeypatch):
+    db = FakeDb()
+    ok_accounts = [
+        {
+            "access": "ok",
+            "accountId": 12,
+            "accountAlias": "Cuenta 12",
+            "events": [
+                {
+                    "event": {"kind": "user_join_direct", "subscription": "Microsoft 365", "userName": "Mario"},
+                    "uid": 211,
+                    "messageId": "msg-211",
+                    "date": "2026-04-22T10:00:00+00:00",
+                    "dbReview": {
+                        "service": "Microsoft 365",
+                        "category": "info",
+                        "action": "sin acción requerida",
+                        "reason": "Microsoft 365: altas y bajas se registran como referencia",
+                    },
+                }
+            ],
+        }
+    ]
+    alerts_data = {"alerts": [], "completedAlerts": []}
+
+    monkeypatch.setattr(main, "build_direct_alerts", lambda **kwargs: [])
+
+    alerts_generated, _, external_notices, _ = main.generate_alerts_for_accounts(
+        db,
+        ok_accounts,
+        alerts_data,
+        services_config={"microsoft365": {"name": "Microsoft 365", "accessType": "renewal_only"}},
+        generated_at="2026-04-22T12:00:00+00:00",
+    )
+
+    assert alerts_generated == 0
+    assert external_notices == []
+
+
+def test_generate_alerts_for_accounts_skips_routine_validation_info_notices(monkeypatch):
+    db = FakeDb()
+    ok_accounts = [
+        {
+            "access": "ok",
+            "accountId": 12,
+            "accountAlias": "Cuenta 12",
+            "events": [
+                {
+                    "event": {"kind": "group_validated", "subscription": "ChatGPT Plus"},
+                    "uid": 212,
+                    "messageId": "msg-212",
+                    "date": "2026-04-22T10:00:00+00:00",
+                    "dbReview": {
+                        "service": "ChatGPT Plus",
+                        "category": "info",
+                        "action": "sin acción",
+                        "reason": "validación sin impacto",
+                        "notifyExternally": True,
+                    },
+                }
+            ],
+        }
+    ]
+    alerts_data = {"alerts": [], "completedAlerts": []}
+
+    monkeypatch.setattr(main, "build_direct_alerts", lambda **kwargs: [])
+
+    alerts_generated, _, external_notices, _ = main.generate_alerts_for_accounts(
+        db,
+        ok_accounts,
+        alerts_data,
+        services_config={"chatgpt": {"name": "ChatGPT Plus", "accessType": "credentials"}},
+        generated_at="2026-04-22T12:00:00+00:00",
+    )
+
+    assert alerts_generated == 0
+    assert external_notices == []
+
+
+@pytest.mark.parametrize(
+    ("event", "review", "expected"),
+    [
+        (
+            {"kind": "unknown", "subscription": "ChatGPT Plus"},
+            {"category": "info", "notifyExternally": True},
+            True,
+        ),
+        (
+            {"kind": "group_validated", "subscription": "ChatGPT Plus"},
+            {"category": "info", "notifyExternally": True},
+            False,
+        ),
+        (
+            {"kind": "user_join_direct", "service": "Microsoft 365"},
+            {"category": "info", "notifyExternally": True},
+            False,
+        ),
+        (
+            {"kind": "unknown", "subscription": "ChatGPT Plus"},
+            {"category": "info", "notifyExternally": False},
+            False,
+        ),
+    ],
+)
+def test_should_send_external_notice_applies_structured_rules(event, review, expected):
+    assert main.should_send_external_notice(event, review) is expected
+
+
+def test_generate_alerts_for_accounts_deduplicates_alerts_within_same_run(monkeypatch):
+    db = FakeDb()
+    ok_accounts = [
+        {
+            "access": "ok",
+            "accountId": 12,
+            "accountAlias": "Cuenta 12",
+            "events": [
+                {
+                    "event": {"kind": "user_join_direct", "subscription": "ChatGPT Plus", "userName": "Mario"},
+                    "uid": 201,
+                    "messageId": "msg-201",
+                    "date": "2026-04-22T10:00:00+00:00",
+                    "dbReview": {"service": "ChatGPT Plus", "category": "pending", "action": "dar acceso", "reason": "alta"},
+                },
+                {
+                    "event": {"kind": "user_join_direct", "subscription": "ChatGPT Plus", "userName": "Mario"},
+                    "uid": 202,
+                    "messageId": "msg-202",
+                    "date": "2026-04-22T10:05:00+00:00",
+                    "dbReview": {"service": "ChatGPT Plus", "category": "pending", "action": "dar acceso", "reason": "duplicado"},
+                },
+            ],
+        }
+    ]
+    alerts_data = {"alerts": [], "completedAlerts": []}
+
+    monkeypatch.setattr(
+        main,
+        "build_direct_alerts",
+        lambda **kwargs: [
+            {
+                "type": "user_needs_access",
+                "status": "pending",
+                "priority": "high",
+                "service": "ChatGPT Plus",
+                "accountId": "12",
+                "accountAlias": "Cuenta 12",
+                "userAlias": "Mario",
+                "businessKey": "user_needs_access|ChatGPT Plus|12|mario",
+                "title": "Dar acceso",
+                "description": "Dar acceso a Mario",
+            }
+        ],
+    )
+
+    alerts_generated, _, external_notices, _ = main.generate_alerts_for_accounts(
+        db,
+        ok_accounts,
+        alerts_data,
+        services_config={"chatgpt": {"name": "ChatGPT Plus", "accessType": "credentials"}},
+        generated_at="2026-04-22T12:00:00+00:00",
+    )
+
+    assert alerts_generated == 1
+    assert len(alerts_data["alerts"]) == 1
+    assert len(db.collection("alerts").store) == 1
+    assert external_notices == []
+
+
+def test_generate_alerts_for_accounts_keeps_review_alerts(monkeypatch):
+    db = FakeDb()
+    ok_accounts = [
+        {
+            "access": "ok",
+            "accountId": 12,
+            "accountAlias": "Cuenta 12",
+            "events": [
+                {
+                    "event": {"kind": "user_join_direct", "subscription": "ChatGPT Plus", "userEmail": "mario@example.com"},
+                    "uid": 301,
+                    "messageId": "msg-301",
+                    "date": "2026-04-22T10:00:00+00:00",
+                    "dbReview": {"service": "ChatGPT Plus", "category": "review", "action": "revisar acceso", "reason": "falta nombre"},
+                }
+            ],
+        }
+    ]
+    alerts_data = {"alerts": [], "completedAlerts": []}
+
+    monkeypatch.setattr(
+        main,
+        "build_direct_alerts",
+        lambda **kwargs: [
+            {
+                "type": "user_needs_access",
+                "status": "pending",
+                "priority": "high",
+                "service": "ChatGPT Plus",
+                "accountId": "12",
+                "accountAlias": "Cuenta 12",
+                "userAlias": "mario@example.com",
+                "businessKey": "user_needs_access|ChatGPT Plus|12|mario@example.com",
+                "title": "Dar acceso",
+                "description": "Revisar acceso manualmente",
+            }
+        ],
+    )
+
+    alerts_generated, _, external_notices, _ = main.generate_alerts_for_accounts(
+        db,
+        ok_accounts,
+        alerts_data,
+        services_config={"chatgpt": {"name": "ChatGPT Plus", "accessType": "credentials"}},
+        generated_at="2026-04-22T12:00:00+00:00",
+    )
+
+    assert alerts_generated == 1
+    assert len(alerts_data["alerts"]) == 1
+    assert external_notices == []
+
+
+
+def test_generate_alerts_for_accounts_updates_group_and_adds_agent_finding_without_service_account(monkeypatch):
+    db = FakeDb(
+        groups={
+            "groups/chatgpt/lank-accounts/12": {
+                "users": [
+                    {"userAlias": "Mario"},
+                    {"userAlias": "Luigi"},
+                ]
+            }
+        }
+    )
+    ok_accounts = [
+        {
+            "access": "ok",
+            "accountId": 12,
+            "accountAlias": "Cuenta 12",
+            "events": [
+                {
+                    "event": {"kind": "user_left_self", "subscription": "ChatGPT Plus", "userName": "Mario"},
+                    "uid": 302,
+                    "messageId": "msg-302",
+                    "date": "2026-04-22T10:00:00+00:00",
+                    "dbReview": {
+                        "service": "ChatGPT Plus",
+                        "category": "pending",
+                        "action": "revocar acceso",
+                        "reason": "salió del grupo",
+                    },
+                }
+            ],
+        }
+    ]
+    alerts_data = {"alerts": [], "completedAlerts": []}
+    updated_calls = []
+
+    monkeypatch.setattr(main, "build_direct_alerts", lambda **kwargs: [])
+    monkeypatch.setattr(main, "load_pool_data", lambda *_args, **_kwargs: {"accounts": []})
+    monkeypatch.setattr(main, "update_group_on_leave", lambda *args: updated_calls.append(args) or True)
+    monkeypatch.setattr(
+        main.lank_agent_review,
+        "resolve_join_alert_without_real_access",
+        lambda *_args, **_kwargs: [{"type": "leave_without_real_access", "severity": "medium"}],
+    )
+
+    alerts_generated, updated_services, external_notices, agent_findings = main.generate_alerts_for_accounts(
+        db,
+        ok_accounts,
+        alerts_data,
+        services_config={"chatgpt": {"name": "ChatGPT Plus", "accessType": "credentials"}},
+        generated_at="2026-04-22T12:00:00+00:00",
+    )
+
+    assert alerts_generated == 0
+    assert external_notices == []
+    assert agent_findings == [{"type": "leave_without_real_access", "severity": "medium"}]
+    assert updated_calls
+    assert updated_services == {"ChatGPT Plus": {12}}
+
+
+
+def test_purge_legacy_event_state_deletes_analysis_doc_and_pending_events():
+    db = FakeDb(
+        pending_events={
+            "evt_1": {"status": "new"},
+            "evt_2": {"status": "done"},
+        }
+    )
+
+    main.purge_legacy_event_state(db)
+
+    assert "analysis/actionable-events" in db.deleted_docs
+    assert db.collection("pending-events").store == {}
+    assert db.batch_instances
+    assert db.batch_instances[0].commit_calls == 1
+    deleted_ids = {ref.id for ref in db.batch_instances[0].deleted_refs}
+    assert deleted_ids == {"evt_1", "evt_2"}

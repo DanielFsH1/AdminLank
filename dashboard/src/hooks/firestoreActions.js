@@ -358,21 +358,6 @@ export async function removeGroupUser(serviceKey, accountId, userAlias, currentU
       });
     }
 
-    // --- Limpiar eventos pendientes de analysis/actionable-events ---
-    const analysisRef = doc(db, 'analysis', 'actionable-events');
-    const analysisSnap = await firestoreGetDoc(analysisRef);
-    if (analysisSnap.exists()) {
-      const events = analysisSnap.data().events || [];
-      const filtered = events.filter(evt => {
-        if (String(evt.accountId || '') !== acctIdStr) return true;
-        if (normalize(evt.userName || '') !== normalize(userAlias)) return true;
-        // Limpiar eventos de ingreso de este usuario a este grupo
-        return !['user_join_direct', 'user_join_transferred'].includes(evt.kind);
-      });
-      if (filtered.length < events.length) {
-        await updateDoc(analysisRef, { events: filtered, count: filtered.length });
-      }
-    }
   } catch (err) {
     // No bloquear la baja si falla la limpieza de alertas
     logManualChange('alert_cleanup_error', `Error limpiando alertas al dar de baja a ${userAlias}: ${err.message}`, {
@@ -614,7 +599,7 @@ export async function updateLankAccount(serviceKey, accountId, fields) {
   await updateDoc(ref, fields);
 }
 
-export async function completeUnidentifiedAlert(alertId, serviceKey, accountId, userName, assignedTo, currentUsers, isAnalysisEvent = false) {
+export async function completeUnidentifiedAlert(alertId, serviceKey, accountId, userName, assignedTo, currentUsers) {
   const { getDoc: getDocument } = await import('firebase/firestore');
 
   // 1. Actualizar el array de usuarios en el grupo Lank
@@ -686,33 +671,8 @@ export async function completeUnidentifiedAlert(alertId, serviceKey, accountId, 
     }
   }
 
-  // 3. Si es un evento de análisis, eliminarlo del array en analysis/actionable-events
-  if (isAnalysisEvent) {
-    const analysisRef = doc(db, 'analysis', 'actionable-events');
-    const analysisSnap = await getDocument(analysisRef);
-    if (analysisSnap.exists()) {
-      const events = analysisSnap.data().events || [];
-      const filteredEvents = events.filter(evt => {
-        const evtAlias = (evt.userName || '').toLowerCase();
-        const evtAccId = String(evt.accountId);
-        const evtSvc = (evt.subscription || '').toLowerCase();
-        // Eliminar el evento que coincida con este usuario/cuenta/servicio
-        return !(
-          (evtAlias === 'usuario no informado' || evtAlias === '?') &&
-          evtAccId === String(accountId) &&
-          (normalize(evt.subscription) === normalize(serviceKey) ||
-           getServiceKeyByName(evt.subscription) === serviceKey)
-        );
-      });
-      await updateDoc(analysisRef, {
-        events: filteredEvents,
-        count: filteredEvents.length,
-      });
-    }
-  }
-
-  // 4. Si es alerta de Firestore (no análisis), marcarla como completada
-  if (!isAnalysisEvent && alertId) {
+  // 3. Marcar la alerta como completada
+  if (alertId) {
     const alertRef = doc(db, 'alerts', alertId);
     await updateDoc(alertRef, {
       status: 'completed',
@@ -797,41 +757,6 @@ export async function completeMissingPhone(alertId, accountId, userAlias, phone,
     status: 'completed',
     completedAt: nowISO(),
     phone: cleanPhone,
-  });
-}
-
-/**
- * Elimina un evento de análisis del array analysis/actionable-events.
- * Usado cuando se completa o descarta manualmente una alerta de análisis.
- * 
- * @param {number} eventIndex - Índice del evento en el array
- * @param {object} [eventData] - Datos del evento para match alternativo
- */
-export async function removeAnalysisEvent(eventIndex, eventData = {}) {
-  const { getDoc: getDocument } = await import('firebase/firestore');
-  const analysisRef = doc(db, 'analysis', 'actionable-events');
-  const snap = await getDocument(analysisRef);
-  if (!snap.exists()) return;
-
-  const events = snap.data().events || [];
-  let filteredEvents;
-
-  if (eventIndex >= 0 && eventIndex < events.length) {
-    filteredEvents = events.filter((_, i) => i !== eventIndex);
-  } else if (eventData.userName && eventData.accountId) {
-    filteredEvents = events.filter(evt => {
-      return !(
-        normalize(evt.userName) === normalize(eventData.userName) &&
-        String(evt.accountId) === String(eventData.accountId)
-      );
-    });
-  } else {
-    return; // No hay suficiente info para eliminar
-  }
-
-  await updateDoc(analysisRef, {
-    events: filteredEvents,
-    count: filteredEvents.length,
   });
 }
 

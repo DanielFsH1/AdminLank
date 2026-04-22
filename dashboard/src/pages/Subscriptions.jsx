@@ -162,17 +162,20 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  }
  }, [navData]);
 
- // Cargar eventos accionables
+ // Derivar aliases con acción pendiente desde alertas pendientes
  useEffect(() => {
  async function loadPendingUsers() {
       try {
-        const eventsSnap = await getDoc(doc(db, 'analysis', 'actionable-events'));
-        if (eventsSnap.exists()) {
-          const events = eventsSnap.data().events || [];
-          const aliases = new Set(events.map(e => (e.userName || '').toLowerCase()).filter(Boolean));
-          setPendingUserAliases(aliases);
-        }
-      } catch (err) { console.error('Error cargando eventos pendientes:', err); }
+        const { query, where, getDocs: fetchDocs } = await import('firebase/firestore');
+        const q = query(collection(db, 'alerts'), where('status', '==', 'pending'));
+        const snap = await fetchDocs(q);
+        const aliases = new Set();
+        snap.docs.forEach(d => {
+          const alias = (d.data().userAlias || '').toLowerCase();
+          if (alias) aliases.add(alias);
+        });
+        setPendingUserAliases(aliases);
+      } catch (err) { console.error('Error cargando alertas pendientes:', err); }
  }
  loadPendingUsers();
  }, []);

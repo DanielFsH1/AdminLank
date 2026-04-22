@@ -16,6 +16,7 @@ import unicodedata
 import traceback
 from datetime import datetime, timedelta, timezone
 from email import message_from_bytes
+from uuid import uuid4
 
 from firebase_functions import https_fn, scheduler_fn, options
 from firebase_admin import initialize_app, firestore
@@ -26,6 +27,7 @@ import lank_alerts
 import lank_agent_review
 import lank_audit
 import lank_telegram
+from alert_pipeline import build_direct_alerts
 
 app = initialize_app()
 
@@ -34,6 +36,7 @@ IGNORED_EVENT_KINDS = {'payment_user', 'payment_cashback', 'monthly_summary', 'c
 JOIN_EVENT_KINDS = {'user_join_direct', 'user_join_transferred'}
 LEAVE_EVENT_KINDS = {'user_left_self', 'user_left_transferred'}
 WITHDRAWAL_EVENT_KINDS = {'withdrawal_requested', 'withdrawal_completed'}
+ROUTINE_INFO_EVENT_KINDS = {'group_validated', 'cashback_validated', 'monthly_summary'}
 # Servicios donde altas/bajas de usuarios no requieren acción administrativa
 # (no hay cuentas reales que gestionar, solo se monitorean renovaciones)
 # Se deriva dinámicamente desde config/services (usesPool == false)
@@ -264,50 +267,6 @@ def load_system_flags(db):
     return {}
 
 
-def emit_pending_event(db, event_data, enrichment=None):
-    """Write an enriched event to pending-events/ for AdminBot to process.
-
-    Args:
-        db: Firestore client.
-        event_data: Dict with kind, accountId, accountAlias, userName, userEmail,
-                    service, category, action, reason, date, etc.
-        enrichment: Optional dict with serviceAccountRef, otherUsers,
-                    realAccountEmail, realAccountExpires, realAccountStatus,
-                    groupStatus, matchesCurrent, matchesStale.
-    Returns:
-        The document ID of the created pending event.
-    """
-    import uuid as _uuid
-    event_id = f'evt_{_uuid.uuid4().hex[:12]}'
-    now = datetime.now(timezone.utc).isoformat()
-
-    doc = {
-        'eventId': event_id,
-        'kind': event_data.get('kind'),
-        'accountId': event_data.get('accountId'),
-        'accountAlias': event_data.get('accountAlias'),
-        'userName': event_data.get('userName'),
-        'userEmail': event_data.get('userEmail'),
-        'service': event_data.get('service'),
-        'serviceKey': event_data.get('serviceKey'),
-        'category': event_data.get('category'),
-        'action': event_data.get('action'),
-        'reason': event_data.get('reason'),
-        'emailDate': event_data.get('date'),
-        'emailUid': event_data.get('uid'),
-        'messageId': event_data.get('messageId'),
-        'analysisGeneratedAt': event_data.get('analysisGeneratedAt'),
-        'status': 'new',
-        'source': 'cloud_function',
-        'createdAt': now,
-    }
-
-    if enrichment:
-        doc['enrichment'] = enrichment
-
-    db.collection('pending-events').document(event_id).set(doc)
-    return event_id
-
 
 def save_analysis_state(db, state):
     db.document('analysis/state').set(state)
@@ -328,10 +287,13 @@ def load_alerts_from_firestore(db):
             'completedAlerts': [a for a in alerts if a.get('status') in ('completed', 'done', 'discarded', 'cancelled_by_ai', 'resolved')]}
 
 
-def save_alert_to_firestore(db, alert):
-    aid = alert.get('id')
-    if aid:
-        db.collection('alerts').document(aid).set(alert, merge=True)
+def save_alert_to_firestore(db, alert, created_at=None):
+    stored_alert = dict(alert)
+    aid = stored_alert.get('id') or stored_alert.get('_docId') or f"alert_{uuid4().hex[:12]}"
+    stored_alert['id'] = aid
+    stored_alert.setdefault('createdAt', created_at or datetime.now(timezone.utc).isoformat())
+    db.collection('alerts').document(aid).set(stored_alert, merge=True)
+    return stored_alert
 
 
 # ────────────────────────── USER MATCHING ───────────────────────────
@@ -584,132 +546,58 @@ def rebuild_summary(events):
     return summary
 
 
-def merge_actionable_events(db, new_events, generated_at):
-    """Merge new events with existing ones.
-    Existing pending/review events are kept unless their alert has been completed/discarded.
-    Info events are kept for 7 days then auto-cleaned.
-    New events are added if they don't duplicate existing ones.
-    """
-    # Load existing events
-    existing_doc = db.document('analysis/actionable-events').get()
-    existing_events = []
-    if existing_doc.exists:
-        existing_events = existing_doc.to_dict().get('events', [])
+def should_send_external_notice(event, review):
+    if review.get('category') != 'info':
+        return False
 
-    # Load all alerts to check which events are resolved
-    resolved_keys = set()
-    try:
-        for doc in db.collection('alerts').stream():
-            a = doc.to_dict()
-            if a.get('status') in ('completed', 'done', 'discarded', 'cancelled_by_ai', 'resolved'):
-                # Build a key to match against events
-                s = a.get('service', '')
-                aid = str(a.get('accountId', ''))
-                u = a.get('userAlias', '')
-                resolved_keys.add(f"{s}|{aid}|{u}")
-    except Exception:
-        pass
+    kind = event.get('kind')
+    service = review.get('service') or event.get('service') or event.get('subscription')
+    if kind in ROUTINE_INFO_EVENT_KINDS:
+        return False
+    if service in UNMANAGED_JOIN_LEAVE_SERVICES and kind in (JOIN_EVENT_KINDS | LEAVE_EVENT_KINDS):
+        return False
 
-    # Filter out resolved events from existing
-    def event_key(ev):
-        return f"{ev.get('subscription', '')}|{ev.get('accountId', '')}|{ev.get('userName', '')}"
+    return review.get('notifyExternally') is True
 
-    # Clean up old info events (older than 7 days)
-    cutoff_7d = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-
-    kept = []
-    for e in existing_events:
-        if event_key(e) in resolved_keys:
-            continue
-        # Auto-expire info events after 7 days
-        if e.get('category') == 'info':
-            discovered = e.get('discoveredAt', e.get('date', ''))
-            if discovered and discovered < cutoff_7d:
-                continue
-        kept.append(e)
-
-    # Tag new info events with discoveredAt for TTL
-    for ne in new_events:
-        if ne.get('category') == 'info' and 'discoveredAt' not in ne:
-            ne['discoveredAt'] = generated_at
-
-    # Add new events that aren't duplicates of existing ones
-    existing_keys = {event_key(e) for e in kept}
-    for ne in new_events:
-        k = event_key(ne)
-        if k not in existing_keys and k not in resolved_keys:
-            kept.append(ne)
-            existing_keys.add(k)
-
-    # Sort by date descending
-    kept.sort(key=lambda e: e.get('date', ''), reverse=True)
-
-    db.document('analysis/actionable-events').set({
-        'count': len(kept),
-        'events': kept,
-        'generatedAt': generated_at,
-    })
-    return kept
 
 
 def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=None,
-                                  system_flags=None, generated_at=None):
-    """Generate alerts for analyzed accounts.
-
-    When system_flags['useNewEventPipeline'] is truthy, operational events
-    (user_left, user_join, group_deactivated) are emitted as pending-events
-    for AdminBot instead of generating legacy alerts.  Group-state updates and
-    agent findings are also skipped so AdminBot handles them.
-
-    Pending events are ALWAYS emitted regardless of the flag, enabling a
-    dual-mode transition period.
-
-    Returns:
-        (alerts_generated, updated_services, actionable_events, agent_findings,
-         pending_events_emitted)
-    """
-    flags = system_flags or {}
-    skip_legacy = flags.get('useNewEventPipeline', False)
-
+                                  generated_at=None):
     alerts_generated = 0
     updated_services = {}
-    actionable = []
+    external_notices = []
     agent_findings = []
-    pending_events_emitted = 0
 
     for account_result in ok_accounts:
         if account_result['access'] != 'ok':
             continue
         for evt_row in account_result['events']:
-            evt = evt_row.get('event', {})
+            evt = dict(evt_row.get('event', {}))
             kind = evt.get('kind', '')
-            service = evt_row.get('dbReview', {}).get('service') or evt.get('subscription')
+            review = evt_row.get('dbReview', {})
+            service = review.get('service') or evt.get('subscription')
             a_id = account_result['accountId']
             alias = account_result.get('accountAlias', '')
             user_alias = evt.get('userName', '?')
+            cat = review.get('category', '')
 
             if not service:
                 continue
 
-            cat = evt_row.get('dbReview', {}).get('category', '')
+            evt['accountId'] = a_id
+            evt['accountAlias'] = alias
+            evt['service'] = service
+            evt['date'] = evt_row.get('date', '')
+            evt['uid'] = evt_row.get('uid')
+            evt['messageId'] = evt_row.get('messageId')
 
-            # Build event entry (pending, review, and info -  all non-ignored events)
-            # Skip kinds that already generate formal alerts to avoid duplicates
-            if cat in ('pending', 'review', 'info') and kind not in ('group_deactivated',):
-                actionable.append({
-                    'accountId': a_id,
-                    'accountAlias': alias,
-                    'userName': evt.get('userName') or 'usuario no informado',
-                    'subscription': service,
-                    'kind': kind,
-                    'category': cat,
-                    'action': evt_row.get('dbReview', {}).get('action', ''),
-                    'reason': evt_row.get('dbReview', {}).get('reason', ''),
-                    'date': evt_row.get('date', ''),
-                })
+            enrichment = {
+                'groupStatus': review.get('dbGroupStatus'),
+                'matchesCurrent': review.get('matchesCurrent', []),
+                'matchesStale': review.get('matchesStale', []),
+            }
 
             if kind in ('user_left_self', 'user_left_transferred'):
-                # Lookup serviceAccountRef
                 svc_ref = None
                 other_users = []
                 fs_key = SERVICE_TO_FS.get(service)
@@ -728,7 +616,6 @@ def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=N
                     except Exception:
                         pass
 
-                # Lookup real account details
                 real_email = None
                 real_expires = None
                 real_status = None
@@ -741,39 +628,6 @@ def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=N
                             real_status = pacc.get('status', '')
                             break
 
-                # ── Emit pending event (always) ──
-                enrichment = {
-                    'serviceAccountRef': svc_ref,
-                    'otherUsers': other_users,
-                    'realAccountEmail': real_email,
-                    'realAccountExpires': real_expires,
-                    'realAccountStatus': real_status,
-                    'groupStatus': evt_row.get('dbReview', {}).get('dbGroupStatus'),
-                    'matchesCurrent': evt_row.get('dbReview', {}).get('matchesCurrent', []),
-                    'matchesStale': evt_row.get('dbReview', {}).get('matchesStale', []),
-                }
-                emit_pending_event(db, {
-                    'kind': kind,
-                    'accountId': a_id,
-                    'accountAlias': alias,
-                    'userName': user_alias,
-                    'userEmail': evt.get('userEmail'),
-                    'service': service,
-                    'serviceKey': fs_key,
-                    'category': cat,
-                    'action': evt_row.get('dbReview', {}).get('action', ''),
-                    'reason': evt_row.get('dbReview', {}).get('reason', ''),
-                    'date': evt_row.get('date', ''),
-                    'uid': evt_row.get('uid'),
-                    'messageId': evt_row.get('messageId'),
-                    'analysisGeneratedAt': generated_at,
-                }, enrichment=enrichment)
-                pending_events_emitted += 1
-
-                if skip_legacy:
-                    continue
-
-                # ── Legacy: update group state ──
                 leave_reason = 'Salida voluntaria.' if kind == 'user_left_self' else 'Transferido fuera del grupo.'
                 group_updated = update_group_on_leave(db, service, a_id, user_alias, leave_reason)
                 if group_updated:
@@ -789,111 +643,53 @@ def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=N
                         )
                     )
 
-                # ── Legacy: generate alerts ──
-                if cat not in ('pending', 'review'):
-                    continue
-                if (lank_alerts.find_duplicate(alerts_data['alerts'], 'profile_delete', service, a_id, user_alias)
-                    or lank_alerts.find_duplicate(alerts_data['alerts'], 'user_left_expired', service, a_id, user_alias)):
-                    continue
-                if not svc_ref:
-                    continue
-                if real_status and real_status.startswith('legacy'):
-                    continue
+                enrichment = {
+                    **enrichment,
+                    'serviceAccountRef': svc_ref,
+                    'otherUsers': other_users,
+                    'realAccountEmail': real_email,
+                    'realAccountExpires': real_expires,
+                    'realAccountStatus': real_status,
+                }
 
-                evt_with_date = dict(evt)
-                evt_with_date['date'] = evt_row.get('date', '')
-                new_alerts = lank_alerts.generate_user_left_alerts(
-                    evt_with_date, service, a_id, alias, svc_ref, other_users,
-                    real_account_email=real_email, real_account_expires=real_expires,
-                    services_config=services_config
-                )
-                for na in new_alerts:
-                    save_alert_to_firestore(db, na)
-                alerts_data['alerts'].extend(new_alerts)
-                alerts_generated += len(new_alerts)
+            direct_alerts = build_direct_alerts(
+                event=evt,
+                review=review,
+                notification_doc_id=f'notification_{a_id}_{evt_row.get("uid")}',
+                generated_at=generated_at or datetime.now(timezone.utc).isoformat(),
+                existing_alerts=alerts_data['alerts'],
+                enrichment=enrichment,
+                services_config=services_config,
+            )
+            existing_business_keys = {
+                alert.get('businessKey')
+                for alert in alerts_data['alerts']
+                if alert.get('businessKey')
+            }
+            for direct_alert in direct_alerts:
+                business_key = direct_alert.get('businessKey')
+                if business_key and business_key in existing_business_keys:
+                    continue
+                stored_alert = save_alert_to_firestore(db, direct_alert, created_at=generated_at)
+                alerts_data['alerts'].append(stored_alert)
+                if business_key:
+                    existing_business_keys.add(business_key)
+                alerts_generated += 1
 
-            elif kind in ('user_join_direct', 'user_join_transferred'):
-                # ── Emit pending event (always) ──
-                fs_key = SERVICE_TO_FS.get(service)
-                emit_pending_event(db, {
-                    'kind': kind,
+            if should_send_external_notice(evt, review):
+                external_notices.append({
                     'accountId': a_id,
                     'accountAlias': alias,
-                    'userName': user_alias if user_alias and user_alias != '?' else 'usuario no informado',
-                    'userEmail': evt.get('userEmail'),
-                    'service': service,
-                    'serviceKey': fs_key,
-                    'category': cat,
-                    'action': evt_row.get('dbReview', {}).get('action', ''),
-                    'reason': evt_row.get('dbReview', {}).get('reason', ''),
-                    'date': evt_row.get('date', ''),
-                    'uid': evt_row.get('uid'),
-                    'messageId': evt_row.get('messageId'),
-                    'analysisGeneratedAt': generated_at,
-                }, enrichment={
-                    'groupStatus': evt_row.get('dbReview', {}).get('dbGroupStatus'),
-                    'matchesCurrent': evt_row.get('dbReview', {}).get('matchesCurrent', []),
-                    'matchesStale': evt_row.get('dbReview', {}).get('matchesStale', []),
-                })
-                pending_events_emitted += 1
-
-                if skip_legacy:
-                    continue
-
-                # ── Legacy: generate alerts ──
-                if cat in ('pending', 'review'):
-                    user_alias_join = user_alias if user_alias and user_alias != '?' else 'usuario no informado'
-                    if not lank_alerts.find_duplicate(alerts_data['alerts'], 'user_needs_access', service, a_id, user_alias_join):
-                        evt_copy = dict(evt)
-                        evt_copy['date'] = evt_row.get('date', '')
-                        if not evt_copy.get('userName'):
-                            evt_copy['userName'] = 'usuario no informado'
-                        new_alert = lank_alerts.generate_user_joined_alert(evt_copy, service, a_id, alias)
-                        if cat == 'review':
-                            new_alert['title'] = 'Dar acceso (revisar nombre)'
-                            new_alert['description'] = (
-                                f'Un usuario se unio al grupo de {service} '
-                                f'(cuenta Lank #{a_id} {alias}). '
-                                f'El correo no indica el nombre. Revisar manualmente.'
-                            )
-                        save_alert_to_firestore(db, new_alert)
-                        alerts_data['alerts'].append(new_alert)
-                        alerts_generated += 1
-
-            elif kind == 'group_deactivated':
-                # ── Emit pending event (always) ──
-                fs_key = SERVICE_TO_FS.get(service)
-                emit_pending_event(db, {
+                    'userName': evt.get('userName') or 'usuario no informado',
+                    'subscription': service,
                     'kind': kind,
-                    'accountId': a_id,
-                    'accountAlias': alias,
-                    'userName': user_alias,
-                    'userEmail': evt.get('userEmail'),
-                    'service': service,
-                    'serviceKey': fs_key,
                     'category': cat,
-                    'action': evt_row.get('dbReview', {}).get('action', ''),
-                    'reason': evt_row.get('dbReview', {}).get('reason', ''),
+                    'action': review.get('action', ''),
+                    'reason': review.get('reason', ''),
                     'date': evt_row.get('date', ''),
-                    'uid': evt_row.get('uid'),
-                    'messageId': evt_row.get('messageId'),
-                    'analysisGeneratedAt': generated_at,
                 })
-                pending_events_emitted += 1
 
-                if skip_legacy:
-                    continue
-
-                # ── Legacy: generate alerts ──
-                if not lank_alerts.find_duplicate(alerts_data['alerts'], 'group_deactivated', service, a_id, None):
-                    evt_with_date = dict(evt)
-                    evt_with_date['date'] = evt_row.get('date', '')
-                    new_alert = lank_alerts.generate_group_deactivated_alert(evt_with_date, service, a_id, alias)
-                    save_alert_to_firestore(db, new_alert)
-                    alerts_data['alerts'].append(new_alert)
-                    alerts_generated += 1
-
-    return alerts_generated, updated_services, actionable, agent_findings, pending_events_emitted
+    return alerts_generated, updated_services, external_notices, agent_findings
 
 
 # ────────────────────────── IMAP ANALYSIS ───────────────────────────
@@ -1077,6 +873,21 @@ def save_notifications(db, account_id, alias, raw_emails, analysis_timestamp=Non
             'updatedAt': now.isoformat(),
             'count': len(existing),
         })
+
+
+def purge_legacy_event_state(db):
+    db.document('analysis/actionable-events').delete()
+    batch = db.batch()
+    count = 0
+    for snap in db.collection('pending-events').stream():
+        batch.delete(snap.reference)
+        count += 1
+        if count % 200 == 0:
+            batch.commit()
+            batch = db.batch()
+    if count % 200:
+        batch.commit()
+
 
 
 def cleanup_old_data(db):
@@ -1553,10 +1364,11 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
         # Save report to Firestore
         ok_accounts = [a for a in report['accounts'] if a['access'] == 'ok']
 
-        # Generate alerts and build actionable events using shared function
-        alerts_generated, updated_services, actionable, agent_findings, pending_events_emitted = generate_alerts_for_accounts(
+        purge_legacy_event_state(db)
+
+        alerts_generated, updated_services, external_notices, agent_findings = generate_alerts_for_accounts(
             db, ok_accounts, alerts_data, services_config=services_config,
-            system_flags=system_flags, generated_at=report['generatedAt'],
+            generated_at=report['generatedAt'],
         )
 
         # Save analysis state AFTER alert generation so a crash during alerts
@@ -1604,9 +1416,6 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
             } for a in failed_accounts],
         })
 
-        # Merge actionable events -  accumulate, don't overwrite
-        merged = merge_actionable_events(db, actionable, report['generatedAt'])
-
         # Update finance documents from withdrawal events
         finance_records = 0
         try:
@@ -1628,7 +1437,6 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
             'alertsGenerated': alerts_generated,
             'financeRecordsUpdated': finance_records,
             'generatedAt': report['generatedAt'],
-            'pendingEventsEmitted': pending_events_emitted,
         }
 
         # Detectar usuarios sin fecha de renovación en servicios renewal-based
@@ -1718,26 +1526,18 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
                     except Exception as fb_err:
                         print(f'[Telegram] Error en fallback de alertas recientes: {fb_err}')
 
-                # 3. Actionable-events como último recurso
-                if not notified:
-                    try:
-                        ae_doc = db.document('analysis/actionable-events').get()
-                        if ae_doc.exists:
-                            ae_events = ae_doc.to_dict().get('events', [])
-                            if ae_events:
-                                pseudo_alerts = []
-                                for evt in ae_events:
-                                    pseudo_alerts.append({
-                                        'title': f"{evt.get('userName', '?')} -  {evt.get('subscription', '?')}",
-                                        'description': evt.get('action', 'Acción requerida'),
-                                        'priority': 'high' if 'join' in evt.get('kind', '') else 'medium',
-                                        'service': evt.get('subscription', '?'),
-                                        'accountId': evt.get('accountId', '?'),
-                                        'accountAlias': evt.get('accountAlias', '?'),
-                                    })
-                                tg.send_alert_notification(pseudo_alerts)
-                    except Exception as ae_err:
-                        print(f'[Telegram] Error leyendo actionable-events: {ae_err}')
+                if external_notices:
+                    pseudo_alerts = []
+                    for evt in external_notices:
+                        pseudo_alerts.append({
+                            'title': f"{evt.get('userName', '?')} - {evt.get('subscription', '?')}",
+                            'description': evt.get('action', 'Acción requerida'),
+                            'priority': 'high' if 'join' in evt.get('kind', '') else 'medium',
+                            'service': evt.get('subscription', '?'),
+                            'accountId': evt.get('accountId', '?'),
+                            'accountAlias': evt.get('accountAlias', '?'),
+                        })
+                    tg.send_alert_notification(pseudo_alerts)
 
                 # Notificar cuentas con error
                 if failed_accounts:
@@ -2302,10 +2102,11 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
     # Save report
     ok_accounts = [a for a in report['accounts'] if a['access'] == 'ok']
 
-    # Generate alerts and build actionable events using shared function
-    alerts_generated, _, actionable, agent_findings, pending_events_emitted = generate_alerts_for_accounts(
+    purge_legacy_event_state(db)
+
+    alerts_generated, _, external_notices, agent_findings = generate_alerts_for_accounts(
         db, ok_accounts, alerts_data, services_config=services_config,
-        system_flags=system_flags, generated_at=report['generatedAt'],
+        generated_at=report['generatedAt'],
     )
 
     # Save analysis state AFTER alert generation so a crash during alerts
@@ -2344,9 +2145,6 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
             'error': a.get('error', 'Error desconocido'),
         } for a in failed_accounts],
     })
-
-    # Merge actionable events -  accumulate, don't overwrite
-    merge_actionable_events(db, actionable, report['generatedAt'])
 
     # Update finance documents from withdrawal events
     try:
@@ -2409,7 +2207,7 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
         print(f'SIM recharge alerts generated: {sim_alert_count}')
         alerts_generated += sim_alert_count
 
-    print(f'Scheduled analysis complete: {len(ok_accounts)} accounts, {alerts_generated} alerts, {pending_events_emitted} pending events emitted.')
+    print(f'Scheduled analysis complete: {len(ok_accounts)} accounts, {alerts_generated} alerts.')
 
     schedule_config = load_schedule_config(db)
     agent_review = lank_agent_review.build_review_document(
@@ -2467,26 +2265,18 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
                 except Exception as fb_err:
                     print(f'[Telegram] Error en fallback de alertas recientes: {fb_err}')
 
-            # 3. Actionable-events como último recurso
-            if not notified:
-                try:
-                    ae_doc = db.document('analysis/actionable-events').get()
-                    if ae_doc.exists:
-                        ae_events = ae_doc.to_dict().get('events', [])
-                        if ae_events:
-                            pseudo_alerts = []
-                            for evt in ae_events:
-                                pseudo_alerts.append({
-                                    'title': f"{evt.get('userName', '?')} -  {evt.get('subscription', '?')}",
-                                    'description': evt.get('action', 'Acción requerida'),
-                                    'priority': 'high' if 'join' in evt.get('kind', '') else 'medium',
-                                    'service': evt.get('subscription', '?'),
-                                    'accountId': evt.get('accountId', '?'),
-                                    'accountAlias': evt.get('accountAlias', '?'),
-                                })
-                            tg.send_alert_notification(pseudo_alerts)
-                except Exception as ae_err:
-                    print(f'[Telegram] Error leyendo actionable-events: {ae_err}')
+            if external_notices:
+                pseudo_alerts = []
+                for evt in external_notices:
+                    pseudo_alerts.append({
+                        'title': f"{evt.get('userName', '?')} - {evt.get('subscription', '?')}",
+                        'description': evt.get('action', 'Acción requerida'),
+                        'priority': 'high' if 'join' in evt.get('kind', '') else 'medium',
+                        'service': evt.get('subscription', '?'),
+                        'accountId': evt.get('accountId', '?'),
+                        'accountAlias': evt.get('accountAlias', '?'),
+                    })
+                tg.send_alert_notification(pseudo_alerts)
 
             if failed_accounts:
                 tg.send_analysis_errors([{

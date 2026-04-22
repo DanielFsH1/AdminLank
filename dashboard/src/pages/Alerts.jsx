@@ -3,7 +3,8 @@ import { useCollection } from '../hooks/useFirestore';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { getServiceMeta, getServiceKeyByName, getPoolServiceKeys, getAllServiceKeys } from '../config/services';
-import { completeAlert, discardAlert, completeUnidentifiedAlert, removeGroupUser, completeM365Renewal, completeMissingPhone, removeAnalysisEvent } from '../hooks/firestoreActions';
+import { completeAlert, discardAlert, completeUnidentifiedAlert, removeGroupUser, completeM365Renewal, completeMissingPhone } from '../hooks/firestoreActions';
+
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
 import { BellIcon, CalendarIcon, CelebrationIcon, ChatIcon, CheckCircleIcon, ClipboardIcon, CreditCardIcon, DotBlue, DotOrange, DotRed, DotYellow, EditIcon, EmailIcon, EmptyMailIcon, HourglassIcon, KeyIcon, LinkIcon, LockKeyIcon, PhoneIcon, PinIcon, SearchIcon, SparkleIcon, TargetIcon, TrashIcon, WarningIcon, XCircleIcon } from '../components/Icons';
 import SearchBar from '../components/SearchBar';
@@ -79,7 +80,6 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  const [activeTab, setActiveTab] = useState('pending');
  const [filterPriority, setFilterPriority] = useState('all');
  const [searchQuery, setSearchQuery] = useState('');
- const [analysisEvents, setAnalysisEvents] = useState([]);
  const [realAccounts, setRealAccounts] = useState({});
  const [groupUsers, setGroupUsers] = useState({}); // {serviceKey_accountId: [users]}
  const [liveAccountNames, setLiveAccountNames] = useState({}); // {accountId: currentAlias}
@@ -99,10 +99,8 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  }, []);
 
  useEffect(() => {
- async function fetchAnalysis() {
+ async function fetchRealAccounts() {
       try {
-        const eventsSnap = await getDoc(doc(db, 'analysis', 'actionable-events'));
-        if (eventsSnap.exists()) setAnalysisEvents(eventsSnap.data().events || []);
         const serviceKeys = getPoolServiceKeys();
         const realAcctMap = {};
         for (const svc of serviceKeys) {
@@ -112,9 +110,9 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
           } catch { realAcctMap[svc] = []; }
         }
         setRealAccounts(realAcctMap);
-      } catch (err) { console.error('Error cargando eventos de análisis:', err); }
+      } catch (err) { console.error('Error cargando cuentas reales:', err); }
  }
- fetchAnalysis();
+ fetchRealAccounts();
  }, []);
 
  // Cargar usuarios de grupos Lank cuando hay alertas pendientes
@@ -125,11 +123,6 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
       for (const a of pendingAlerts) {
         const svcKey = serviceNameToKey(a.service) || parseServiceKey(a.serviceAccountRef);
         if (svcKey && a.accountId) toFetch.add(`${svcKey}_${a.accountId}`);
-      }
-      // También de eventos de análisis
-      for (const evt of analysisEvents) {
-        const svcKey = serviceNameToKey(evt.subscription);
-        if (svcKey && evt.accountId) toFetch.add(`${svcKey}_${evt.accountId}`);
       }
 
       const usersMap = {};
@@ -145,8 +138,8 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
         setGroupUsers(prev => ({ ...prev, ...usersMap }));
       }
  }
- if (alerts.length > 0 || analysisEvents.length > 0) fetchGroupUsers();
- }, [alerts, analysisEvents]);
+ if (alerts.length > 0) fetchGroupUsers();
+ }, [alerts]);
 
  // Resolver nombres actuales de cuentas Lank (evitar alias stale en alertas)
  useEffect(() => {
@@ -154,9 +147,6 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
      const accountIds = new Set();
      for (const a of alerts) {
        if (a.accountId != null && a.accountId !== '') accountIds.add(String(a.accountId));
-     }
-     for (const evt of analysisEvents) {
-       if (evt.accountId != null && evt.accountId !== '') accountIds.add(String(evt.accountId));
      }
      if (accountIds.size === 0) return;
      const namesMap = {};
@@ -175,7 +165,7 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
      }
    }
    fetchLiveAccountNames();
- }, [alerts, analysisEvents]);
+ }, [alerts]);
 
  // Obtener cuentas reales disponibles para asignación
  const getAvailableRealAccounts = useCallback((serviceKey) => {
@@ -199,49 +189,12 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  return null;
  };
 
- const analysisAlerts = useMemo(() => {
- return analysisEvents.map((evt, i) => {
-      const svcKey = serviceNameToKey(evt.subscription);
-      const accountRef = svcKey ? findRealAccountForUser(svcKey, evt.userName) : null;
-      return {
-        id: `analysis-evt-${i}`,
-        firestoreId: `analysis-evt-${i}`,
-        title: `${evt.userName || '?'} — ${evt.subscription || '?'}`,
-        description: evt.action || 'Acción requerida',
-        type: KIND_TO_TYPE[evt.kind] || 'access_verify',
-        priority: KIND_TO_PRIORITY[evt.kind] || 'medium',
-        status: 'pending',
-        accountId: evt.accountId,
-        accountAlias: evt.accountAlias,
-        userAlias: evt.userName,
-        service: evt.subscription,
-        serviceAccountRef: accountRef,
-        createdAt: evt.date,
-        source: 'análisis automático',
-        _isAnalysis: true,
-        _serviceKey: svcKey,
-      };
- });
- }, [analysisEvents, realAccounts]);
-
- // Normalizar alias para dedup: null/undefined/?/usuario no informado → ''
- const normalizeAlias = (v) => (!v || v === '?' || v === 'usuario no informado' || v === 'desconocido') ? '' : v.toLowerCase();
-
  const categorized = useMemo(() => {
- const allPending = [
-      ...alerts.filter(a => a.status === 'pending'),
-      ...analysisAlerts.filter(ae => {
-        return !alerts.some(a =>
-          normalizeAlias(a.userAlias) === normalizeAlias(ae.userAlias) &&
-          String(a.accountId) === String(ae.accountId) &&
-          a.service === ae.service
-        );
-      }),
- ];
+ const pending = alerts.filter(a => a.status === 'pending');
  const completed = alerts.filter(a => a.status === 'completed' || a.status === 'done');
  const discarded = alerts.filter(a => a.status === 'discarded' || a.status === 'cancelled_by_ai' || a.status === 'cancelled_by_system' || a.status === 'resolved');
- return { pending: allPending, completed, discarded };
- }, [alerts, analysisAlerts]);
+ return { pending, completed, discarded };
+ }, [alerts]);
 
  const groupedAlerts = useMemo(() => {
  let list = categorized[activeTab] || [];
@@ -333,10 +286,6 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  // Si se hizo clic en un botón de acción, no navegar
  if (e?.target?.closest('.alert-actions')) return;
  if (!onNavigate) return;
- if (alert._isAnalysis && alert._serviceKey) {
-      onNavigate('subscriptions', { service: alert._serviceKey, accountRef: alert.serviceAccountRef, highlightUser: alert.userAlias });
-      return;
- }
  if (alert.accountId) {
       if (alert.serviceAccountRef || alert.service) {
         const svcKey = serviceNameToKey(alert.service) || parseServiceKey(alert.serviceAccountRef);
@@ -374,13 +323,7 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  if (!confirmComplete) return;
  const { alert } = confirmComplete;
  try {
-      if (alert._isAnalysis) {
-        // Eliminar evento de analysis/actionable-events
-        const evtIdx = parseInt((alert.id || '').replace('analysis-evt-', ''));
-        await removeAnalysisEvent(evtIdx, { userName: alert.userAlias, accountId: alert.accountId });
-      } else {
-        await completeAlert(alert.id || alert.firestoreId);
-      }
+      await completeAlert(alert.id || alert.firestoreId);
       showToast(` Alerta completada: ${alert.title}`);
  } catch (err) {
       showToast(`Error: ${err.message}`, 'error');
@@ -451,20 +394,13 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  setDiscardModal({
       alertId: alert.id || alert.firestoreId,
       title: alert.title,
-      _isAnalysis: !!alert._isAnalysis,
-      _analysisEvtIdx: alert._isAnalysis ? parseInt((alert.id || '').replace('analysis-evt-', '')) : -1,
-      _analysisData: alert._isAnalysis ? { userName: alert.userAlias, accountId: alert.accountId } : null,
  });
  };
 
  const handleDiscardConfirm = async (values) => {
  if (!discardModal) return;
  try {
-      if (discardModal._isAnalysis) {
-        await removeAnalysisEvent(discardModal._analysisEvtIdx, discardModal._analysisData);
-      } else {
-        await discardAlert(discardModal.alertId, values.reason);
-      }
+      await discardAlert(discardModal.alertId, values.reason);
       showToast(`Alerta descartada: ${discardModal.title}`);
  } catch (err) {
       showToast(`Error: ${err.message}`, 'error');
@@ -498,7 +434,6 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
         values.userName,
         values.assignedTo,
         users,
-        !!alert._isAnalysis, // flag para eventos de análisis
       );
       showToast(` Usuario identificado: ${values.userName}${values.assignedTo ? ` → asignado a ${values.assignedTo}` : ''}`);
  } catch (err) {

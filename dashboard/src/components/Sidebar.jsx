@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
-import { useCollection, useDocument } from '../hooks/useFirestore';
+import { useCollection } from '../hooks/useFirestore';
 import { BarChartIcon, KeyIcon, UsersIcon, BellIcon, MoneyIcon, AnalyzeIcon, LockIcon, ToolboxIcon, DoorIcon } from './Icons';
 
 // SIM Card icon for sidebar
@@ -47,25 +47,10 @@ const SYSTEM_ITEMS = [
 
 export default function Sidebar({ activeTab, onTabChange, mobileOpen, onClose }) {
   const { data: alerts } = useCollection('alerts');
-  const { data: actionableDoc } = useDocument('analysis', 'actionable-events');
-  const analysisEvents = actionableDoc?.events || [];
 
-  // Conteo unificado: alertas de Firestore + actionable-events (sin duplicados)
   const pendingCount = useMemo(() => {
-    const TERMINAL = ['completed', 'done', 'discarded', 'cancelled_by_ai', 'cancelled_by_system', 'resolved'];
-    const norm = (v) => (!v || v === '?' || v === 'usuario no informado' || v === 'desconocido') ? '' : v.toLowerCase();
-    const firestorePending = alerts.filter(a => a.status === 'pending');
-    const resolvedAlerts = alerts.filter(a => TERMINAL.includes(a.status));
-    const extraFromAnalysis = analysisEvents.filter(ae => {
-      const hasAlert = [...firestorePending, ...resolvedAlerts].some(a =>
-        norm(a.userAlias) === norm(ae.userName) &&
-        String(a.accountId) === String(ae.accountId) &&
-        a.service === ae.subscription
-      );
-      return !hasAlert;
-    });
-    return firestorePending.length + extraFromAnalysis.length;
-  }, [alerts, analysisEvents]);
+    return alerts.filter(a => a.status === 'pending').length;
+  }, [alerts]);
 
   const handleLogout = async () => {
     if (window.confirm('¿Cerrar sesión?')) {

@@ -226,27 +226,9 @@ class TelegramBot:
             except Exception:
                 pass
 
-            # Alertas pendientes (Firestore alerts + actionable-events)
+            # Alertas pendientes del flujo directo actual
             alerts_q = list(self.db.collection('alerts').where('status', '==', 'pending').stream())
             pending_count = len(alerts_q)
-
-            # Sumar actionable-events que no tengan alerta duplicada (en CUALQUIER estado)
-            try:
-                ae_doc = self.db.document('analysis/actionable-events').get()
-                if ae_doc.exists:
-                    ae_events = ae_doc.to_dict().get('events', [])
-                    # Build keys from ALL alerts (pending + resolved) to avoid counting stale events
-                    all_alerts = list(self.db.collection('alerts').stream())
-                    alert_keys = set()
-                    for a_doc in all_alerts:
-                        a = a_doc.to_dict()
-                        alert_keys.add(f"{a.get('userAlias','')}-{a.get('accountId','')}-{a.get('service','')}")
-                    for evt in ae_events:
-                        key = f"{evt.get('userName','')}-{evt.get('accountId','')}-{evt.get('subscription','')}"
-                        if key not in alert_keys:
-                            pending_count += 1
-            except Exception:
-                pass
 
             # Cuentas
             registry = self.db.document('config/account-registry').get()
@@ -272,48 +254,13 @@ class TelegramBot:
             return f"❌ Error al obtener estado: {e}"
 
     def _cmd_alertas(self):
-        """Lista las alertas pendientes (Firestore + actionable-events)."""
+        """Lista las alertas pendientes del flujo directo actual."""
         try:
             priority_emoji = {'critical': '🔴', 'high': '🟠', 'medium': '🟡', 'low': '🟢'}
             all_pending = []
 
-            # 1. Alertas de Firestore con status pending
-            alerts_q = list(self.db.collection('alerts').where('status', '==', 'pending').stream())
-            alert_keys = set()
-            for doc in alerts_q:
-                a = doc.to_dict()
-                all_pending.append(a)
-                alert_keys.add(f"{a.get('userAlias','')}-{a.get('accountId','')}-{a.get('service','')}")
-
-            # 2. Build keys from ALL alerts (pending + resolved) to exclude stale events
-            all_alert_keys = set(alert_keys)  # Start with pending keys
-            try:
-                for adoc in self.db.collection('alerts').stream():
-                    ad = adoc.to_dict()
-                    all_alert_keys.add(f"{ad.get('userAlias','')}-{ad.get('accountId','')}-{ad.get('service','')}")
-            except Exception:
-                pass
-
-            # 3. Actionable-events del último análisis (excluir los que ya tienen alerta en cualquier estado)
-            try:
-                ae_doc = self.db.document('analysis/actionable-events').get()
-                if ae_doc.exists:
-                    for evt in ae_doc.to_dict().get('events', []):
-                        key = f"{evt.get('userName','')}-{evt.get('accountId','')}-{evt.get('subscription','')}"
-                        if key not in all_alert_keys:
-                            all_pending.append({
-                                'title': f"{evt.get('userName', '?')} — {evt.get('subscription', '?')}",
-                                'description': evt.get('action', 'Acción requerida'),
-                                'type': evt.get('kind', 'info'),
-                                'priority': 'high' if 'join' in evt.get('kind', '') else 'medium',
-                                'service': evt.get('subscription', '?'),
-                                'accountId': evt.get('accountId', '?'),
-                                'accountAlias': evt.get('accountAlias', '?'),
-                                'userAlias': evt.get('userName', '?'),
-                                'source': 'análisis automático',
-                            })
-            except Exception:
-                pass
+            for doc in self.db.collection('alerts').where('status', '==', 'pending').stream():
+                all_pending.append(doc.to_dict())
 
             if not all_pending:
                 return "✅ No hay alertas pendientes."

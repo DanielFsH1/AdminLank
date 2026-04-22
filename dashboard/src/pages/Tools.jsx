@@ -4,7 +4,7 @@ import { collection, getDocs, doc, getDoc, deleteDoc, writeBatch, addDoc, query,
 
 import { db } from '../firebase';
 
-import { AnalyzeIcon, BankIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClockIcon, ContainerIcon, CreditCardIcon, DollarIcon, DownloadIcon, EmailIcon, FileStorageIcon, HourglassIcon, KeyIcon, LightbulbIcon, LightningIcon, LockIcon, LockKeyIcon, MailboxIcon, MoneyIcon, PackageIcon, ShieldCheckIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, TrendUpIcon, UsersIcon, WarningIcon, XCircleIcon } from '../components/Icons';
+import { AnalyzeIcon, BankIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClockIcon, ContainerIcon, CreditCardIcon, DollarIcon, DownloadIcon, EmailIcon, FileStorageIcon, HourglassIcon, KeyIcon, LightbulbIcon, LockIcon, LockKeyIcon, MailboxIcon, MoneyIcon, PackageIcon, ShieldCheckIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, TrendUpIcon, UsersIcon, WarningIcon, XCircleIcon } from '../components/Icons';
 
 import CryptoJS from 'crypto-js';
 
@@ -28,7 +28,6 @@ const COLLECTIONS = [
  { key: 'vault-cards', label: 'Tarjetas (Bóveda)', icon: <CreditCardIcon size={16} />, type: 'collection', desc: 'Datos de tarjetas de pago', sensitive: true },
  { key: 'analysis/state', label: 'Estado de Análisis', icon: <AnalyzeIcon size={16} />, type: 'doc', desc: 'UIDs procesados' },
  { key: 'analysis/latest-report', label: 'Último Reporte', icon: <BarChartIcon size={16} />, type: 'doc', desc: 'Resumen del análisis' },
- { key: 'analysis/actionable-events', label: 'Eventos Accionables', icon: <LightningIcon size={16} />, type: 'doc', desc: 'Eventos pendientes' },
  { key: 'analysis/raw-emails', label: 'Correos Crudos', icon: <EmailIcon size={16} />, type: 'doc', desc: 'Emails sin procesar (legacy)' },
  { key: 'alerts', label: 'Alertas', icon: <BellIcon size={16} />, type: 'collection', desc: 'Alertas del sistema' },
  { key: 'notifications', label: 'Notificaciones', icon: <MailboxIcon size={16} />, type: 'collection', desc: 'Correos detectados (7 días)' },

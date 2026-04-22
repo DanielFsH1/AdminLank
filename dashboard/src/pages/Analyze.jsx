@@ -80,7 +80,6 @@ function getProfileImg(accountId) {
 
 export default function Analyze({ onNavigate, navData, servicesConfig }) {
  const [report, setReport] = useState(null);
- const [events, setEvents] = useState(null);
  const [rawEmails, setRawEmails] = useState(null);
  const [notifications, setNotifications] = useState([]); // Firestore notifications with 7-day retention
  const [realAccounts, setRealAccounts] = useState({}); // { chatgpt: [{ id, slots, ... }] }
@@ -111,9 +110,8 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
  const fetchData = useCallback(async () => {
  try {
       setLoading(true);
-      const [reportSnap, eventsSnap, rawSnap, schedSnap] = await Promise.all([
+      const [reportSnap, rawSnap, schedSnap] = await Promise.all([
         getDoc(doc(db, 'analysis', 'latest-report')),
-        getDoc(doc(db, 'analysis', 'actionable-events')),
         getDoc(doc(db, 'analysis', 'raw-emails')),
         getDoc(doc(db, 'config', 'schedule')),
       ]);
@@ -121,7 +119,6 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
         setReport(reportSnap.data());
         setLastAnalysisTime(reportSnap.data().generatedAt || null);
       }
-      if (eventsSnap.exists()) setEvents(eventsSnap.data());
       if (rawSnap.exists()) setRawEmails(rawSnap.data());
       if (schedSnap.exists()) {
         const sched = schedSnap.data();
@@ -418,11 +415,7 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
 
  // Click en tarjeta de cuenta en 'Todas las Cuentas'
  const handleAccountCardClick = (acc) => {
- if (acc.pending > 0 || acc.review > 0) {
-      // Tiene eventos accionables → ir a la sub-pestaña de eventos
-      setView('eventos');
- } else if ((acc.rawEmailCount || 0) > 0) {
-      // Solo tiene correos/notificaciones → ir a notificaciones
+ if ((acc.rawEmailCount || 0) > 0) {
       setView('notificaciones');
  }
  };
@@ -485,7 +478,6 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
  }
  const failedAccountsList = report.failedAccounts || [];
 
- const actionableEvents = events?.events || [];
  // totalAccounts = total attempted, accountsOk = successful; backward compat with old reports
  const totalAccounts = report.totalAccounts || report.accountCount || 0;
  const accountsOk = report.accountsOk || report.accountCount || 0;
@@ -504,8 +496,7 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
  // Raw emails data
  const rawAccountsWithMail = rawEmails?.accounts || [];
 
- // Accounts with events
- const accountsWithEvents = accounts.filter(a => a.pending > 0 || a.review > 0);
+ // Accounts with clean status
  const accountsAllClean = accounts.filter(a => a.relevant === 0 && a.access === 'ok');
 
  // Total notifications count
@@ -642,9 +633,9 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
 
         <div className="analyze-kpi-card">
           <div className="analyze-kpi-icon" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444' }}><BellIcon size={16} /></div>
-          <div className="analyze-kpi-value" style={{ color: actionableEvents.length > 0 ? '#ef4444' : '#10b981' }}>{actionableEvents.length}</div>
-          <div className="analyze-kpi-label">Pendientes activos</div>
-          <div className="analyze-kpi-sub">Eventos sin resolver (acumulado)</div>
+          <div className="analyze-kpi-value" style={{ color: alertsGenerated > 0 ? '#ef4444' : '#10b981' }}>{alertsGenerated}</div>
+          <div className="analyze-kpi-label">Alertas generadas</div>
+          <div className="analyze-kpi-sub">En este análisis</div>
         </div>
 
         <div className="analyze-kpi-card">
@@ -675,7 +666,6 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
         {[
           { key: 'resumen', label: <><BarChartIcon size={16} /> Resumen</>, count: null },
           { key: 'notificaciones', label: <><InboxIcon size={16} /> Notificaciones</>, count: totalNotifications, badge: totalUnread > 0 ? totalUnread : null },
-          { key: 'eventos', label: <><LightningIcon size={16} /> Eventos</>, count: actionableEvents.length, badge: actionableEvents.filter(e => e.category === 'pending' || e.category === 'review').length || null },
           { key: 'cuentas', label: ' Todas las Cuentas', count: totalAccounts },
         ].map(t => (
           <button
@@ -693,74 +683,8 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
       {/* ==================== RESUMEN ==================== */}
       {view === 'resumen' && (
         <div className="analyze-section">
-          {/* Actionable Events Summary */}
-          {actionableEvents.length > 0 && (
-            <div className="analyze-card" style={{ borderLeft: '3px solid #ef4444' }}>
-              <h3 className="analyze-card-title"> Eventos que requieren acción</h3>
-              <div className="analyze-events-list">
-                {actionableEvents.map((evt, i) => {
-                  const color = getSubscriptionColor(evt.subscription) || '#6b7280';
-                  return (
-                    <div className="analyze-event-row clickable" key={i} onClick={() => handleEventClick(evt)}>
-                      <div className="analyze-event-dot" style={{ background: color }} />
-                      <div className="analyze-event-info">
-                        <div className="analyze-event-main">
-                          <span className="analyze-event-kind">{KIND_LABELS[evt.kind] || evt.kind}</span>
-                          <span className="analyze-event-user">{evt.userName || '?'}</span>
-                          <span className="analyze-event-svc" style={{ background: `${color}22`, color }}>
-                            {evt.subscription}
-                          </span>
-                        </div>
-                        <div className="analyze-event-meta">
-                          <span>Cuenta #{evt.accountId} {evt.accountAlias}</span>
-                          <span>·</span>
-                          <span>{formatDate(evt.date)}</span>
-                        </div>
-                        <div className="analyze-event-action">
-                          <PinIcon size={16} /> {evt.action} — <span>{evt.reason}</span>
-                        </div>
-                      </div>
-                      <div className="analyze-event-goto" title="Ir a la cuenta real">→</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {actionableEvents.length === 0 && (
-            <div className="analyze-card" style={{ borderLeft: '3px solid #10b981', textAlign: 'center', padding: '32px' }}>
-              <div style={{ fontSize: '40px', marginBottom: '12px' }}><CheckCircleIcon size={16} /></div>
-              <h3>Todo limpio</h3>
-              <p style={{ color: 'var(--text-secondary)', marginTop: '6px' }}>
-                No hay eventos pendientes de acción. El sistema está al día.
-              </p>
-            </div>
-          )}
-
-          {/* Accounts with issues */}
-          {accountsWithEvents.length > 0 && (
-            <div className="analyze-card" style={{ marginTop: '16px' }}>
-              <h3 className="analyze-card-title"><BarChartIcon size={16} /> Cuentas con actividad pendiente</h3>
-              <div className="analyze-accounts-mini">
-                {accountsWithEvents.map(acc => (
-                  <div className="analyze-account-mini" key={acc.accountId}>
-                    <div className="analyze-acct-mini-left">
-                      <img src={getProfileImg(acc.accountId)} alt="" className="analyze-mini-avatar" />
-                      <strong>#{acc.accountId}</strong> {acc.accountAlias}
-                    </div>
-                    <div className="analyze-acct-mini-right">
-                      {acc.pending > 0 && <span className="analyze-badge pending">{acc.pending} pendiente{acc.pending > 1 ? 's' : ''}</span>}
-                      {acc.review > 0 && <span className="analyze-badge review">{acc.review} revisión</span>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Pipeline stats */}
-          <div className="analyze-card" style={{ marginTop: '16px' }}>
+          <div className="analyze-card">
             <h3 className="analyze-card-title"><WrenchIcon size={16} /> Pipeline de análisis</h3>
             <div className="analyze-pipeline-grid">
               <div className="analyze-pipeline-step">
@@ -793,11 +717,11 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
               <div className="analyze-pipeline-step">
                 <div className="analyze-pipeline-num">4</div>
                 <div>
-                  <div className="analyze-pipeline-title">Alertas y pendientes</div>
-                  <div className="analyze-pipeline-desc">{alertsGenerated} alertas nuevas • {actionableEvents.length} pendientes acumulados</div>
+                  <div className="analyze-pipeline-title">Alertas directas</div>
+                  <div className="analyze-pipeline-desc">{alertsGenerated} alertas generadas</div>
                 </div>
-                <div className={`analyze-pipeline-status ${actionableEvents.length > 0 ? 'warn' : 'ok'}`}>
-                  {actionableEvents.length > 0 ? <WarningIcon size={16} /> : <CheckIcon size={14} />}
+                <div className={`analyze-pipeline-status ${alertsGenerated > 0 ? 'warn' : 'ok'}`}>
+                  {alertsGenerated > 0 ? <WarningIcon size={16} /> : <CheckIcon size={14} />}
                 </div>
               </div>
             </div>
@@ -935,136 +859,6 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
           )}
         </div>
       )}
-
-      {/* ==================== EVENTOS ==================== */}
-      {view === 'eventos' && (() => {
-        const pendingEvents = actionableEvents.filter(e => e.category === 'pending' || e.category === 'review');
-        const infoEvents = actionableEvents.filter(e => e.category === 'info');
-        return (
-        <div className="analyze-section">
-          {pendingEvents.length === 0 && infoEvents.length === 0 ? (
-            <div className="analyze-card" style={{ textAlign: 'center', padding: '40px' }}>
-              <div style={{ fontSize: '48px', marginBottom: '12px' }}><TargetIcon size={16} /></div>
-              <h3>Sin eventos</h3>
-              <p style={{ color: 'var(--text-secondary)', marginTop: '6px' }}>
-                No se detectaron eventos de usuarios o suscripciones en el ultimo análisis.
-              </p>
-            </div>
-          ) : (
-            <>
-              {/* Eventos que requieren acción */}
-              {pendingEvents.length > 0 && (
-              <div className="analyze-card">
-                <h3 className="analyze-card-title"><LightningIcon size={16} /> Eventos que requieren acción ({pendingEvents.length})</h3>
-                <div className="analyze-events-detailed">
-                  {pendingEvents.map((evt, i) => {
-                    const color = getSubscriptionColor(evt.subscription) || '#6b7280';
-                    const steps = getActionSteps(evt);
-                    return (
-                      <div
-                        className="analyze-event-card"
-                        key={`p-${i}`}
-                        style={{ borderLeftColor: color }}
-                        onClick={() => handleEventClick(evt)}
-                      >
-                        <div className="analyze-event-card-header">
-                          <div className="analyze-event-card-left">
-                            <img src={getProfileImg(evt.accountId)} alt="" className="analyze-event-avatar" />
-                            <div>
-                              <div className="analyze-event-card-title">
-                                {KIND_EMOJI[evt.kind] || ''} {evt.userName || '?'}
-                                <span className="analyze-event-svc" style={{ background: `${color}22`, color }}>
-                                  {evt.subscription}
-                                </span>
-                              </div>
-                              <div className="analyze-event-card-sub">
-                                Cuenta #{evt.accountId} {evt.accountAlias} · {formatDate(evt.date)}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="analyze-event-goto" title="Ver en alertas">→</div>
-                        </div>
-
-                        <div className="analyze-event-card-action">
-                          <span className="analyze-action-label"><PinIcon size={16} /> Acción requerida:</span>
-                          <span className="analyze-action-text">{evt.action}</span>
-                        </div>
-                        <div className="analyze-event-card-reason">
-                          Motivo: {evt.reason}
-                        </div>
-
-                        {steps.length > 0 && (
-                          <div className="analyze-event-steps">
-                            <div className="analyze-steps-title">Pasos a seguir:</div>
-                            {steps.map((step, si) => (
-                              <div className="analyze-step" key={si}>
-                                <span className="analyze-step-num">{si + 1}</span>
-                                <span>{step}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-              )}
-
-              {/* Sin eventos pendientes */}
-              {pendingEvents.length === 0 && (
-                <div className="analyze-card" style={{ borderLeft: '3px solid #10b981', textAlign: 'center', padding: '24px', marginBottom: '16px' }}>
-                  <h3 style={{ color: '#10b981' }}><CheckCircleIcon size={16} /> Sin eventos pendientes</h3>
-                  <p style={{ color: 'var(--text-secondary)', marginTop: '4px', fontSize: '13px' }}>
-                    No hay eventos que requieran acción en este momento.
-                  </p>
-                </div>
-              )}
-
-              {/* Eventos informativos */}
-              {infoEvents.length > 0 && (
-              <div className="analyze-card" style={{ marginTop: '16px' }}>
-                <h3 className="analyze-card-title" style={{ color: 'var(--text-secondary)' }}><ClipboardIcon size={16} /> Eventos informativos ({infoEvents.length})</h3>
-                <div className="analyze-events-detailed">
-                  {infoEvents.map((evt, i) => {
-                    const color = getSubscriptionColor(evt.subscription) || '#6b7280';
-                    return (
-                      <div
-                        className="analyze-event-card"
-                        key={`i-${i}`}
-                        style={{ borderLeftColor: `${color}66`, opacity: 0.8 }}
-                      >
-                        <div className="analyze-event-card-header">
-                          <div className="analyze-event-card-left">
-                            <img src={getProfileImg(evt.accountId)} alt="" className="analyze-event-avatar" />
-                            <div>
-                              <div className="analyze-event-card-title">
-                                {KIND_EMOJI[evt.kind] || ''} {evt.userName || '?'}
-                                <span className="analyze-event-svc" style={{ background: `${color}22`, color }}>
-                                  {evt.subscription}
-                                </span>
-                                <span style={{ fontSize: '10px', background: 'var(--bg-secondary)', color: 'var(--text-muted)', padding: '2px 6px', borderRadius: '4px', marginLeft: '6px' }}>info</span>
-                              </div>
-                              <div className="analyze-event-card-sub">
-                                Cuenta #{evt.accountId} {evt.accountAlias} · {formatDate(evt.date)}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="analyze-event-card-reason" style={{ color: 'var(--text-muted)' }}>
-                          {evt.reason}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-              )}
-            </>
-          )}
-        </div>
-        );
-      })()}
 
       {/* ==================== TODAS LAS CUENTAS ==================== */}
       {view === 'cuentas' && (
