@@ -1,13 +1,13 @@
 """
-AdminLank Cloud Function -  AnÃ¡lisis de correos IMAP + sincronizaciÃ³n Firestore.
+AdminLank Cloud Function -  Análisis de correos IMAP + sincronización Firestore.
 
 Endpoints:
-  POST /analyze_emails   -  Ejecuta anÃ¡lisis completo de correos IMAP
-  POST /update_schedule  -  Actualiza configuraciÃ³n de anÃ¡lisis programados
-  POST /cleanup          -  Limpia notificaciones >7 dÃ­as y alertas >30 dÃ­as
+  POST /analyze_emails   -  Ejecuta análisis completo de correos IMAP
+  POST /update_schedule  -  Actualiza configuración de análisis programados
+  POST /cleanup          -  Limpia notificaciones >7 días y alertas >30 días
 
 Todas las credenciales IMAP se almacenan en Firestore (collection: config/imap-credentials).
-El estado del anÃ¡lisis se guarda en Firestore (analysis/state, analysis/history).
+El estado del análisis se guarda en Firestore (analysis/state, analysis/history).
 """
 import json
 import imaplib
@@ -34,13 +34,13 @@ IGNORED_EVENT_KINDS = {'payment_user', 'payment_cashback', 'monthly_summary', 'c
 JOIN_EVENT_KINDS = {'user_join_direct', 'user_join_transferred'}
 LEAVE_EVENT_KINDS = {'user_left_self', 'user_left_transferred'}
 WITHDRAWAL_EVENT_KINDS = {'withdrawal_requested', 'withdrawal_completed'}
-# Servicios donde altas/bajas de usuarios no requieren acciÃ³n administrativa
+# Servicios donde altas/bajas de usuarios no requieren acción administrativa
 # (no hay cuentas reales que gestionar, solo se monitorean renovaciones)
-# Se deriva dinÃ¡micamente desde config/services (usesPool == false)
-UNMANAGED_JOIN_LEAVE_SERVICES = {'Microsoft 365'}  # Fallback, se sobreescribe con config dinÃ¡mica
+# Se deriva dinámicamente desde config/services (usesPool == false)
+UNMANAGED_JOIN_LEAVE_SERVICES = {'Microsoft 365'}  # Fallback, se sobreescribe con config dinámica
 
 # Mapeo de nombres de servicio a claves de Firestore
-# Fallback hardcodeado -  se sobreescribe con config dinÃ¡mica al inicio del anÃ¡lisis
+# Fallback hardcodeado -  se sobreescribe con config dinámica al inicio del análisis
 SERVICE_TO_FS = {
     'ChatGPT Plus': 'chatgpt', 'YouTube Premium': 'youtube', 'HBO Max Platino': 'hbo',
     'Microsoft 365': 'microsoft365', 'Gemini AI': 'gemini', 'F1 TV Premium': 'f1tv',
@@ -48,7 +48,7 @@ SERVICE_TO_FS = {
 
 
 def load_service_config(db):
-    """Carga la configuraciÃ³n dinÃ¡mica de servicios desde Firestore.
+    """Carga la configuración dinámica de servicios desde Firestore.
     Retorna (services_dict, name_to_key_map, unmanaged_set).
     """
     doc = db.document('config/services').get()
@@ -65,14 +65,14 @@ def load_service_config(db):
         for alias in svc.get('nameAliases', []):
             name_to_key[alias] = key
         name_to_key[svc.get('name', key)] = key
-        # Servicios sin pool â†’ unmanaged
+        # Servicios sin pool → unmanaged
         if svc.get('usesPool') is False:
             unmanaged.add(svc.get('name', key))
     return services, name_to_key, unmanaged
 
 
 def _build_name_aliases(services_config):
-    """Construye un diccionario {alias: nombre_canÃ³nico} para lank_mail_core."""
+    """Construye un diccionario {alias: nombre_canónico} para lank_mail_core."""
     if not services_config:
         return None
     aliases = {}
@@ -84,7 +84,7 @@ def _build_name_aliases(services_config):
     return aliases
 
 
-# â"€â"€â"€ HELPERS â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+# ───────────────────────────── HELPERS ──────────────────────────────
 
 def normalize_text(value):
     if value is None:
@@ -132,14 +132,14 @@ def action_for_event(event):
         'user_join_transferred': 'revisar acceso del usuario transferido',
         'user_left_self': 'quitar acceso del usuario',
         'user_left_transferred': 'quitar acceso y ajustar ingreso esperado',
-        'payment_user': 'registrar ingreso; no hay acciÃ³n urgente',
-        'payment_cashback': 'registrar ingreso; no hay acciÃ³n urgente',
-        'withdrawal_requested': 'esperar confirmaciÃ³n del retiro',
+        'payment_user': 'registrar ingreso; no hay acción urgente',
+        'payment_cashback': 'registrar ingreso; no hay acción urgente',
+        'withdrawal_requested': 'esperar confirmación del retiro',
         'withdrawal_completed': 'registrar retiro completado',
         'group_deactivated': 'revisar grupo y retirar accesos',
-        'group_validated': 'sin acciÃ³n urgente; solo registrar estado',
-        'cashback_validated': 'sin acciÃ³n urgente; solo registrar estado',
-        'monthly_summary': 'sin acciÃ³n; solo registro',
+        'group_validated': 'sin acción urgente; solo registrar estado',
+        'cashback_validated': 'sin acción urgente; solo registrar estado',
+        'monthly_summary': 'sin acción; solo registro',
     }
     return actions.get(kind, 'revisar manualmente')
 
@@ -172,7 +172,7 @@ def extract_user_entries(items):
     return entries
 
 
-# â"€â"€â"€ FIRESTORE DATA LOADING â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+# ────────────────────── FIRESTORE DATA LOADING ──────────────────────
 
 def load_imap_credentials(db):
     """Load IMAP credentials from Firestore config/imap-credentials."""
@@ -201,7 +201,7 @@ def load_current_state_context(db, name_to_key=None):
     if name_to_key is None:
         name_to_key = dict(SERVICE_TO_FS)
     context = {}
-    # Construir el mapeo inverso: key â†’ nombre canÃ³nico
+    # Construir el mapeo inverso: key → nombre canónico
     key_to_name = {}
     for name, key in name_to_key.items():
         if key not in key_to_name:
@@ -334,7 +334,7 @@ def save_alert_to_firestore(db, alert):
         db.collection('alerts').document(aid).set(alert, merge=True)
 
 
-# â"€â"€â"€ USER MATCHING â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+# ────────────────────────── USER MATCHING ───────────────────────────
 
 def match_user(account_context, user_name, user_email):
     name_norm = normalize_text(user_name)
@@ -363,7 +363,7 @@ def match_user(account_context, user_name, user_email):
     }
 
 
-# â"€â"€â"€ EVENT CLASSIFICATION â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+# ─────────────────────── EVENT CLASSIFICATION ───────────────────────
 
 def classify_event(event, db_context, db=None):
     service = core.canonical_subscription(event.get('subscription')) or event.get('subscription')
@@ -379,7 +379,7 @@ def classify_event(event, db_context, db=None):
         account_number = event.get('accountNumber') or 'cuenta no informada'
         if kind == 'withdrawal_requested':
             review['category'] = 'pending'
-            review['action'] = 'esperar confirmaciÃ³n del retiro'
+            review['action'] = 'esperar confirmación del retiro'
             review['reason'] = f'retiro solicitado por ${amount or event.get("amount") or "?"} hacia {bank} / {account_number}'
             review['matchStatus'] = 'awaiting_completion'
         else:
@@ -398,13 +398,13 @@ def classify_event(event, db_context, db=None):
     if not service:
         review['category'] = 'review'
         review['action'] = 'revisar manualmente'
-        review['reason'] = 'no pude identificar la suscripciÃ³n'
+        review['reason'] = 'no pude identificar la suscripción'
         return review
 
-    # Servicios no gestionados: altas/bajas no requieren acciÃ³n pero se registran
+    # Servicios no gestionados: altas/bajas no requieren acción pero se registran
     if service in UNMANAGED_JOIN_LEAVE_SERVICES and kind in (JOIN_EVENT_KINDS | LEAVE_EVENT_KINDS):
         review['category'] = 'info'
-        review['action'] = 'sin acciÃ³n requerida'
+        review['action'] = 'sin acción requerida'
         review['reason'] = f'{service}: altas y bajas se registran como referencia'
         review['matchStatus'] = 'unmanaged_service'
         return review
@@ -424,17 +424,17 @@ def classify_event(event, db_context, db=None):
         if not account_context or account_context.get('groupStatus') == 'no_group':
             review['category'] = 'review'
             review['action'] = 'revisar si debe activarse'
-            review['reason'] = 'grupo validado pero no estÃ¡ activo en la base'
+            review['reason'] = 'grupo validado pero no está activo en la base'
         else:
             review['category'] = 'info'
-            review['action'] = 'sin acciÃ³n'
-            review['reason'] = 'validaciÃ³n sin impacto'
+            review['action'] = 'sin acción'
+            review['reason'] = 'validación sin impacto'
         return review
 
     if kind == 'group_deactivated':
         review['category'] = 'pending'
         review['action'] = 'revisar grupo y accesos'
-        review['reason'] = 'Lank reportÃ³ que el grupo fue dado de baja'
+        review['reason'] = 'Lank reportó que el grupo fue dado de baja'
         return review
 
     if kind not in JOIN_EVENT_KINDS | LEAVE_EVENT_KINDS:
@@ -462,7 +462,7 @@ def classify_event(event, db_context, db=None):
     if kind in JOIN_EVENT_KINDS:
         if match['currentFound']:
             review['category'] = 'ignore'
-            review['action'] = 'sin acciÃ³n'
+            review['action'] = 'sin acción'
             review['reason'] = 'usuario ya estaba en la base'
             review['matchStatus'] = 'already_present'
             return review
@@ -471,7 +471,7 @@ def classify_event(event, db_context, db=None):
         review['reason'] = 'usuario nuevo no presente en la base'
         review['matchStatus'] = 'missing_from_current_state'
         if match['staleFound']:
-            review['reason'] += '; aparece en histÃ³rico'
+            review['reason'] += '; aparece en histórico'
         if account_context.get('groupStatus') in {'no_group', 'empty', 'deactivated'}:
             review['reason'] += f"; base marca groupStatus={account_context.get('groupStatus')}"
         return review
@@ -495,8 +495,8 @@ def classify_event(event, db_context, db=None):
 
         if user_in_legacy:
             review['category'] = 'ignore'
-            review['action'] = 'sin acciÃ³n'
-            review['reason'] = 'usuario en cuenta legacy; no requiere acciÃ³n'
+            review['action'] = 'sin acción'
+            review['reason'] = 'usuario en cuenta legacy; no requiere acción'
             review['matchStatus'] = 'legacy_account_no_action'
             return review
 
@@ -507,15 +507,15 @@ def classify_event(event, db_context, db=None):
         return review
 
     review['category'] = 'ignore'
-    review['action'] = 'sin acciÃ³n'
-    review['reason'] = 'usuario ya no estÃ¡ en la base'
+    review['action'] = 'sin acción'
+    review['reason'] = 'usuario ya no está en la base'
     review['matchStatus'] = 'already_absent_from_current_state'
     if match['staleFound']:
-        review['reason'] += '; solo aparece en histÃ³rico'
+        review['reason'] += '; solo aparece en histórico'
     return review
 
 
-# â"€â"€â"€ EVENT RECONCILIATION â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+# ─────────────────────── EVENT RECONCILIATION ───────────────────────
 
 def event_identity_key(row):
     kind = row['event'].get('kind')
@@ -556,17 +556,17 @@ def reconcile_event_sequences(events):
 
             if kind in JOIN_EVENT_KINDS and review.get('category') == 'pending' and review.get('matchStatus') == 'missing_from_current_state' and later_leave:
                 review['category'] = 'ignore'
-                review['action'] = 'sin acciÃ³n'
+                review['action'] = 'sin acción'
                 review['reason'] = 'alta superada por baja posterior'
                 review['matchStatus'] = 'superseded_by_later_leave'
             elif kind in LEAVE_EVENT_KINDS and review.get('category') == 'pending' and review.get('matchStatus') == 'still_present_in_current_state' and later_join:
                 review['category'] = 'ignore'
-                review['action'] = 'sin acciÃ³n'
+                review['action'] = 'sin acción'
                 review['reason'] = 'baja superada por alta posterior'
                 review['matchStatus'] = 'superseded_by_later_join'
             elif kind == 'withdrawal_requested' and review.get('category') == 'pending' and later_withdraw_completed:
                 review['category'] = 'ignore'
-                review['action'] = 'sin acciÃ³n'
+                review['action'] = 'sin acción'
                 review['reason'] = 'retiro ya confirmado'
                 review['matchStatus'] = 'superseded_by_withdrawal_completed'
 
@@ -578,7 +578,7 @@ def rebuild_summary(events):
         bucket = 'ignored' if row['dbReview'].get('category') == 'ignore' else row['dbReview'].get('category')
         if bucket in summary:
             summary[bucket] += 1
-        # 'relevant' = solo eventos que requieren atenciÃ³n (pending + review + info)
+        # 'relevant' = solo eventos que requieren atención (pending + review + info)
         if bucket not in ('ignored',):
             summary['relevant'] += 1
     return summary
@@ -896,7 +896,7 @@ def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=N
     return alerts_generated, updated_services, actionable, agent_findings, pending_events_emitted
 
 
-# â"€â"€â"€ IMAP ANALYSIS â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+# ────────────────────────── IMAP ANALYSIS ───────────────────────────
 
 def search_recent_lank(mail, days, last_uid=None):
     if last_uid is not None:
@@ -943,7 +943,7 @@ def analyze_account(account, rates, days, db_context, db, last_uid=None, service
             except Exception:
                 pass
         if not opened:
-            raise RuntimeError('No pude abrir buzÃ³n Ãºtil')
+            raise RuntimeError('No pude abrir buzón útil')
 
         uids = search_recent_lank(mail, days, last_uid)
         seen = set()
@@ -1012,7 +1012,7 @@ def analyze_account(account, rates, days, db_context, db, last_uid=None, service
     return result
 
 
-# â"€â"€â"€ NOTIFICATIONS (7-day retention) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+# ───────────────── NOTIFICATIONS (7-day retention) ──────────────────
 
 def save_notifications(db, account_id, alias, raw_emails, analysis_timestamp=None):
     """Save raw email notifications to Firestore with 7-day expiry based on email date."""
@@ -1114,7 +1114,7 @@ def cleanup_old_data(db):
         print(f'Cleanup alerts error: {e}')
 
 
-# â"€â"€â"€ FINANCE -  WITHDRAWAL TRACKING â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+# ────────────────── FINANCE -  WITHDRAWAL TRACKING ──────────────────
 
 MONTH_NAMES_EN = [
     'january', 'february', 'march', 'april', 'may', 'june',
@@ -1368,7 +1368,7 @@ def _recalculate_overview_totals(db, month_name, month_key):
         print(f'Error recalculating overview: {e}')
 
 
-# â"€â"€â"€ UPDATE GROUP STATE â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+# ──────────────────────── UPDATE GROUP STATE ────────────────────────
 
 def update_group_on_leave(db, service, account_id, user_alias, reason=''):
     """Remove user from Firestore group when they leave."""
@@ -1392,7 +1392,7 @@ def update_group_on_leave(db, service, account_id, user_alias, reason=''):
         notes = data.get('notes', [])
         if not isinstance(notes, list):
             notes = []
-        notes.append(f'{date_str}: {user_alias} saliÃ³ del grupo. {reason}'.strip())
+        notes.append(f'{date_str}: {user_alias} salió del grupo. {reason}'.strip())
         doc_ref.update({
             'users': users,
             'hasUsers': len(users) > 0,
@@ -1436,7 +1436,7 @@ def update_group_on_leave(db, service, account_id, user_alias, reason=''):
             except Exception:
                 pass
 
-        # Cancelar alertas pending de este usuario (renovaciÃ³n, telÃ©fono faltante, etc.)
+        # Cancelar alertas pending de este usuario (renovación, teléfono faltante, etc.)
         try:
             alias_lower = normalize_alias(user_alias)
             pending_alerts = db.collection('alerts').where('status', '==', 'pending').where(
@@ -1445,7 +1445,7 @@ def update_group_on_leave(db, service, account_id, user_alias, reason=''):
             for alert_doc in pending_alerts:
                 alert = alert_doc.to_dict()
                 a_type = alert.get('type', '')
-                # Solo cancelar alertas de renovaciÃ³n, telÃ©fono faltante y renewDay faltante
+                # Solo cancelar alertas de renovación, teléfono faltante y renewDay faltante
                 if any(k in a_type for k in ('renewal', 'missing_phone', 'missing_renewal')):
                     alert_doc.reference.update({
                         'status': 'cancelled_by_system',
@@ -1459,7 +1459,7 @@ def update_group_on_leave(db, service, account_id, user_alias, reason=''):
     return False
 
 
-# â"€â"€â"€ MAIN ANALYSIS FUNCTION â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+# ────────────────────── MAIN ANALYSIS FUNCTION ──────────────────────
 
 @https_fn.on_request(
     cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
@@ -1631,13 +1631,13 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
             'pendingEventsEmitted': pending_events_emitted,
         }
 
-        # Detectar usuarios sin fecha de renovaciÃ³n en servicios renewal-based
+        # Detectar usuarios sin fecha de renovación en servicios renewal-based
         missing_renewal_count = lank_alerts.generate_missing_renewal_alerts(db, services_config)
         if missing_renewal_count > 0:
             print(f'Missing renewal date alerts generated: {missing_renewal_count}')
             alerts_generated += missing_renewal_count
 
-        # Detectar usuarios sin telÃ©fono (preparaciÃ³n para WhatsApp)
+        # Detectar usuarios sin teléfono (preparación para WhatsApp)
         missing_phone_count = lank_alerts.generate_missing_phone_alerts(db, services_config)
         if missing_phone_count > 0:
             print(f'Missing phone alerts generated: {missing_phone_count}')
@@ -1698,10 +1698,10 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
                     if alert_dicts:
                         tg.send_alert_notification(alert_dicts)
                         notified = True
-                        print(f'[Telegram] NotificaciÃ³n enviada: {len(alert_dicts)} alertas '
+                        print(f'[Telegram] Notificación enviada: {len(alert_dicts)} alertas '
                               f'(scripts: {alerts_generated})')
 
-                # 2. Fallback: buscar alertas pending recientes (Ãºltimos 10 min)
+                # 2. Fallback: buscar alertas pending recientes (últimos 10 min)
                 if not notified:
                     try:
                         recent_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
@@ -1718,7 +1718,7 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
                     except Exception as fb_err:
                         print(f'[Telegram] Error en fallback de alertas recientes: {fb_err}')
 
-                # 3. Actionable-events como Ãºltimo recurso
+                # 3. Actionable-events como último recurso
                 if not notified:
                     try:
                         ae_doc = db.document('analysis/actionable-events').get()
@@ -1729,7 +1729,7 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
                                 for evt in ae_events:
                                     pseudo_alerts.append({
                                         'title': f"{evt.get('userName', '?')} -  {evt.get('subscription', '?')}",
-                                        'description': evt.get('action', 'AcciÃ³n requerida'),
+                                        'description': evt.get('action', 'Acción requerida'),
                                         'priority': 'high' if 'join' in evt.get('kind', '') else 'medium',
                                         'service': evt.get('subscription', '?'),
                                         'accountId': evt.get('accountId', '?'),
@@ -1750,8 +1750,8 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
                 if agent_review.get('shouldNotify') and agent_review_text:
                     tg.send_message(agent_review_text, parse_mode=None)
         except Exception as tg_err:
-            print(f'[Telegram] Error no fatal enviando notificaciÃ³n: {tg_err}')
-        # â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+            print(f'[Telegram] Error no fatal enviando notificación: {tg_err}')
+        # ──────────────────────────────────────────────────────────────────
 
         return https_fn.Response(
             json.dumps(response_data),
@@ -1767,7 +1767,7 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
         )
 
 
-# â"€â"€â"€ SCHEDULE CONFIG â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+# ───────────────────────── SCHEDULE CONFIG ──────────────────────────
 
 @https_fn.on_request(
     cors=options.CorsOptions(cors_origins="*", cors_methods=["POST", "OPTIONS"]),
@@ -1854,7 +1854,7 @@ def health_check(req: https_fn.Request) -> https_fn.Response:
     db = None
     try:
         db = firestore.client()
-        checks['firestore'] = {'status': 'ok', 'message': 'ConexiÃ³n exitosa'}
+        checks['firestore'] = {'status': 'ok', 'message': 'Conexión exitosa'}
     except Exception as e:
         checks['firestore'] = {'status': 'error', 'message': str(e)}
 
@@ -1970,7 +1970,7 @@ def health_check(req: https_fn.Request) -> https_fn.Response:
             else:
                 checks['last_analysis'] = {'status': 'warning', 'message': 'Nunca se ha ejecutado'}
         else:
-            checks['last_analysis'] = {'status': 'warning', 'message': 'Sin datos de anÃ¡lisis'}
+            checks['last_analysis'] = {'status': 'warning', 'message': 'Sin datos de análisis'}
     except Exception as e:
         checks['last_analysis'] = {'status': 'error', 'message': str(e)}
 
@@ -2058,7 +2058,7 @@ def health_check(req: https_fn.Request) -> https_fn.Response:
     return https_fn.Response(json.dumps(result), content_type='application/json')
 
 
-# â"€â"€â"€ AUDIT LOG (Dashboard) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+# ────────────────────── AUDIT LOG (Dashboard) ───────────────────────
 
 
 @https_fn.on_request(
@@ -2068,15 +2068,15 @@ def health_check(req: https_fn.Request) -> https_fn.Response:
     memory=options.MemoryOption.MB_256,
 )
 def get_audit_log(req: https_fn.Request) -> https_fn.Response:
-    """Lee las Ãºltimas entradas del audit-log para el dashboard.
+    """Lee las últimas entradas del audit-log para el dashboard.
 
-    Filtra en memoria para evitar necesidad de Ã­ndices compuestos en Firestore.
+    Filtra en memoria para evitar necesidad de índices compuestos en Firestore.
 
     Query params:
         limit: int (default 50, max 200)
         source: str (filtro por fuente: ai_analysis, ai_chat, manual, system)
         actor: str (filtro por actor: admin, ai, system)
-        action: str (filtro por acciÃ³n: create_alert, remove_user, etc.)
+        action: str (filtro por acción: create_alert, remove_user, etc.)
     """
     if req.method == 'OPTIONS':
         return https_fn.Response('', status=204)
@@ -2088,7 +2088,7 @@ def get_audit_log(req: https_fn.Request) -> https_fn.Response:
         actor_filter = req.args.get('actor', '').strip()
         action_filter = req.args.get('action', '').strip()
 
-        # Leer los Ãºltimos 100 docs sin filtros compuestos (evita error de Ã­ndice)
+        # Leer los últimos 100 docs sin filtros compuestos (evita error de índice)
         from google.cloud.firestore_v1 import Query as FsQuery
         docs = list(
             db.collection('audit-log')
@@ -2125,9 +2125,9 @@ def get_audit_log(req: https_fn.Request) -> https_fn.Response:
         )
 
 
-# â"€â"€â"€ AI CHAT â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+# ───────────────────────────── AI CHAT ──────────────────────────────
 
-# â"€â"€â"€ SCHEDULED ANALYSIS (runs if enabled) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+# ─────────────── SCHEDULED ANALYSIS (runs if enabled) ───────────────
 
 @scheduler_fn.on_schedule(
     schedule="0,30 * * * *",
@@ -2160,7 +2160,7 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
     start_time_str = config.get('startTime')
     now = datetime.now(timezone.utc)
 
-    # â"€â"€â"€ Active hours window check â"€â"€â"€
+# ──────────────────── Active hours window check ─────────────────────
     active_hours = config.get('activeHours')
     if active_hours and active_hours.get('enabled'):
         tz_offset = active_hours.get('tzOffset', 0)  # minutes offset from UTC
@@ -2385,13 +2385,13 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
     if renewal_count > 0:
         print(f'Renewal alerts generated: {renewal_count}')
 
-    # Detectar usuarios sin fecha de renovaciÃ³n en servicios renewal-based
+    # Detectar usuarios sin fecha de renovación en servicios renewal-based
     missing_renewal_count = lank_alerts.generate_missing_renewal_alerts(db, services_config)
     if missing_renewal_count > 0:
         print(f'Missing renewal date alerts generated: {missing_renewal_count}')
     renewal_count += missing_renewal_count
 
-    # Detectar usuarios sin telÃ©fono (preparaciÃ³n para WhatsApp)
+    # Detectar usuarios sin teléfono (preparación para WhatsApp)
     missing_phone_count = lank_alerts.generate_missing_phone_alerts(db, services_config)
     if missing_phone_count > 0:
         print(f'Missing phone alerts generated: {missing_phone_count}')
@@ -2425,7 +2425,7 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
     )
     agent_review_text = lank_agent_review.build_notification_text(agent_review)
 
-    # â"€â"€â"€ Notificaciones de Telegram (scheduled) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+# ────────────── Notificaciones de Telegram (scheduled) ──────────────
     try:
         tg = lank_telegram.TelegramBot(db)
         if tg.is_enabled:
@@ -2444,7 +2444,7 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
                 if alert_dicts:
                     tg.send_alert_notification(alert_dicts)
                     notified = True
-                    print(f'[Telegram] NotificaciÃ³n enviada: {len(alert_dicts)} alertas '
+                    print(f'[Telegram] Notificación enviada: {len(alert_dicts)} alertas '
                           f'(scripts: {alerts_generated}, renewal: {renewal_count})')
 
             # 2. FALLBACK FINAL: Siempre buscar alertas pending recientes
@@ -2452,7 +2452,7 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
 
             if not notified:
                 try:
-                    # Buscar alertas pending creadas en los Ãºltimos 10 minutos
+                    # Buscar alertas pending creadas en los últimos 10 minutos
                     recent_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
                     recent_alerts = list(db.collection('alerts')
                                         .where('status', '==', 'pending')
@@ -2467,7 +2467,7 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
                 except Exception as fb_err:
                     print(f'[Telegram] Error en fallback de alertas recientes: {fb_err}')
 
-            # 3. Actionable-events como Ãºltimo recurso
+            # 3. Actionable-events como último recurso
             if not notified:
                 try:
                     ae_doc = db.document('analysis/actionable-events').get()
@@ -2478,7 +2478,7 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
                             for evt in ae_events:
                                 pseudo_alerts.append({
                                     'title': f"{evt.get('userName', '?')} -  {evt.get('subscription', '?')}",
-                                    'description': evt.get('action', 'AcciÃ³n requerida'),
+                                    'description': evt.get('action', 'Acción requerida'),
                                     'priority': 'high' if 'join' in evt.get('kind', '') else 'medium',
                                     'service': evt.get('subscription', '?'),
                                     'accountId': evt.get('accountId', '?'),
@@ -2498,13 +2498,13 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
             if agent_review.get('shouldNotify') and agent_review_text:
                 tg.send_message(agent_review_text, parse_mode=None)
     except Exception as tg_err:
-        print(f'[Telegram] Error no fatal en notificaciÃ³n scheduled: {tg_err}')
-    # â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+        print(f'[Telegram] Error no fatal en notificación scheduled: {tg_err}')
+    # ──────────────────────────────────────────────────────────────────
 
 
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ──────────────────────────────────────────────────────────────────
 # TELEGRAM BOT WEBHOOK
-# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# ──────────────────────────────────────────────────────────────────
 
 @https_fn.on_request(
     cors=options.CorsOptions(cors_origins='*', cors_methods=['POST']),
@@ -2514,7 +2514,7 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
 def telegram_webhook(req: https_fn.Request) -> https_fn.Response:
     """Webhook para recibir mensajes de Telegram.
 
-    Telegram envÃ­a actualizaciones vÃ­a POST. Esta funciÃ³n:
+    Telegram envía actualizaciones vía POST. Esta función:
     1. Valida que el chat_id sea del admin autorizado
     2. Procesa comandos (/estado, /alertas, etc.)
     3. Para mensajes normales, responde que el chat IA no está disponible
@@ -2537,7 +2537,7 @@ def telegram_webhook(req: https_fn.Request) -> https_fn.Response:
         if not chat_id or not text:
             return https_fn.Response('OK', status=200)
 
-        # â"€â"€ Auto-registro: si no hay admin configurado, el primero se registra
+# ── Auto-registro: si no hay admin configurado, el primero se registra ──
         if not tg.admin_chat_id:
             db.document('config/telegram-settings').set({
                 'botToken': tg.token,
@@ -2547,19 +2547,19 @@ def telegram_webhook(req: https_fn.Request) -> https_fn.Response:
             }, merge=True)
             tg._settings = None  # Limpiar cache
             tg.send_message(
-                'âœ… *Registro completado*\n\n'
+                '✅ *Registro completado*\n\n'
                 f'Tu chat ID ({chat_id}) ha sido registrado como administrador.\n'
                 'Ahora puedes usar todos los comandos. Escribe /ayuda para ver la lista.',
                 chat_id=chat_id,
             )
             return https_fn.Response('OK', status=200)
 
-        # â"€â"€ Verificar autorizaciÃ³n
+# ────────────────────── Verificar autorizacin ───────────────────────
         if not tg.is_authorized(chat_id):
-            tg.send_message('â›" No estÃ¡s autorizado para usar este bot.', chat_id=chat_id)
+            tg.send_message('⛔ No estás autorizado para usar este bot.', chat_id=chat_id)
             return https_fn.Response('OK', status=200)
 
-        # â"€â"€ Procesar comando
+# ───────────────────────── Procesar comando ─────────────────────────
         if text.startswith('/'):
             response_text = tg.process_command(text, chat_id)
             if response_text:
@@ -2574,7 +2574,7 @@ def telegram_webhook(req: https_fn.Request) -> https_fn.Response:
     except Exception as e:
         traceback.print_exc()
         try:
-            tg.send_message(f'âŒ Error interno: {str(e)[:200]}', chat_id=chat_id)
+            tg.send_message(f'❌ Error interno: {str(e)[:200]}', chat_id=chat_id)
         except Exception:
             pass
         return https_fn.Response('OK', status=200)
@@ -2645,12 +2645,12 @@ def telegram_setup(req: https_fn.Request) -> https_fn.Response:
         )
 
     return https_fn.Response(
-        json.dumps({'error': 'AcciÃ³n no reconocida'}),
+        json.dumps({'error': 'Acción no reconocida'}),
         status=400, content_type='application/json',
     )
 
 
-# â"€â"€â"€ GESTIÃ"N DE ALMACENAMIENTO DE DEPLOY â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+# ──────────────── GESTIN DE ALMACENAMIENTO DE DEPLOY ────────────────
 
 def _get_cloud_storage_data(gcs_client):
     """Collect Cloud Storage (gcf-v2-*) deploy artifacts info."""
@@ -2910,10 +2910,10 @@ def _cleanup_artifact_registry(project_id):
 def manage_storage(req: https_fn.Request) -> https_fn.Response:
     """Gestiona artefactos de deploy en Cloud Storage y Artifact Registry.
 
-    GET: Lista ambos almacenes con tamaÃ±o, objetos y limpiables.
-         ?type=cs  â†’ solo Cloud Storage
-         ?type=ar  â†’ solo Artifact Registry
-         (sin type â†’ ambos)
+    GET: Lista ambos almacenes con tamaño, objetos y limpiables.
+         ?type=cs  → solo Cloud Storage
+         ?type=ar  → solo Artifact Registry
+         (sin type → ambos)
     POST: { action: 'cleanup_cs' | 'cleanup_ar' | 'cleanup_all',
             pinHash: str }
     POST: { action: 'get_policies' }
@@ -2962,11 +2962,11 @@ def manage_storage(req: https_fn.Request) -> https_fn.Response:
             content_type='application/json',
         )
 
-    # â"€â"€ POST â"€â"€
+# ─────────────────────────────── POST ───────────────────────────────
     body = req.get_json(silent=True) or {}
     action = body.get('action', '')
 
-    # â"€â"€ Get policies (no PIN needed) â"€â"€
+# ─────────────────── Get policies (no PIN needed) ───────────────────
     if action == 'get_policies':
         try:
             policy_doc = db.document('config/cleanup-policies').get()
@@ -2984,7 +2984,7 @@ def manage_storage(req: https_fn.Request) -> https_fn.Response:
                 status=500, content_type='application/json',
             )
 
-    # â"€â"€ Set policies â"€â"€
+# ─────────────────────────── Set policies ───────────────────────────
     if action == 'set_policies':
         pin_hash = body.get('pinHash', '')
         if not pin_hash:
@@ -3012,7 +3012,7 @@ def manage_storage(req: https_fn.Request) -> https_fn.Response:
             db,
             source='manual',
             action='update_cleanup_policies',
-            description='ActualizaciÃ³n de polÃ­ticas de limpieza automÃ¡tica',
+            description='Actualización de políticas de limpieza automática',
             actor='admin',
             metadata={'policies': new_policies},
         )
@@ -3022,21 +3022,21 @@ def manage_storage(req: https_fn.Request) -> https_fn.Response:
             content_type='application/json',
         )
 
-    # â"€â"€ Cleanup actions â"€â"€
+# ───────────────────────── Cleanup actions ──────────────────────────
     if action not in ('cleanup_cs', 'cleanup_ar', 'cleanup_all', 'cleanup'):
         return https_fn.Response(
-            json.dumps({'error': 'AcciÃ³n no reconocida'}),
+            json.dumps({'error': 'Acción no reconocida'}),
             status=400, content_type='application/json',
         )
 
-    # Legacy support: 'cleanup' â†’ 'cleanup_cs'
+    # Legacy support: 'cleanup' → 'cleanup_cs'
     if action == 'cleanup':
         action = 'cleanup_cs'
 
     pin_hash = body.get('pinHash', '')
     if not pin_hash:
         return https_fn.Response(
-            json.dumps({'error': 'PIN requerido para esta operaciÃ³n'}),
+            json.dumps({'error': 'PIN requerido para esta operación'}),
             status=401, content_type='application/json',
         )
 
