@@ -24,10 +24,10 @@ export default function Overview({ onNavigate, servicesConfig }) {
   useEffect(() => {
     getDocs(collection(db, 'notifications')).then(snap => {
       setNotifications(snap.docs.map(d => ({ docId: d.id, ...d.data() })));
-    });
+    }).catch(err => console.error('Error fetching notifications:', err));
     getDoc(doc(db, 'config', 'notification-reads')).then(snap => {
       if (snap.exists()) setReadUids(new Set(snap.data().readUids || []));
-    });
+    }).catch(err => console.error('Error fetching notification-reads:', err));
   }, []);
 
   const totalNotifs = useMemo(() =>
@@ -73,14 +73,15 @@ export default function Overview({ onNavigate, servicesConfig }) {
   const totalActiveUsers = Object.values(serviceStats).reduce((s, v) => s + v.totalUsers, 0);
 
   // Conteo unificado: alertas de Firestore + actionable-events (sin duplicados)
-  const TERMINAL_STATUSES = ['completed', 'done', 'discarded', 'cancelled_by_ai', 'resolved'];
+  const TERMINAL_STATUSES = ['completed', 'done', 'discarded', 'cancelled_by_ai', 'cancelled_by_system', 'resolved'];
+  const norm = (v) => (!v || v === '?' || v === 'usuario no informado' || v === 'desconocido') ? '' : v.toLowerCase();
   const firestorePending = alerts.filter(a => a.status === 'pending');
   // Alertas resueltas: todas las que tienen un status terminal
   const resolvedAlerts = alerts.filter(a => TERMINAL_STATUSES.includes(a.status));
   const extraFromAnalysis = analysisEvents.filter(ae => {
     // Excluir si ya tiene una alerta (cualquier estado) para el mismo usuario/cuenta/servicio
     const hasAlert = [...firestorePending, ...resolvedAlerts].some(a =>
-      a.userAlias === ae.userName &&
+      norm(a.userAlias) === norm(ae.userName) &&
       String(a.accountId) === String(ae.accountId) &&
       a.service === ae.subscription
     );

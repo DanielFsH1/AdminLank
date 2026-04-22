@@ -23,7 +23,7 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
  const highlightServiceKey = typeof navData === 'object' ? navData?.serviceKey : null;
  const highlightUserAlias = typeof navData === 'object' ? navData?.userAlias : null;
 
- const { data: accounts, loading } = useCollection('accounts', { realtime: false });
+ const { data: accounts, loading } = useCollection('accounts');
  const { data: masterConfigDoc } = useDocument('config', 'subscription-master', { realtime: false });
  const [search, setSearch] = useState('');
  const [expandedId, setExpandedId] = useState(highlightAccountId || null);

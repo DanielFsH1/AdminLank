@@ -2,9 +2,10 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useDocument } from '../hooks/useFirestore';
 import { collection, getDocs, onSnapshot, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { formatMXN, getBankMeta, getProfileImage, BANKS } from '../config/services';
+import { formatMXN, getBankMeta, getProfileImage, BANKS, setCustomBankAccounts } from '../config/services';
 import { confirmRecurringExpense, saveCreditAccount, deleteCreditAccount, addCreditInstallment, removeCreditInstallment, saveCreditStatement, logManualChange } from '../hooks/firestoreActions';
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
+import AddClabeModal from '../components/AddClabeModal';
 import { BankIcon, BarChartIcon, CalendarIcon, CheckCircleIcon, ClipboardIcon, ClockIcon, CloseIcon, CreditCardIcon, DepositIcon, EditIcon, ExpenseIcon, FolderIcon, HourglassIcon, KeyIcon, LinkIcon, MoneyIcon, PlusIcon, ReceiptIcon, RefreshIcon, SaveIcon, TrashIcon, TrendUpIcon, WarningIcon } from '../components/Icons';
 
 const MONTH_NAMES_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -28,7 +29,7 @@ function formatDateTime(dateStr) {
 }
 
 export default function Finance() {
- const { data: overview, loading: loadingOverview, error: errorOverview } = useDocument('finance', 'overview', { realtime: false });
+ const { data: overview, loading: loadingOverview, error: errorOverview } = useDocument('finance', 'overview');
  const { data: ledger, loading: loadingLedger } = useDocument('finance', 'manual-ledger');
  const [withdrawals, setWithdrawals] = useState([]);
  const [wTab, setWTab] = useState('all');
@@ -97,6 +98,9 @@ export default function Finance() {
  const [addClabeModal, setAddClabeModal] = useState(false);
  const [removeClabeConfirm, setRemoveClabeConfirm] = useState(null);
  const [clabeToast, setClabeToast] = useState({ visible: false, message: '', type: 'success' });
+
+ // Custom bank accounts (user-created with uploaded images)
+ const [customBankAccounts, setCustomBankAccountsState] = useState({});
 
  const showClabeToast = useCallback((msg, type = 'success') => {
  setClabeToast({ visible: true, message: msg, type });
@@ -198,6 +202,22 @@ export default function Finance() {
  return () => unsub();
  }, []);
 
+ // Cargar cuentas bancarias custom (con logos subidos)
+ useEffect(() => {
+   const bankAccRef = doc(db, 'finance', 'bank-accounts');
+   const unsub = onSnapshot(bankAccRef, snap => {
+     if (snap.exists()) {
+       const accounts = snap.data().accounts || {};
+       setCustomBankAccountsState(accounts);
+       setCustomBankAccounts(accounts);
+     } else {
+       setCustomBankAccountsState({});
+       setCustomBankAccounts({});
+     }
+   });
+   return () => unsub();
+ }, []);
+
  // Cargar cuentas de crédito
  useEffect(() => {
    const creditRef = doc(db, 'finance', 'credit-accounts');
@@ -236,19 +256,39 @@ export default function Finance() {
  });
  };
 
- const handleAddClabe = async (values) => {
- if (!values.bank?.trim() || !values.clabe?.trim()) return;
- const newEntry = {
-      bank: values.bank.trim(),
-      clabe: values.clabe.trim(),
-      type: values.type || 'debito',
- };
- if (values.note?.trim()) newEntry.note = values.note.trim();
+ const handleAddClabe = async (clabeEntry, newBankData) => {
+ if (!clabeEntry.bank?.trim() || !clabeEntry.clabe?.trim()) return;
 
- const ref = doc(db, 'finance', 'bank-clabes');
- const updatedAccounts = [...clabes, newEntry];
- await updateDoc(ref, { accounts: updatedAccounts });
- showClabeToast(`CLABE de ${newEntry.bank} agregada`);
+ // Duplicate CLABE check
+ if (clabes.some(c => c.clabe === clabeEntry.clabe)) {
+   throw new Error('Esta CLABE ya está registrada');
+ }
+
+ // If creating a new bank account, save it first
+ if (newBankData) {
+   const bankAccRef = doc(db, 'finance', 'bank-accounts');
+   const bankAccSnap = await getDoc(bankAccRef);
+   const existing = bankAccSnap.exists() ? (bankAccSnap.data().accounts || {}) : {};
+   const updated = {
+     ...existing,
+     [newBankData.name]: { color: newBankData.color, logo: newBankData.logo },
+   };
+   if (bankAccSnap.exists()) {
+     await updateDoc(bankAccRef, { accounts: updated });
+   } else {
+     await setDoc(bankAccRef, { accounts: updated });
+   }
+ }
+
+ const clabeRef = doc(db, 'finance', 'bank-clabes');
+ const updatedAccounts = [...clabes, clabeEntry];
+ const clabeSnap = await getDoc(clabeRef);
+ if (clabeSnap.exists()) {
+   await updateDoc(clabeRef, { accounts: updatedAccounts });
+ } else {
+   await setDoc(clabeRef, { accounts: updatedAccounts });
+ }
+ showClabeToast(`CLABE de ${clabeEntry.bank} agregada`);
  };
 
  const handleRemoveClabeConfirm = async () => {
@@ -1767,24 +1807,11 @@ export default function Finance() {
 
 
       {/* Modal: Agregar CLABE */}
-      <EditModal
+      <AddClabeModal
         open={addClabeModal}
         onClose={() => setAddClabeModal(false)}
         onSave={handleAddClabe}
-        title="Agregar cuenta CLABE"
-        icon={<BankIcon size={16} />}
-        fields={[
-          { key: 'bank', label: 'Nombre del banco', required: true, placeholder: 'Ej: BBVA, Klar, Nu...' },
-          { key: 'clabe', label: 'CLABE interbancaria (18 dígitos)', required: true, placeholder: '000000000000000000' },
-          { key: 'type', label: 'Tipo de cuenta', type: 'select', options: [
-            { value: 'debito', label: 'Débito' },
-            { value: 'credito', label: 'Crédito (solo para pagar)' },
-          ]},
-          { key: 'note', label: 'Nota (opcional)', placeholder: 'Ej: solo para pagar' },
-        ]}
-        initialValues={{ bank: '', clabe: '', type: 'debito', note: '' }}
-        saveLabel="Agregar CLABE"
-        confirmMessage="Se agregará esta cuenta CLABE a la lista."
+        customBankAccounts={customBankAccounts}
       />
 
       {/* Diálogo: Confirmar eliminación de CLABE */}
