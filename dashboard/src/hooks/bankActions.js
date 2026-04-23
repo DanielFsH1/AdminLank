@@ -91,6 +91,8 @@ export async function createCreditAccount(bankId, creditData) {
     cutoffDay: parseInt(creditData.cutoffDay, 10) || 1,
     paymentDueDay: parseInt(creditData.paymentDueDay, 10) || 15,
     alertDaysBefore: parseInt(creditData.alertDaysBefore, 10) || 1,
+    paymentClabe: creditData.paymentClabe || '',
+    paymentClabeNote: creditData.paymentClabeNote || '',
     installments: [],
     monthlyStatements: [],
     createdAt: nowISO(),
@@ -116,6 +118,8 @@ export async function updateCreditAccount(bankId, creditData) {
     cutoffDay: parseInt(creditData.cutoffDay, 10) || current.cutoffDay,
     paymentDueDay: parseInt(creditData.paymentDueDay, 10) || current.paymentDueDay,
     alertDaysBefore: parseInt(creditData.alertDaysBefore, 10) || current.alertDaysBefore,
+    paymentClabe: creditData.paymentClabe ?? current.paymentClabe ?? '',
+    paymentClabeNote: creditData.paymentClabeNote ?? current.paymentClabeNote ?? '',
     updatedAt: nowISO(),
   };
   await updateDoc(ref_, { creditAccount: updated, updatedAt: nowISO() });

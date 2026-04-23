@@ -183,6 +183,14 @@ export default function Finance() {
              ...bank.creditAccount,
              clabeIndex: -1,
            });
+           if (bank.creditAccount.paymentClabe) {
+             derivedClabes.push({
+               bank: bank.name,
+               clabe: bank.creditAccount.paymentClabe,
+               type: 'credito',
+               note: bank.creditAccount.paymentClabeNote || 'sólo para pagar',
+             });
+           }
          }
        });
 

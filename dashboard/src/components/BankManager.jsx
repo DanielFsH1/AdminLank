@@ -166,7 +166,7 @@ export default function BankManager({ vaultCards = {} }) {
 
   // ─── Credit account ───
   const openCreateCredit = (bankId) => {
-    setCreditValues({ creditLimit: '', currentBalance: '0', annualRate: '', minimumPayment: '', cutoffDay: '', paymentDueDay: '', alertDaysBefore: '1' });
+    setCreditValues({ creditLimit: '', currentBalance: '0', annualRate: '', minimumPayment: '', cutoffDay: '', paymentDueDay: '', alertDaysBefore: '1', paymentClabe: '', paymentClabeNote: '' });
     setCreditModal({ bankId, mode: 'create' });
   };
 
@@ -176,6 +176,7 @@ export default function BankManager({ vaultCards = {} }) {
       creditLimit: c.creditLimit || '', currentBalance: c.currentBalance || '0',
       annualRate: c.annualRate || '', minimumPayment: c.minimumPayment || '',
       cutoffDay: c.cutoffDay || '', paymentDueDay: c.paymentDueDay || '', alertDaysBefore: c.alertDaysBefore || '1',
+      paymentClabe: c.paymentClabe || '', paymentClabeNote: c.paymentClabeNote || '',
     });
     setCreditModal({ bankId: bank.id, mode: 'edit' });
   };
@@ -617,6 +618,16 @@ export default function BankManager({ vaultCards = {} }) {
                   <input type="number" value={creditValues.alertDaysBefore} onChange={e => setCreditValues(p => ({ ...p, alertDaysBefore: e.target.value }))} placeholder="1" min="0" max="15" />
                 </div>
               </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div className="vault-form-group">
+                  <label>CLABE para pagar</label>
+                  <input type="text" value={creditValues.paymentClabe} onChange={e => setCreditValues(p => ({ ...p, paymentClabe: e.target.value }))} placeholder="18 dígitos" maxLength={18} style={{ fontFamily: 'monospace' }} />
+                </div>
+                <div className="vault-form-group">
+                  <label>Nota CLABE pago</label>
+                  <input type="text" value={creditValues.paymentClabeNote} onChange={e => setCreditValues(p => ({ ...p, paymentClabeNote: e.target.value }))} placeholder="sólo para pagar" />
+                </div>
+              </div>
             </div>
             <div className="vault-modal-actions">
               <button className="vault-modal-btn cancel" onClick={() => setCreditModal(null)}>Cancelar</button>
@@ -853,6 +864,15 @@ export default function BankManager({ vaultCards = {} }) {
 
         {/* Key dates */}
         <div className="credit-dates-row">
+          {credit.paymentClabe && (
+            <div className="credit-date-item" style={{ gridColumn: '1 / -1' }}>
+              <div>
+                <div className="credit-date-label">CLABE para pagar</div>
+                <div className="credit-date-value" style={{ fontFamily: 'monospace', fontSize: '13px' }}>{credit.paymentClabe}</div>
+                {credit.paymentClabeNote && <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{credit.paymentClabeNote}</div>}
+              </div>
+            </div>
+          )}
           <div className="credit-date-item">
             <div>
               <div className="credit-date-label">Fecha de corte</div>
