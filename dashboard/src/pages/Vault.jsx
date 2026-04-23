@@ -10,6 +10,7 @@ import { seedGooglePasswords } from '../utils/seedGooglePasswords';
 import { BadgeIcon, BankIcon, CalendarIcon, CashIcon, CheckCircleIcon, ClipboardIcon, CloseIcon, CreditCardIcon, DotRed, EditIcon, EmailIcon, HashIcon, HourglassIcon, KeyIcon, LinkIcon, LockIcon, LockKeyIcon, NotesIcon, PhoneIcon, PlusIcon, ReceiptIcon, RefreshIcon, SaveIcon, SearchIcon, SeedlingIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, WarningIcon } from '../components/Icons';
 import { normalizeSearch, nMatch } from '../utils/normalize';
 import SearchBar from '../components/SearchBar';
+import BankManager from '../components/BankManager';
 import CryptoJS from 'crypto-js';
 
 const SERVICE_SENSITIVE = ['password', 'googlePassword'];
@@ -1305,6 +1306,9 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
            Credenciales de Servicios
           {pendingAlertCount > 0 && <span className="vault-tab-badge">{pendingAlertCount}</span>}
         </button>
+        <button className={`vault-tab ${activeTab === 'banks' ? 'active' : ''}`} onClick={() => setActiveTab('banks')}>
+          <BankIcon size={16} /> Bancos
+        </button>
         <button className={`vault-tab ${activeTab === 'cards' ? 'active' : ''}`} onClick={() => setActiveTab('cards')}>
            Tarjetas de Pago ({Object.keys(allCards).length})
         </button>
@@ -1322,6 +1326,11 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
         onChange={setSearchQuery}
         placeholder="Buscar por nombre, email, servicio, banco, notas, referencia..."
       />
+
+      {/* ═══ TAB: BANCOS ═══ */}
+      {activeTab === 'banks' && (
+        <BankManager vaultCards={cards} />
+      )}
 
       {/* ═══ TAB: CREDENCIALES ═══ */}
       {activeTab === 'credentials' && (

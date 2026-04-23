@@ -2234,8 +2234,9 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
 
             # 1. Alertas de Firestore con status pending (incluye primera capa)
             if total_alerts > 0:
+                from google.cloud.firestore_v1.base_query import FieldFilter
                 new_alerts = list(db.collection('alerts')
-                                 .where('status', '==', 'pending')
+                                 .where(filter=FieldFilter('status', '==', 'pending'))
                                  .order_by('createdAt', direction='DESCENDING')
                                  .limit(max(total_alerts, 10)).stream())
                 alert_dicts = [a.to_dict() for a in new_alerts]
@@ -2250,11 +2251,11 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
 
             if not notified:
                 try:
-                    # Buscar alertas pending creadas en los últimos 10 minutos
+                    from google.cloud.firestore_v1.base_query import FieldFilter
                     recent_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
                     recent_alerts = list(db.collection('alerts')
-                                        .where('status', '==', 'pending')
-                                        .where('createdAt', '>=', recent_cutoff)
+                                        .where(filter=FieldFilter('status', '==', 'pending'))
+                                        .where(filter=FieldFilter('createdAt', '>=', recent_cutoff))
                                         .order_by('createdAt', direction='DESCENDING')
                                         .limit(20).stream())
                     alert_dicts = [a.to_dict() for a in recent_alerts]
@@ -2287,6 +2288,10 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
 
             if agent_review.get('shouldNotify') and agent_review_text:
                 tg.send_message(agent_review_text, parse_mode=None)
+                print(f'[Telegram] Resumen de agent-review enviado ({len(agent_review_text)} chars)')
+            else:
+                print(f'[Telegram] Agent-review no enviado (shouldNotify={agent_review.get("shouldNotify")}, '
+                      f'hasText={bool(agent_review_text)})')
     except Exception as tg_err:
         print(f'[Telegram] Error no fatal en notificación scheduled: {tg_err}')
     # ──────────────────────────────────────────────────────────────────

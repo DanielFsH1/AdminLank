@@ -145,9 +145,21 @@ export function getServiceMeta(id) {
   return SERVICES[id] || { name: id, color: '#666', logo: '', maxSlots: 0 };
 }
 
+let _customBankAccounts = {};
+
+export function setCustomBankAccounts(accounts) {
+  _customBankAccounts = accounts || {};
+}
+
+export function getCustomBankAccounts() {
+  return _customBankAccounts;
+}
+
 // Obtener metadata de banco con fallback
 export function getBankMeta(bankName) {
-  return BANKS[bankName] || { color: '#64748b', logo: '' };
+  if (BANKS[bankName]) return BANKS[bankName];
+  if (_customBankAccounts[bankName]) return _customBankAccounts[bankName];
+  return { color: '#64748b', logo: '' };
 }
 
 /**

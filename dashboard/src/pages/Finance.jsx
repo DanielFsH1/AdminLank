@@ -1,11 +1,10 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useDocument } from '../hooks/useFirestore';
 import { collection, getDocs, onSnapshot, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { formatMXN, getBankMeta, getProfileImage, BANKS, setCustomBankAccounts } from '../config/services';
-import { confirmRecurringExpense, generateRecurringExpenses, saveCreditAccount, deleteCreditAccount, addCreditInstallment, removeCreditInstallment, saveCreditStatement, logManualChange } from '../hooks/firestoreActions';
+import { confirmRecurringExpense, generateRecurringExpenses, logManualChange } from '../hooks/firestoreActions';
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
-import AddClabeModal from '../components/AddClabeModal';
 import { BankIcon, BarChartIcon, CalendarIcon, CheckCircleIcon, ClipboardIcon, ClockIcon, CloseIcon, CreditCardIcon, DepositIcon, EditIcon, ExpenseIcon, FolderIcon, HourglassIcon, KeyIcon, LinkIcon, MoneyIcon, PlusIcon, ReceiptIcon, RefreshIcon, SaveIcon, TrashIcon, TrendUpIcon, WarningIcon } from '../components/Icons';
 
 const MONTH_NAMES_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -66,16 +65,7 @@ export default function Finance() {
  const [loadingCredit, setLoadingCredit] = useState(true);
  const [vaultCards, setVaultCards] = useState({});
  const [expandedCredit, setExpandedCredit] = useState(null);
- const [creditExpandSection, setCreditExpandSection] = useState({}); // { [accountId]: 'installments' | 'statements' | null }
- const [creditModal, setCreditModal] = useState(null); // null | 'create' | { ...account }
- const [installmentModal, setInstallmentModal] = useState(null); // null | accountId
- const [statementModal, setStatementModal] = useState(null); // null | accountId
- const [deleteCreditConfirm, setDeleteCreditConfirm] = useState(null);
- const [deleteInstallmentConfirm, setDeleteInstallmentConfirm] = useState(null);
- const [creditToast, setCreditToast] = useState({ visible: false, message: '', type: 'success' });
- const showCreditToast = useCallback((msg, type = 'success') => {
-   setCreditToast({ visible: true, message: msg, type });
- }, []);
+ const [creditExpandSection, setCreditExpandSection] = useState({});
 
  const showExpenseToast = useCallback((msg, type = 'success') => {
  setExpenseToast({ visible: true, message: msg, type });
@@ -95,31 +85,9 @@ export default function Finance() {
  const [clabes, setClabes] = useState([]);
  const [loadingClabes, setLoadingClabes] = useState(true);
  const [copiedClabe, setCopiedClabe] = useState(null);
- const [addClabeModal, setAddClabeModal] = useState(false);
- const [removeClabeConfirm, setRemoveClabeConfirm] = useState(null);
- const [clabeToast, setClabeToast] = useState({ visible: false, message: '', type: 'success' });
 
  // Custom bank accounts (user-created with uploaded images)
  const [customBankAccounts, setCustomBankAccountsState] = useState({});
-
- const showClabeToast = useCallback((msg, type = 'success') => {
- setClabeToast({ visible: true, message: msg, type });
- }, []);
-
- // Available vault cards for linking (build options list)
- const vaultCardOptions = useMemo(() => {
-   return Object.entries(vaultCards).map(([id, card]) => ({
-     value: id,
-     label: `${card.bank || ''} ****${card.lastFour || ''}`.trim(),
-   }));
- }, [vaultCards]);
-
- // Available CLABEs de crédito for linking
- const creditClabeOptions = useMemo(() => {
-   return clabes
-     .map((c, idx) => c.type === 'credito' ? { value: idx, label: `${c.bank} — ${c.clabe}` } : null)
-     .filter(Boolean);
- }, [clabes]);
 
  const bankAccountOptions = useMemo(() => {
    const debitClabes = clabes.filter(c => c.type !== 'credito');
@@ -187,10 +155,51 @@ export default function Finance() {
  });
  }, [expandedHistMonth]);
 
- // Cargar CLABEs bancarias
+ // Ref: si la colección banks tiene datos, es fuente primaria (post-migración)
+ const banksSourceRef = useRef(false);
+
+ // Listener de colección banks — fuente primaria post-migración
+ useEffect(() => {
+   const unsub = onSnapshot(collection(db, 'banks'), snap => {
+     if (!snap.empty) {
+       banksSourceRef.current = true;
+       const derivedClabes = [];
+       const derivedCredit = [];
+
+       snap.docs.forEach(d => {
+         const bank = { id: d.id, ...d.data() };
+         if (bank.debitAccount?.clabe) {
+           derivedClabes.push({
+             bank: bank.name,
+             clabe: bank.debitAccount.clabe,
+             type: 'debito',
+             note: bank.debitAccount.note || '',
+           });
+         }
+         if (bank.creditAccount) {
+           derivedCredit.push({
+             id: bank.id,
+             bank: bank.name,
+             ...bank.creditAccount,
+             clabeIndex: -1,
+           });
+         }
+       });
+
+       setClabes(derivedClabes);
+       setLoadingClabes(false);
+       setCreditAccounts(derivedCredit);
+       setLoadingCredit(false);
+     }
+   });
+   return () => unsub();
+ }, []);
+
+ // Cargar CLABEs bancarias (fallback pre-migración)
  useEffect(() => {
  const clabeRef = doc(db, 'finance', 'bank-clabes');
  const unsub = onSnapshot(clabeRef, snap => {
+      if (banksSourceRef.current) return;
       if (snap.exists()) {
         const data = snap.data();
         setClabes(data.accounts || []);
@@ -218,10 +227,11 @@ export default function Finance() {
    return () => unsub();
  }, []);
 
- // Cargar cuentas de crédito
+ // Cargar cuentas de crédito (fallback pre-migración)
  useEffect(() => {
    const creditRef = doc(db, 'finance', 'credit-accounts');
    const unsub = onSnapshot(creditRef, snap => {
+     if (banksSourceRef.current) return;
      if (snap.exists()) {
        setCreditAccounts(snap.data().accounts || []);
      } else {
@@ -230,8 +240,10 @@ export default function Finance() {
      setLoadingCredit(false);
    }, (err) => {
      console.warn('credit-accounts listener error:', err);
-     setCreditAccounts([]);
-     setLoadingCredit(false);
+     if (!banksSourceRef.current) {
+       setCreditAccounts([]);
+       setLoadingCredit(false);
+     }
    });
    return () => unsub();
  }, []);
@@ -262,55 +274,6 @@ export default function Finance() {
       setCopiedClabe(clabe);
       setTimeout(() => setCopiedClabe(null), 2000);
  });
- };
-
- const handleAddClabe = async (clabeEntry, newBankData) => {
- if (!clabeEntry.bank?.trim() || !clabeEntry.clabe?.trim()) return;
-
- // Duplicate CLABE check
- if (clabes.some(c => c.clabe === clabeEntry.clabe)) {
-   throw new Error('Esta CLABE ya está registrada');
- }
-
- // If creating a new bank account, save it first
- if (newBankData) {
-   const bankAccRef = doc(db, 'finance', 'bank-accounts');
-   const bankAccSnap = await getDoc(bankAccRef);
-   const existing = bankAccSnap.exists() ? (bankAccSnap.data().accounts || {}) : {};
-   const updated = {
-     ...existing,
-     [newBankData.name]: { color: newBankData.color, logo: newBankData.logo },
-   };
-   if (bankAccSnap.exists()) {
-     await updateDoc(bankAccRef, { accounts: updated });
-   } else {
-     await setDoc(bankAccRef, { accounts: updated });
-   }
- }
-
- const clabeRef = doc(db, 'finance', 'bank-clabes');
- const updatedAccounts = [...clabes, clabeEntry];
- const clabeSnap = await getDoc(clabeRef);
- if (clabeSnap.exists()) {
-   await updateDoc(clabeRef, { accounts: updatedAccounts });
- } else {
-   await setDoc(clabeRef, { accounts: updatedAccounts });
- }
- showClabeToast(`CLABE de ${clabeEntry.bank} agregada`);
- };
-
- const handleRemoveClabeConfirm = async () => {
- if (removeClabeConfirm === null) return;
- try {
- const ref = doc(db, 'finance', 'bank-clabes');
- const updatedAccounts = clabes.filter((_, i) => i !== removeClabeConfirm.index);
- await updateDoc(ref, { accounts: updatedAccounts });
- showClabeToast(`CLABE de ${removeClabeConfirm.bank} eliminada`);
- setRemoveClabeConfirm(null);
- } catch (err) {
- showClabeToast(`Error al eliminar: ${err.message}`, 'error');
- throw err;
- }
  };
 
  // Helper: determinar el monthKey de una fecha
@@ -681,7 +644,6 @@ export default function Finance() {
  };
 
  // ─── Credit account helpers ─────────────────────────────────────────
- const buildCreditId = (bank) => bank.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
 
  const getLinkedCardLabel = (cardId) => {
    const card = vaultCards[cardId];
@@ -692,106 +654,6 @@ export default function Finance() {
  const getLinkedClabe = (clabeIdx) => {
    if (clabeIdx == null || clabeIdx < 0 || clabeIdx >= clabes.length) return null;
    return clabes[clabeIdx];
- };
-
- const handleSaveCreditAccount = async (values) => {
-   try {
-     const id = values.id || buildCreditId(values.bank);
-     const vaultCardIds = Array.isArray(values.vaultCardIds)
-       ? values.vaultCardIds
-       : (values.vaultCardIds || '').split(',').map(s => s.trim()).filter(Boolean);
-     const parsedClabeIndex = values.clabeIndex == null || values.clabeIndex === '' || values.clabeIndex === '-1'
-       ? -1
-       : parseInt(values.clabeIndex, 10);
-     const account = {
-       id,
-       bank: values.bank?.trim() || '',
-       creditLimit: parseFloat(values.creditLimit) || 0,
-       currentBalance: parseFloat(values.currentBalance) || 0,
-       cutoffDay: parseInt(values.cutoffDay, 10) || 1,
-       paymentDueDay: parseInt(values.paymentDueDay, 10) || 15,
-       annualRate: parseFloat(values.annualRate) || 0,
-       minimumPayment: parseFloat(values.minimumPayment) || 0,
-       alertDaysBefore: parseInt(values.alertDaysBefore, 10) || 1,
-       vaultCardIds,
-       clabeIndex: Number.isNaN(parsedClabeIndex) ? -1 : parsedClabeIndex,
-       installments: values.installments || (creditModal?.installments) || [],
-       monthlyStatements: values.monthlyStatements || (creditModal?.monthlyStatements) || [],
-     };
-     await saveCreditAccount(account, creditAccounts);
-     showCreditToast(`${account.bank} ${creditModal === 'create' ? 'creada' : 'actualizada'}`);
-     setCreditModal(null);
-   } catch (err) {
-     showCreditToast('Error: ' + err.message, 'error');
-   }
- };
-
- const handleDeleteCredit = async () => {
-   if (!deleteCreditConfirm) return;
-   try {
-     await deleteCreditAccount(deleteCreditConfirm.id, creditAccounts);
-     showCreditToast(`${deleteCreditConfirm.bank} eliminada`);
-     setDeleteCreditConfirm(null);
-   } catch (err) {
-     showCreditToast('Error: ' + err.message, 'error');
-     throw err;
-   }
- };
-
- const handleAddInstallment = async (values) => {
-   if (!installmentModal) return;
-   try {
-     const inst = {
-       description: values.description?.trim() || '',
-       totalAmount: parseFloat(values.totalAmount) || 0,
-       months: parseInt(values.months, 10) || 1,
-       monthlyPayment: parseFloat(values.monthlyPayment) || 0,
-       startDate: values.startDate || new Date().toISOString().slice(0, 7),
-       remainingMonths: parseInt(values.remainingMonths || values.months, 10) || 1,
-       withInterest: values.withInterest === 'true' || values.withInterest === true,
-       status: 'active',
-     };
-     if (!inst.monthlyPayment && inst.totalAmount && inst.months) {
-       inst.monthlyPayment = Math.round((inst.totalAmount / inst.months) * 100) / 100;
-     }
-     await addCreditInstallment(installmentModal, inst, creditAccounts);
-     showCreditToast(`MSI agregado: ${inst.description}`);
-     setInstallmentModal(null);
-   } catch (err) {
-     showCreditToast('Error: ' + err.message, 'error');
-   }
- };
-
- const handleDeleteInstallment = async () => {
-   if (!deleteInstallmentConfirm) return;
-   try {
-     await removeCreditInstallment(deleteInstallmentConfirm.accountId, deleteInstallmentConfirm.installmentId, creditAccounts);
-     showCreditToast('MSI eliminado');
-     setDeleteInstallmentConfirm(null);
-   } catch (err) {
-     showCreditToast('Error: ' + err.message, 'error');
-     throw err;
-   }
- };
-
- const handleSaveStatement = async (values) => {
-   if (!statementModal) return;
-   try {
-     const stmt = {
-       monthKey: values.monthKey || currentMonthKey,
-       balanceAtCutoff: parseFloat(values.balanceAtCutoff) || 0,
-       minimumPayment: parseFloat(values.minimumPayment) || 0,
-       paymentMade: parseFloat(values.paymentMade) || 0,
-       interestCharged: parseFloat(values.interestCharged) || 0,
-       paidAt: values.paidAt || '',
-       notes: values.notes?.trim() || '',
-     };
-     await saveCreditStatement(statementModal, stmt, creditAccounts);
-     showCreditToast(`Estado de cuenta ${stmt.monthKey} guardado`);
-     setStatementModal(null);
-   } catch (err) {
-     showCreditToast('Error: ' + err.message, 'error');
-   }
  };
 
  return (
@@ -824,20 +686,14 @@ export default function Finance() {
       <div className="finance-section" style={{ marginTop: '24px' }}>
         <div className="finance-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span><CreditCardIcon size={16} /> Cuentas de Crédito</span>
-          <button
-            className="alert-action-btn edit"
-            onClick={() => setCreditModal('create')}
-            style={{ fontSize: '12px' }}
-          >
-            <PlusIcon size={16} /> Agregar cuenta
-          </button>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 400 }}>Editar en Bóveda → Bancos</span>
         </div>
 
         {loadingCredit ? (
           <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>Cargando...</div>
         ) : creditAccounts.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)', fontSize: '13px' }}>
-            No hay cuentas de crédito registradas. Haz clic en "Agregar cuenta" para comenzar.
+            No hay cuentas de crédito registradas. Administra bancos desde Bóveda → Bancos.
           </div>
         ) : (
           <div className="credit-accounts-grid">
@@ -868,12 +724,6 @@ export default function Finance() {
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: '4px' }}>
-                      <button className="clabe-remove-btn" style={{ opacity: 1 }} onClick={() => setCreditModal({ ...acct })} title="Editar">
-                        <EditIcon size={16} />
-                      </button>
-                      <button className="clabe-remove-btn" style={{ opacity: 1 }} onClick={() => setDeleteCreditConfirm(acct)} title="Eliminar">
-                        <TrashIcon size={16} />
-                      </button>
                     </div>
                   </div>
 
@@ -952,14 +802,6 @@ export default function Finance() {
                                 <div>{formatMXN(inst.monthlyPayment)}/mes</div>
                                 <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Total: {formatMXN(inst.totalAmount)}</div>
                               </div>
-                              <button
-                                className="clabe-remove-btn"
-                                style={{ opacity: 0.7, marginLeft: '4px' }}
-                                onClick={() => setDeleteInstallmentConfirm({ accountId: acct.id, installmentId: inst.id, description: inst.description })}
-                                title="Eliminar MSI"
-                              >
-                                <TrashIcon size={14} />
-                              </button>
                             </div>
                           ))}
                         </div>
@@ -999,15 +841,7 @@ export default function Finance() {
                     </>
                   )}
 
-                  {/* Action buttons */}
-                  <div className="credit-actions-row">
-                    <button className="alert-action-btn edit" style={{ fontSize: '11px' }} onClick={() => setInstallmentModal(acct.id)}>
-                      <PlusIcon size={14} /> MSI
-                    </button>
-                    <button className="alert-action-btn edit" style={{ fontSize: '11px' }} onClick={() => setStatementModal(acct.id)}>
-                      <PlusIcon size={14} /> Estado de cuenta
-                    </button>
-                  </div>
+                  {/* Action buttons — read-only in Finance, edit in Bóveda → Bancos */}
                 </div>
               );
             })}
@@ -1378,13 +1212,7 @@ export default function Finance() {
       <div className="finance-section" style={{ marginTop: '24px' }}>
         <div className="finance-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span><BankIcon size={16} /> Cuentas Bancarias</span>
-          <button
-            className="alert-action-btn edit"
-            onClick={() => setAddClabeModal(true)}
-            style={{ fontSize: '12px' }}
-          >
-            <PlusIcon size={16} /> Agregar cuenta
-          </button>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 400 }}>Editar en Bóveda → Bancos</span>
         </div>
 
         {/* Cuentas de débito */}
@@ -1428,15 +1256,6 @@ export default function Finance() {
                                 )}
                               </div>
                             </div>
-                            {clabeEntry && (
-                              <button
-                                className="clabe-remove-btn"
-                                onClick={() => setRemoveClabeConfirm({ index: clabeGlobalIdx, bank: bankName })}
-                                title="Eliminar CLABE"
-                              >
-                                <TrashIcon size={16} />
-                              </button>
-                            )}
                           </div>
 
                           {/* CLABE copiable */}
@@ -1518,13 +1337,6 @@ export default function Finance() {
                                 )}
                               </div>
                             </div>
-                            <button
-                              className="clabe-remove-btn"
-                              onClick={() => setRemoveClabeConfirm({ index: globalIdx, bank: c.bank })}
-                              title="Eliminar CLABE"
-                            >
-                              <TrashIcon size={16} />
-                            </button>
                           </div>
                           <div
                             className={`clabe-number ${isCopied ? 'copied' : ''}`}
@@ -1814,28 +1626,6 @@ export default function Finance() {
       )}
 
 
-      {/* Modal: Agregar CLABE */}
-      <AddClabeModal
-        open={addClabeModal}
-        onClose={() => setAddClabeModal(false)}
-        onSave={handleAddClabe}
-        customBankAccounts={customBankAccounts}
-      />
-
-      {/* Diálogo: Confirmar eliminación de CLABE */}
-      <ConfirmDialog
-        open={!!removeClabeConfirm}
-        onClose={() => setRemoveClabeConfirm(null)}
-        onConfirm={handleRemoveClabeConfirm}
-        title="Eliminar CLABE"
-        message={removeClabeConfirm ? `¿Estás seguro de eliminar la CLABE de "${removeClabeConfirm.bank}"? Esta acción es irreversible.` : ''}
-        confirmLabel={<><TrashIcon size={16} /> Sí, eliminar</>}
-        danger
-        icon={<WarningIcon size={16} />}
-      />
-
-      {/* Toast CLABEs */}
-      <Toast {...clabeToast} onClose={() => setClabeToast(prev => ({ ...prev, visible: false }))} />
 
       {/* Modal: Agregar gasto/inversión manual */}
       <EditModal
@@ -1982,106 +1772,6 @@ export default function Finance() {
       {/* Toast depósitos */}
       <Toast {...depositToast} onClose={() => setDepositToast(prev => ({ ...prev, visible: false }))} />
 
-      {/* ═══ MODALES DE CUENTAS DE CRÉDITO ═══ */}
-
-      {/* Modal: Crear/editar cuenta de crédito */}
-      <EditModal
-        open={!!creditModal}
-        onClose={() => setCreditModal(null)}
-        onSave={handleSaveCreditAccount}
-        title={creditModal === 'create' ? 'Nueva cuenta de crédito' : `Editar — ${creditModal?.bank || ''}`}
-        icon={<CreditCardIcon size={16} />}
-        initialValues={creditModal && creditModal !== 'create' ? {
-          id: creditModal.id,
-          bank: creditModal.bank,
-          creditLimit: creditModal.creditLimit || '',
-          currentBalance: creditModal.currentBalance || '',
-          cutoffDay: creditModal.cutoffDay || '',
-          paymentDueDay: creditModal.paymentDueDay || '',
-          annualRate: creditModal.annualRate || '',
-          minimumPayment: creditModal.minimumPayment || '',
-          alertDaysBefore: creditModal.alertDaysBefore || 1,
-          vaultCardIds: (creditModal.vaultCardIds || []).join(','),
-          clabeIndex: creditModal.clabeIndex != null ? String(creditModal.clabeIndex) : '-1',
-          installments: creditModal.installments,
-          monthlyStatements: creditModal.monthlyStatements,
-        } : {}}
-        fields={[
-          { key: 'bank', label: 'Banco', type: 'select', options: Object.keys(BANKS).filter(b => b.toLowerCase().includes('crédito') || b.toLowerCase().includes('credito')).map(b => ({ value: b, label: b })), required: true, placeholder: 'Seleccionar banco' },
-          { key: 'creditLimit', label: 'Línea de crédito ($)', type: 'number', placeholder: '15000', required: true },
-          { key: 'currentBalance', label: 'Saldo utilizado actual ($)', type: 'number', placeholder: '3200' },
-          { key: 'cutoffDay', label: 'Día de corte (1-31)', type: 'number', placeholder: '15', required: true },
-          { key: 'paymentDueDay', label: 'Día límite de pago (1-31)', type: 'number', placeholder: '5', required: true },
-          { key: 'annualRate', label: 'Tasa de interés anual (%)', type: 'number', placeholder: '0' },
-          { key: 'minimumPayment', label: 'Pago mínimo del mes ($)', type: 'number', placeholder: '0' },
-          { key: 'alertDaysBefore', label: 'Alertar X días antes', type: 'number', placeholder: '1' },
-          { key: 'vaultCardIds', label: 'Tarjetas vinculadas (IDs separados por coma)', type: 'text', placeholder: vaultCardOptions.map(o => o.label).join(', ') || 'ID de tarjeta en Bóveda' },
-          { key: 'clabeIndex', label: 'CLABE de crédito vinculada', type: 'select', options: [{ value: '-1', label: 'Ninguna' }, ...creditClabeOptions.map(o => ({ value: String(o.value), label: o.label }))], placeholder: 'Seleccionar CLABE' },
-        ]}
-      />
-
-      {/* Modal: Agregar MSI */}
-      <EditModal
-        open={!!installmentModal}
-        onClose={() => setInstallmentModal(null)}
-        onSave={handleAddInstallment}
-        title="Agregar compra a meses"
-        icon={<ReceiptIcon size={16} />}
-        fields={[
-          { key: 'description', label: 'Descripción', type: 'text', placeholder: 'Ej: Laptop Dell', required: true },
-          { key: 'totalAmount', label: 'Monto total ($)', type: 'number', placeholder: '12000', required: true },
-          { key: 'months', label: 'Plazo (meses)', type: 'number', placeholder: '12', required: true },
-          { key: 'monthlyPayment', label: 'Pago mensual ($) — se calcula si se deja vacío', type: 'number', placeholder: 'Automático' },
-          { key: 'remainingMonths', label: 'Meses restantes', type: 'number', placeholder: 'Igual al plazo si es nuevo' },
-          { key: 'startDate', label: 'Mes de inicio (YYYY-MM)', type: 'text', placeholder: currentMonthKey },
-          { key: 'withInterest', label: '¿Con intereses?', type: 'select', options: [{ value: 'false', label: 'Sin intereses (MSI)' }, { value: 'true', label: 'Con intereses' }] },
-        ]}
-      />
-
-      {/* Modal: Registrar estado de cuenta */}
-      <EditModal
-        open={!!statementModal}
-        onClose={() => setStatementModal(null)}
-        onSave={handleSaveStatement}
-        title="Registrar estado de cuenta"
-        icon={<CalendarIcon size={16} />}
-        fields={[
-          { key: 'monthKey', label: 'Mes (YYYY-MM)', type: 'text', placeholder: currentMonthKey, required: true },
-          { key: 'balanceAtCutoff', label: 'Saldo al corte ($)', type: 'number', placeholder: '3200', required: true },
-          { key: 'minimumPayment', label: 'Pago mínimo ($)', type: 'number', placeholder: '500' },
-          { key: 'paymentMade', label: 'Pago realizado ($)', type: 'number', placeholder: '3200' },
-          { key: 'interestCharged', label: 'Intereses cobrados ($)', type: 'number', placeholder: '0' },
-          { key: 'paidAt', label: 'Fecha de pago (YYYY-MM-DD)', type: 'text', placeholder: new Date().toISOString().slice(0, 10) },
-          { key: 'notes', label: 'Notas', type: 'text', placeholder: 'Observaciones opcionales' },
-        ]}
-      />
-
-      {/* Confirmar eliminación de cuenta de crédito */}
-      <ConfirmDialog
-        open={!!deleteCreditConfirm}
-        onClose={() => setDeleteCreditConfirm(null)}
-        onConfirm={handleDeleteCredit}
-        title="Eliminar cuenta de crédito"
-        message={deleteCreditConfirm ? `¿Eliminar la cuenta de ${deleteCreditConfirm.bank}? Se perderán todos los MSI y estados de cuenta registrados.` : ''}
-        confirmLabel={<><TrashIcon size={16} /> Sí, eliminar</>}
-        danger
-        icon={<WarningIcon size={16} />}
-      />
-
-      {/* Confirmar eliminación de MSI */}
-      <ConfirmDialog
-        open={!!deleteInstallmentConfirm}
-        onClose={() => setDeleteInstallmentConfirm(null)}
-        onConfirm={handleDeleteInstallment}
-        title="Eliminar compra a meses"
-        message={deleteInstallmentConfirm ? `¿Eliminar "${deleteInstallmentConfirm.description}"?` : ''}
-        confirmLabel={<><TrashIcon size={16} /> Sí, eliminar</>}
-        danger
-        icon={<WarningIcon size={16} />}
-      />
-
-      {/* Toast crédito */}
-      <Toast {...creditToast} onClose={() => setCreditToast(prev => ({ ...prev, visible: false }))} />
  </>
  );
 }

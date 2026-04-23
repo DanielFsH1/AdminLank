@@ -5541,3 +5541,82 @@ code, pre, .clabe-digits, .alert-v2-highlight code {
   .sim-number-phone { font-size: 10px; }
   .sim-year-tab { padding: 6px 14px; font-size: 12px; }
 }
+
+/* ═══ ADD CLABE MODAL ═══ */
+.add-clabe-mode-toggle {
+  display: flex; gap: 4px; padding: 4px;
+  background: var(--bg-input); border-radius: var(--radius-md);
+}
+.add-clabe-mode-btn {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px 12px; border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-secondary); font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: all 0.2s;
+}
+.add-clabe-mode-btn.active {
+  background: var(--bg-card); color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.add-clabe-mode-btn:hover:not(.active) { color: var(--text-primary); }
+
+.add-clabe-bank-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 8px; max-height: 240px; overflow-y: auto;
+  padding: 4px 2px;
+}
+.add-clabe-bank-option {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 12px 8px; border: 2px solid var(--border-color);
+  border-radius: var(--radius-md); background: var(--bg-input);
+  cursor: pointer; transition: all 0.2s;
+}
+.add-clabe-bank-option:hover { border-color: var(--bank-color, var(--accent)); transform: translateY(-1px); }
+.add-clabe-bank-option.selected {
+  border-color: var(--bank-color, var(--accent));
+  background: color-mix(in srgb, var(--bank-color, var(--accent)) 8%, var(--bg-input));
+  box-shadow: 0 0 0 1px var(--bank-color, var(--accent));
+}
+.add-clabe-bank-logo {
+  width: 36px; height: 36px; border-radius: 8px; object-fit: cover;
+  border: 1px solid var(--border-color);
+}
+.add-clabe-bank-placeholder {
+  width: 36px; height: 36px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-card); color: var(--text-muted);
+  border: 1px solid var(--border-color);
+}
+.add-clabe-bank-name {
+  font-size: 11px; font-weight: 600; color: var(--text-primary);
+  text-align: center; line-height: 1.2; word-break: break-word;
+}
+.add-clabe-bank-check {
+  position: absolute; top: 4px; right: 4px;
+}
+
+.add-clabe-upload-zone {
+  border: 2px dashed var(--border-color); border-radius: var(--radius-md);
+  cursor: pointer; transition: all 0.2s; overflow: hidden;
+}
+.add-clabe-upload-zone:hover { border-color: var(--accent); background: var(--bg-input); }
+.add-clabe-upload-zone.has-image { border-style: solid; }
+.add-clabe-upload-empty {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 24px 16px; color: var(--text-muted);
+}
+.add-clabe-upload-empty span:first-of-type { font-size: 13px; font-weight: 600; }
+.add-clabe-upload-hint { font-size: 11px; color: var(--text-muted); }
+.add-clabe-upload-preview {
+  display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+}
+.add-clabe-upload-preview img {
+  width: 48px; height: 48px; border-radius: 8px; object-fit: cover;
+  border: 1px solid var(--border-color);
+}
+.add-clabe-upload-change {
+  font-size: 13px; color: var(--accent); font-weight: 600;
+}
+
+@media (max-width: 600px) {
+  .add-clabe-bank-grid { grid-template-columns: repeat(3, 1fr); }
+}

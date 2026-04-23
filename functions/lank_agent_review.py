@@ -224,6 +224,16 @@ def build_review_document(db, trigger, report, ok_accounts, failed_accounts,
     ))
     findings = dedupe_findings(findings)
 
+    pending_alert_count = 0
+    try:
+        from google.cloud.firestore_v1.base_query import FieldFilter
+        pending_docs = list(db.collection('alerts')
+                           .where(filter=FieldFilter('status', '==', 'pending'))
+                           .select([]).stream())
+        pending_alert_count = len(pending_docs)
+    except Exception:
+        pass
+
     metrics = {
         'totalAccounts': len(report.get('accounts', [])),
         'accountsOk': len(ok_accounts or []),
@@ -231,6 +241,7 @@ def build_review_document(db, trigger, report, ok_accounts, failed_accounts,
         'rawEmails': sum(len(a.get('rawEmails', [])) for a in ok_accounts or []),
         'totalEvents': sum(a.get('summary', {}).get('totalEvents', 0) for a in ok_accounts or []),
         'alertsGenerated': alerts_generated,
+        'pendingAlerts': pending_alert_count,
         'financeRecordsUpdated': finance_records,
     }
 
@@ -286,6 +297,10 @@ def build_notification_text(review_doc):
             f"alertas nuevas: {metrics.get('alertsGenerated', 0)}"
         ),
     ]
+
+    pending = metrics.get('pendingAlerts', 0)
+    if pending > 0:
+        lines.append(f"⚠️ Alertas pendientes en total: {pending}")
 
     schedule = review_doc.get('schedule', {})
     if schedule.get('enabled'):
