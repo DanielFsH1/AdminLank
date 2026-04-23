@@ -2793,7 +2793,7 @@ body {
 
 .credit-accounts-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 16px;
 }
 .credit-account-card {
@@ -2801,9 +2801,11 @@ body {
   border: 1px solid var(--border-color);
   border-left: 4px solid var(--bank-color, var(--accent-primary));
   border-radius: var(--radius-lg);
-  padding: 20px;
+  padding: 0;
   transition: all var(--transition-fast);
   position: relative;
+  cursor: pointer;
+  overflow: hidden;
 }
 .credit-account-card:hover {
   border-color: var(--bank-color, var(--accent-primary));
@@ -2814,7 +2816,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 14px;
+  padding: 16px 20px;
 }
 .credit-account-bank {
   display: flex;
@@ -3896,9 +3898,13 @@ body {
 
 /* Linked accounts */
 .vault-linked-section {
-  padding: 12px 18px;
+  padding: 14px 18px;
   border-top: 1px solid var(--border-color);
-  background: rgba(16,185,129,0.02);
+  background: var(--bg-secondary, rgba(100,100,100,0.03));
+  border-radius: 0;
+}
+.vault-linked-section + .vault-linked-section {
+  border-top: 1px dashed var(--border-color);
 }
 .vault-linked-title {
   font-size: 12px; font-weight: 700; color: var(--text-secondary);
@@ -4960,7 +4966,7 @@ code, pre, .clabe-digits, .alert-v2-highlight code {
 
   /* Credit accounts — más compactas */
   .credit-account-card {
-    padding: 14px;
+    padding: 0;
   }
   .credit-account-name {
     font-size: 14px;
@@ -5220,7 +5226,7 @@ code, pre, .clabe-digits, .alert-v2-highlight code {
     gap: 10px;
   }
   .credit-account-card {
-    padding: 12px;
+    padding: 0;
   }
   .credit-dates-row {
     gap: 6px;

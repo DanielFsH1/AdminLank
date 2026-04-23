@@ -385,9 +385,9 @@ export default function BankManager({ vaultCards = {} }) {
           const expandSection = creditExpandSection[bank.id] || null;
 
           return (
-            <div className="credit-account-card" key={bank.id} style={{ '--bank-color': bank.color || '#64748b' }}>
+            <div className="credit-account-card" key={bank.id} style={{ '--bank-color': bank.color || '#64748b' }} onClick={() => toggleBank(bank.id)}>
               {/* Header */}
-              <div className="credit-account-header" style={{ cursor: 'pointer' }} onClick={() => toggleBank(bank.id)}>
+              <div className="credit-account-header">
                 <div className="credit-account-bank">
                   {bank.logoUrl
                     ? <img src={bank.logoUrl} alt="" className="bank-logo-xl" onError={e => { e.target.style.display = 'none'; }} />
@@ -414,7 +414,7 @@ export default function BankManager({ vaultCards = {} }) {
               </div>
 
               {isExpanded && (
-                <div style={{ padding: '0 16px 16px' }}>
+                <div onClick={e => e.stopPropagation()} style={{ cursor: 'default' }}>
                   {/* ── Cuenta Débito ── */}
                   <div className="vault-linked-section" style={{ marginTop: '8px' }}>
                     <div className="vault-linked-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
