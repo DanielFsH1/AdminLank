@@ -1702,7 +1702,7 @@ export async function addRecurringCharge(cardId, charge) {
     active: true,
     createdAt: nowISO(),
   };
-  const updatedCharges = [...currentCharges, newCharge];
+  const updatedCharges = [...currentCharges, newCharge].sort((a, b) => (a.billingDay || 0) - (b.billingDay || 0));
   if (snap.exists()) {
     await updateDoc(ref, { recurringCharges: updatedCharges, updatedAt: nowISO() });
   } else {
@@ -1743,6 +1743,7 @@ export async function updateRecurringCharge(cardId, chargeId, updates) {
   const updatedCharge = { ...oldCharge, ...updates, updatedAt: nowISO() };
   const updatedCharges = [...currentCharges];
   updatedCharges[chargeIndex] = updatedCharge;
+  updatedCharges.sort((a, b) => (a.billingDay || 0) - (b.billingDay || 0));
   await updateDoc(ref, { recurringCharges: updatedCharges, updatedAt: nowISO() });
   // Sincronizar monthlyCost y billingDay con la cuenta real vinculada
   const svcKey = updatedCharge.serviceKey;

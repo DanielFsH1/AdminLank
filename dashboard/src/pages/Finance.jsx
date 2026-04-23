@@ -3,7 +3,7 @@ import { useDocument } from '../hooks/useFirestore';
 import { collection, getDocs, onSnapshot, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { formatMXN, getBankMeta, getProfileImage, BANKS, setCustomBankAccounts } from '../config/services';
-import { confirmRecurringExpense, saveCreditAccount, deleteCreditAccount, addCreditInstallment, removeCreditInstallment, saveCreditStatement, logManualChange } from '../hooks/firestoreActions';
+import { confirmRecurringExpense, generateRecurringExpenses, saveCreditAccount, deleteCreditAccount, addCreditInstallment, removeCreditInstallment, saveCreditStatement, logManualChange } from '../hooks/firestoreActions';
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
 import AddClabeModal from '../components/AddClabeModal';
 import { BankIcon, BarChartIcon, CalendarIcon, CheckCircleIcon, ClipboardIcon, ClockIcon, CloseIcon, CreditCardIcon, DepositIcon, EditIcon, ExpenseIcon, FolderIcon, HourglassIcon, KeyIcon, LinkIcon, MoneyIcon, PlusIcon, ReceiptIcon, RefreshIcon, SaveIcon, TrashIcon, TrendUpIcon, WarningIcon } from '../components/Icons';
@@ -247,6 +247,14 @@ export default function Finance() {
      setVaultCards({});
    });
  }, []);
+
+ // Generar cobros recurrentes pendientes al cargar vault-cards
+ useEffect(() => {
+   if (Object.keys(vaultCards).length === 0) return;
+   generateRecurringExpenses(vaultCards).catch(err =>
+     console.warn('Error generating recurring expenses:', err)
+   );
+ }, [vaultCards]);
 
  // CLABE handlers
  const handleCopyClabe = (clabe, bank) => {

@@ -1579,7 +1579,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
                     {/* Cobros recurrentes (unifica cuentas vinculadas + cobros) */}
                     {(() => {
                       const rawCard = cards[cardId];
-                      const charges = rawCard?.recurringCharges || [];
+                      const charges = [...(rawCard?.recurringCharges || [])].sort((a, b) => (a.billingDay || 0) - (b.billingDay || 0));
                       const totalRecurring = charges.filter(c => c.active).reduce((s, c) => s + (c.amount || 0), 0);
                       return (
                         <div className="vault-linked-section">
