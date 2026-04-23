@@ -9,7 +9,6 @@ import {
   addCreditInstallment, removeCreditInstallment, saveCreditStatement,
   linkCardToBank, unlinkCardFromBank,
   getLogoGallery, uploadBankLogo, deleteBankLogo,
-  migrateExistingBanks,
 } from '../hooks/bankActions';
 import { ConfirmDialog, Toast } from './EditModal';
 import {
@@ -26,8 +25,6 @@ export default function BankManager({ vaultCards = {} }) {
   const [expandedBanks, setExpandedBanks] = useState(new Set());
   const [creditExpandSection, setCreditExpandSection] = useState({});
   const [searchQuery, setSearchQuery] = useState('');
-  const [migrating, setMigrating] = useState(false);
-  const [migrated, setMigrated] = useState(false);
 
   // ─── Modals ───
   const [bankModal, setBankModal] = useState(null);
@@ -101,18 +98,6 @@ export default function BankManager({ vaultCards = {} }) {
       ...prev,
       [bankId]: prev[bankId] === section ? null : section,
     }));
-  };
-
-  // ─── Migration ───
-  const handleMigrate = async () => {
-    setMigrating(true);
-    try {
-      const result = await migrateExistingBanks();
-      showToast(`Migración completada: ${result.migrated} bancos, ${result.cardsLinked || 0} tarjetas vinculadas`);
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
-    setMigrating(false);
   };
 
   // ─── Bank CRUD ───
@@ -383,27 +368,6 @@ export default function BankManager({ vaultCards = {} }) {
   // ═══════════════════════════════════════════════════════════════
   // RENDER
   // ═══════════════════════════════════════════════════════════════
-
-  // Migration prompt if no banks exist
-  if (!migrated && Object.keys(banks).length === 0) {
-    return (
-      <div style={{ textAlign: 'center', padding: '48px 24px' }}>
-        <BankIcon size={48} />
-        <h3 style={{ margin: '16px 0 8px', fontSize: '18px' }}>Configurar Bancos</h3>
-        <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px', maxWidth: '400px', margin: '0 auto 20px' }}>
-          Migra los bancos existentes desde la configuración actual o crea bancos nuevos desde cero.
-        </p>
-        <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
-          <button className="edit-modal-btn primary" onClick={handleMigrate} disabled={migrating}>
-            {migrating ? <><span className="spinner" /> Migrando...</> : 'Migrar bancos existentes'}
-          </button>
-          <button className="edit-modal-btn cancel" onClick={openCreateBank}>
-            <PlusIcon size={14} /> Crear desde cero
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="bank-manager">
