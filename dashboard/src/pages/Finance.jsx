@@ -735,6 +735,7 @@ export default function Finance() {
                     </div>
                   </div>
 
+                  <div style={{ padding: '0 20px 16px' }}>
                   {/* Utilization bar */}
                   <div className="credit-util-bar-wrap">
                     <div className="credit-util-bar-labels">
@@ -850,6 +851,7 @@ export default function Finance() {
                   )}
 
                   {/* Action buttons — read-only in Finance, edit in Bóveda → Bancos */}
+                  </div>
                 </div>
               );
             })}

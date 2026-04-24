@@ -2795,6 +2795,7 @@ body {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 16px;
+  align-items: start;
 }
 .credit-account-card {
   background: var(--bg-card);
