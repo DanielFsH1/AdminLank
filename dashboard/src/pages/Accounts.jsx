@@ -465,29 +465,6 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
  // ─── CRUD: Editar cuenta Lank maestra ───
 
  const [createAccountModal, setCreateAccountModal] = useState(false);
- const [createAccountValues, setCreateAccountValues] = useState({ canonicalAlias: '', fullName: '', email: '', whatsapp: '' });
- const [creatingAccount, setCreatingAccount] = useState(false);
-
- const handleCreateAccountSave = async () => {
-   setCreatingAccount(true);
-   try {
-     const { createLankMasterAccount } = await import('../hooks/firestoreActions');
-     const newId = await createLankMasterAccount({
-       canonicalAlias: createAccountValues.canonicalAlias,
-       fullName: createAccountValues.fullName,
-       lankGmailAddress: createAccountValues.email,
-       whatsapp: createAccountValues.whatsapp,
-       notes: [],
-     });
-     showToast(`Cuenta Lank #${newId} creada exitosamente`);
-     setCreateAccountModal(false);
-     setCreateAccountValues({ canonicalAlias: '', fullName: '', email: '', whatsapp: '' });
-   } catch (err) {
-     showToast(`Error: ${err.message}`, 'error');
-   } finally {
-     setCreatingAccount(false);
-   }
- };
 
  const handleEditAccount = (acctId, acct) => {
    setEditAccountModal({ acctId });
@@ -534,7 +511,7 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
  <>
       <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div className="section-title"><UsersIcon size={16} /> Cuentas Lank ({filtered.length})</div>
-        <button className="crud-add-service-btn" onClick={() => setCreateAccountModal(true)} style={{ margin: 0 }}>
+        <button className="crud-add-service-btn" onClick={() => setCreateAccountModal(true)} style={{ margin: 0, width: 'auto' }}>
           <PlusIcon size={14} /> Nueva cuenta
         </button>
       </div>
@@ -1036,7 +1013,7 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
       {/* Modal: Crear cuenta Lank maestra */}
       <EditModal
         open={createAccountModal}
-        onClose={() => !creatingAccount && setCreateAccountModal(false)}
+        onClose={() => setCreateAccountModal(false)}
         onSave={async (values) => {
           const newId = await createLankMasterAccount({
             canonicalAlias: values.canonicalAlias,

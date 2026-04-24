@@ -1003,6 +1003,12 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
 
  // ─── DELETE CARD ───
  const handleDeleteCard = (cardId, cardLabel) => {
+   const card = vaultCards[cardId];
+   const activeCharges = (card?.recurringCharges || []).filter(rc => rc.active);
+   if (activeCharges.length > 0) {
+     showToast(`No se puede eliminar: tiene ${activeCharges.length} cobro${activeCharges.length > 1 ? 's' : ''} recurrente${activeCharges.length > 1 ? 's' : ''} activo${activeCharges.length > 1 ? 's' : ''}. Desactívalos primero.`, 'error');
+     return;
+   }
  setConfirmDialog({
       title: <> Eliminar tarjeta</>,
       message: `¿Eliminar la tarjeta "${cardLabel}"?\n\nEsta acción es IRREVERSIBLE.`,
@@ -1659,10 +1665,6 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
               );
             })}
 
-          {/* Create new card */}
-          <div className="vault-create-card" onClick={openCreateCard}>
-             Nueva tarjeta de pago
-          </div>
         </div>
       )}
 

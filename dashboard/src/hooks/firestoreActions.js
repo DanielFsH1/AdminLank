@@ -1147,6 +1147,23 @@ export async function createLankMasterAccount(accountData) {
     // SIM auto-add is best-effort; account creation already succeeded
   }
 
+  // Auto-create linked lank_google vault email entry
+  if (payload.lankGmailAddress) {
+    try {
+      await createVaultEmailAccount({
+        type: 'lank_google',
+        lankAccountId: String(newId),
+        email: payload.lankGmailAddress,
+        fullName: payload.fullName,
+        canonicalAlias: payload.canonicalAlias,
+        password: '',
+        notes: '',
+      });
+    } catch (_) {
+      // Best-effort: vault entry may already exist for this email
+    }
+  }
+
   logManualChange('create_lank_master_account', `Cuenta Lank #${newId} creada: ${payload.canonicalAlias}`, {
     collection: 'accounts', documentId: String(newId),
     after: payload,
