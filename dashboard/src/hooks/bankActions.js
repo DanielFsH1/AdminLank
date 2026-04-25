@@ -15,6 +15,18 @@ function slugify(name) {
   return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
+function parseOptionalFloat(value, fallback) {
+  if (value === '' || value === null || value === undefined) return fallback;
+  const parsed = Number.parseFloat(value);
+  return Number.isNaN(parsed) ? fallback : parsed;
+}
+
+function parseOptionalInt(value, fallback) {
+  if (value === '' || value === null || value === undefined) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) ? fallback : parsed;
+}
+
 // ─── BANK CRUD ─────────────────────────────────────────────────────
 
 export async function createBank({ name, color, logoUrl, clabe, note }) {
@@ -111,13 +123,13 @@ export async function updateCreditAccount(bankId, creditData) {
 
   const updated = {
     ...current,
-    creditLimit: parseFloat(creditData.creditLimit) || current.creditLimit,
-    currentBalance: parseFloat(creditData.currentBalance) || current.currentBalance,
-    annualRate: parseFloat(creditData.annualRate) || current.annualRate,
-    minimumPayment: parseFloat(creditData.minimumPayment) || current.minimumPayment,
-    cutoffDay: parseInt(creditData.cutoffDay, 10) || current.cutoffDay,
-    paymentDueDay: parseInt(creditData.paymentDueDay, 10) || current.paymentDueDay,
-    alertDaysBefore: parseInt(creditData.alertDaysBefore, 10) || current.alertDaysBefore,
+    creditLimit: parseOptionalFloat(creditData.creditLimit, current.creditLimit),
+    currentBalance: parseOptionalFloat(creditData.currentBalance, current.currentBalance),
+    annualRate: parseOptionalFloat(creditData.annualRate, current.annualRate),
+    minimumPayment: parseOptionalFloat(creditData.minimumPayment, current.minimumPayment),
+    cutoffDay: parseOptionalInt(creditData.cutoffDay, current.cutoffDay),
+    paymentDueDay: parseOptionalInt(creditData.paymentDueDay, current.paymentDueDay),
+    alertDaysBefore: parseOptionalInt(creditData.alertDaysBefore, current.alertDaysBefore),
     paymentClabe: creditData.paymentClabe ?? current.paymentClabe ?? '',
     paymentClabeNote: creditData.paymentClabeNote ?? current.paymentClabeNote ?? '',
     updatedAt: nowISO(),

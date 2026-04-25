@@ -27,6 +27,21 @@ function formatDateTime(dateStr) {
  });
 }
 
+function buildLegacyManualEntryIdentifier(entry) {
+ if (!entry || entry.entryId) return entry?.entryId || null;
+ return [
+  'legacy',
+  entry.type || '',
+  entry.effectiveAt || '',
+  entry.description || '',
+  String(entry.amount ?? ''),
+  entry.subscription || '',
+  entry.bankAccount || '',
+  entry.cardId || '',
+  entry.status || '',
+ ].join('|');
+}
+
 export default function Finance() {
  const { data: overview, loading: loadingOverview, error: errorOverview } = useDocument('finance', 'overview');
  const { data: ledger, loading: loadingLedger } = useDocument('finance', 'manual-ledger');
@@ -64,7 +79,6 @@ export default function Finance() {
  const [creditAccounts, setCreditAccounts] = useState([]);
  const [loadingCredit, setLoadingCredit] = useState(true);
  const [vaultCards, setVaultCards] = useState({});
- const [expandedCredit, setExpandedCredit] = useState(null);
  const [creditExpandSection, setCreditExpandSection] = useState({});
 
  const showExpenseToast = useCallback((msg, type = 'success') => {
@@ -85,9 +99,6 @@ export default function Finance() {
  const [clabes, setClabes] = useState([]);
  const [loadingClabes, setLoadingClabes] = useState(true);
  const [copiedClabe, setCopiedClabe] = useState(null);
-
- // Custom bank accounts (user-created with uploaded images)
- const [customBankAccounts, setCustomBankAccountsState] = useState({});
 
  const bankAccountOptions = useMemo(() => {
    const debitClabes = clabes.filter(c => c.type !== 'credito');
@@ -141,7 +152,7 @@ export default function Finance() {
  if (!expandedHistMonth) return;
  if (historyWithdrawals[expandedHistMonth]) return;
 
- const [year, monthStr] = expandedHistMonth.split('-');
+ const [, monthStr] = expandedHistMonth.split('-');
  const monthIndex = parseInt(monthStr, 10) - 1;
  const monthName = MONTH_NAMES_EN[monthIndex];
  const colRef = collection(db, `finance/withdrawals-${monthName}/records`);
@@ -181,8 +192,7 @@ export default function Finance() {
              id: bank.id,
              bank: bank.name,
              ...bank.creditAccount,
-             clabeIndex: -1,
-           });
+            });
            if (bank.creditAccount.paymentClabe) {
              derivedClabes.push({
                bank: bank.name,
@@ -224,11 +234,8 @@ export default function Finance() {
    const bankAccRef = doc(db, 'finance', 'bank-accounts');
    const unsub = onSnapshot(bankAccRef, snap => {
      if (snap.exists()) {
-       const accounts = snap.data().accounts || {};
-       setCustomBankAccountsState(accounts);
-       setCustomBankAccounts(accounts);
+       setCustomBankAccounts(snap.data().accounts || {});
      } else {
-       setCustomBankAccountsState({});
        setCustomBankAccounts({});
      }
    });
@@ -258,14 +265,15 @@ export default function Finance() {
 
  // Cargar vault-cards (para vincular tarjetas con cuentas de crédito)
  useEffect(() => {
-   getDocs(collection(db, 'vault-cards')).then(snap => {
+   const unsub = onSnapshot(collection(db, 'vault-cards'), (snap) => {
      const cards = {};
      snap.docs.forEach(d => { cards[d.id] = { id: d.id, ...d.data() }; });
      setVaultCards(cards);
-   }).catch(err => {
+   }, (err) => {
      console.warn('vault-cards fetch error:', err);
      setVaultCards({});
    });
+   return () => unsub();
  }, []);
 
  // Generar cobros recurrentes pendientes al cargar vault-cards
@@ -275,6 +283,13 @@ export default function Finance() {
      console.warn('Error generating recurring expenses:', err)
    );
  }, [vaultCards]);
+
+ const getEntryIdentifier = useCallback((entry) => entry?.entryId || buildLegacyManualEntryIdentifier(entry), []);
+
+ const findLedgerEntryIndex = useCallback((entries, entry) => {
+  const entryId = getEntryIdentifier(entry);
+  return entries.findIndex(currentEntry => getEntryIdentifier(currentEntry) === entryId);
+ }, [getEntryIdentifier]);
 
  // CLABE handlers
  const handleCopyClabe = (clabe, bank) => {
@@ -416,8 +431,7 @@ export default function Finance() {
  // Editar gasto manual
  const handleEditExpense = async (values) => {
  if (!editExpenseModal) return;
- const { index, entry: oldEntry } = editExpenseModal;
- if (index < 0) return; // Protección: entry no encontrada en ledger
+ const { entry: oldEntry } = editExpenseModal;
  const amount = parseFloat(values.amount);
  if (!values.description?.trim() || isNaN(amount) || amount <= 0) return;
 
@@ -438,11 +452,16 @@ export default function Finance() {
  if (values.note?.trim()) updatedEntry.notes = [values.note.trim()];
  else delete updatedEntry.notes;
 
- // Actualizar en manual-ledger
  const ledgerRef = doc(db, 'finance', 'manual-ledger');
  const currentEntries = ledger?.entries || [];
+ const entryIndex = findLedgerEntryIndex(currentEntries, oldEntry);
+ if (entryIndex < 0) {
+      showExpenseToast('No se encontró el gasto a editar. Recarga la página e intenta de nuevo.', 'error');
+      return;
+ }
+
  const updatedEntries = [...currentEntries];
- updatedEntries[index] = updatedEntry;
+ updatedEntries[entryIndex] = updatedEntry;
  await updateDoc(ledgerRef, { entries: updatedEntries });
 
  // Revertir totales del mes viejo y aplicar al mes nuevo
@@ -457,12 +476,18 @@ export default function Finance() {
  // Eliminar gasto manual
  const handleRemoveExpenseConfirm = async () => {
  if (removeExpenseConfirm === null) return;
- const { index, entry } = removeExpenseConfirm;
- if (index < 0) return; // Protección: entry no encontrada en ledger
+ const { entry } = removeExpenseConfirm;
  try {
  const ledgerRef = doc(db, 'finance', 'manual-ledger');
  const currentEntries = ledger?.entries || [];
- const updatedEntries = currentEntries.filter((_, i) => i !== index);
+ const entryIndex = findLedgerEntryIndex(currentEntries, entry);
+ if (entryIndex < 0) {
+        showExpenseToast('No se encontró el gasto a eliminar. Recarga la página e intenta de nuevo.', 'error');
+        setRemoveExpenseConfirm(null);
+        return;
+ }
+
+ const updatedEntries = currentEntries.filter((_, i) => i !== entryIndex);
  await updateDoc(ledgerRef, { entries: updatedEntries });
 
  // Revertir totales del mes correspondiente
@@ -518,8 +543,7 @@ export default function Finance() {
  // Editar depósito/ingreso
  const handleEditDeposit = async (values) => {
    if (!editDepositModal) return;
-   const { index, entry: oldEntry } = editDepositModal;
-   if (index < 0) return;
+   const { entry: oldEntry } = editDepositModal;
    const amount = parseFloat(values.amount);
    if (!values.description?.trim() || isNaN(amount) || amount <= 0) return;
 
@@ -541,8 +565,14 @@ export default function Finance() {
 
    const ledgerRef = doc(db, 'finance', 'manual-ledger');
    const currentEntries = ledger?.entries || [];
+   const entryIndex = findLedgerEntryIndex(currentEntries, oldEntry);
+   if (entryIndex < 0) {
+     showDepositToast('No se encontró el ingreso a editar. Recarga la página e intenta de nuevo.', 'error');
+     return;
+   }
+
    const updatedEntries = [...currentEntries];
-   updatedEntries[index] = updatedEntry;
+   updatedEntries[entryIndex] = updatedEntry;
    await updateDoc(ledgerRef, { entries: updatedEntries });
 
    const oldMonthKey = getEntryMonthKey(oldEntry.effectiveAt);
@@ -562,12 +592,18 @@ export default function Finance() {
  // Eliminar depósito/ingreso
  const handleRemoveDepositConfirm = async () => {
    if (removeDepositConfirm === null) return;
-   const { index, entry } = removeDepositConfirm;
-   if (index < 0) return;
+   const { entry } = removeDepositConfirm;
    try {
      const ledgerRef = doc(db, 'finance', 'manual-ledger');
      const currentEntries = ledger?.entries || [];
-     const updatedEntries = currentEntries.filter((_, i) => i !== index);
+     const entryIndex = findLedgerEntryIndex(currentEntries, entry);
+     if (entryIndex < 0) {
+       showDepositToast('No se encontró el ingreso a eliminar. Recarga la página e intenta de nuevo.', 'error');
+       setRemoveDepositConfirm(null);
+       return;
+     }
+
+     const updatedEntries = currentEntries.filter((_, i) => i !== entryIndex);
      await updateDoc(ledgerRef, { entries: updatedEntries });
 
      const monthKey = getEntryMonthKey(entry.effectiveAt);
@@ -659,10 +695,9 @@ export default function Finance() {
    return `${card.bank || ''} ****${card.lastFour || ''}`.trim();
  };
 
- const getLinkedClabe = (clabeIdx) => {
-   if (clabeIdx == null || clabeIdx < 0 || clabeIdx >= clabes.length) return null;
-   return clabes[clabeIdx];
- };
+ const getLinkedCreditCardIds = (bankId) => Object.values(vaultCards)
+   .filter(card => card.bankId === bankId && card.accountType === 'credit')
+   .map(card => card.id);
 
  return (
  <>
@@ -710,12 +745,11 @@ export default function Finance() {
               const utilPct = acct.creditLimit > 0 ? Math.min(100, Math.round((acct.currentBalance / acct.creditLimit) * 100)) : 0;
               const utilClass = utilPct <= 30 ? 'low' : utilPct <= 70 ? 'medium' : 'high';
               const available = Math.max(0, (acct.creditLimit || 0) - (acct.currentBalance || 0));
-              const isExpanded = expandedCredit === acct.id;
               const expandSection = creditExpandSection[acct.id] || null;
               const installments = acct.installments || [];
               const statements = [...(acct.monthlyStatements || [])].sort((a, b) => (b.monthKey || '').localeCompare(a.monthKey || ''));
               const totalMSIMonthly = installments.reduce((s, i) => s + (i.monthlyPayment || 0), 0);
-              const linkedClabe = getLinkedClabe(acct.clabeIndex);
+              const linkedCardIds = getLinkedCreditCardIds(acct.id);
 
               return (
                 <div className="credit-account-card" key={acct.id} style={{ '--bank-color': bankMeta.color }}>
@@ -776,11 +810,11 @@ export default function Finance() {
 
                   {/* Linked resources */}
                   <div className="credit-links-row">
-                    {(acct.vaultCardIds || []).map(cid => (
+                    {linkedCardIds.map(cid => (
                       <span className="credit-link-chip" key={cid}><CreditCardIcon size={12} /> {getLinkedCardLabel(cid)}</span>
                     ))}
-                    {linkedClabe && (
-                      <span className="credit-link-chip"><BankIcon size={12} /> CLABE: {linkedClabe.clabe?.slice(-6)}</span>
+                    {acct.paymentClabe && (
+                      <span className="credit-link-chip"><BankIcon size={12} /> CLABE: {acct.paymentClabe.slice(-6)}{acct.paymentClabeNote ? ` · ${acct.paymentClabeNote}` : ''}</span>
                     )}
                     {installments.length > 0 && (
                       <span className="credit-link-chip"><ReceiptIcon size={12} /> {installments.length} MSI · {formatMXN(totalMSIMonthly)}/mes</span>
@@ -1017,8 +1051,8 @@ export default function Finance() {
                 </div>
               )}
               {expenseEntries.filter(e => e.status === 'pending').map((entry, i) => {
-                const globalIdx = allEntries.indexOf(entry);
-                const editedAmount = pendingAmounts[globalIdx];
+                const entryId = getEntryIdentifier(entry);
+                const editedAmount = entryId ? pendingAmounts[entryId] : undefined;
                 const displayAmount = editedAmount !== undefined ? editedAmount : (entry.amount || '');
                 const finalAmount = editedAmount !== undefined ? parseFloat(editedAmount) : (entry.amount || 0);
                 const needsAmount = !entry.amount || entry.amount <= 0;
@@ -1047,7 +1081,10 @@ export default function Finance() {
                             <input
                               type="number"
                               value={displayAmount}
-                              onChange={e => setPendingAmounts(prev => ({ ...prev, [globalIdx]: e.target.value }))}
+                              onChange={e => {
+                                if (!entryId) return;
+                                setPendingAmounts(prev => ({ ...prev, [entryId]: e.target.value }));
+                              }}
                               placeholder={needsAmount ? 'Ingresa monto' : '0.00'}
                               style={{
                                 width: '100%', maxWidth: needsAmount ? '120px' : '90px', minWidth: '70px',
@@ -1063,19 +1100,23 @@ export default function Finance() {
                         </div>
                         <button
                           className="alert-action-btn edit"
-                          disabled={confirmingExpenseIdx === globalIdx || (finalAmount <= 0 && !editedAmount)}
+                          disabled={confirmingExpenseIdx === entryId || (finalAmount <= 0 && !editedAmount)}
                           onClick={async () => {
                             const amountToConfirm = parseFloat(displayAmount);
                             if (!amountToConfirm || amountToConfirm <= 0) {
                               showExpenseToast('Ingresa un monto válido antes de confirmar', 'error');
                               return;
                             }
+                            if (!entryId) {
+                              showExpenseToast('No se pudo identificar el cobro a confirmar', 'error');
+                              return;
+                            }
                             if (confirmingExpenseIdx !== null) return;
-                            setConfirmingExpenseIdx(globalIdx);
+                            setConfirmingExpenseIdx(entryId);
                             try {
-                              await confirmRecurringExpense(globalIdx, allEntries, amountToConfirm !== entry.amount ? amountToConfirm : null);
+                              await confirmRecurringExpense(entryId, amountToConfirm !== entry.amount ? amountToConfirm : null);
                               showExpenseToast(`Cobro "${entry.description}" confirmado — ${formatMXN(amountToConfirm)}`);
-                              setPendingAmounts(prev => { const next = {...prev}; delete next[globalIdx]; return next; });
+                              setPendingAmounts(prev => { const next = {...prev}; delete next[entryId]; return next; });
                             } catch (err) {
                               showExpenseToast('Error: ' + err.message, 'error');
                             } finally {
@@ -1085,14 +1126,14 @@ export default function Finance() {
                           title="Confirmar que el cobro se realizó"
                           style={{ fontSize: '11px', whiteSpace: 'nowrap' }}
                         >
-                          {confirmingExpenseIdx === globalIdx
+                          {confirmingExpenseIdx === entryId
                             ? <><span className="spinner" /> Confirmando...</>
                             : <><CheckCircleIcon size={16} /> Confirmar</>
                           }
                         </button>
                         <button
                           className="clabe-remove-btn"
-                          onClick={() => setRemoveExpenseConfirm({ index: globalIdx, entry })}
+                          onClick={() => setRemoveExpenseConfirm({ entry })}
                           title="Eliminar cobro"
                         >
                           <TrashIcon size={16} />
@@ -1111,7 +1152,8 @@ export default function Finance() {
               {expenseEntries.filter(e => e.status !== 'pending').map((entry, i) => {
                 const typeLabels = { expense: <><ExpenseIcon size={16} /> Gasto</>, investment: <><ExpenseIcon size={16} /> Gasto (inversión)</>, income_adjustment: <><MoneyIcon size={16} /> Ajuste +</>, expense_refund: <><RefreshIcon size={16} /> Devolución</> };
                 const typeBadge = { expense: 'badge-danger', investment: 'badge-danger', income_adjustment: 'badge-success', expense_refund: 'badge-info' };
-                const globalIdx = allEntries.indexOf(entry);
+                const entryId = getEntryIdentifier(entry);
+                const entryIndex = allEntries.findIndex(currentEntry => currentEntry.entryId === entryId);
                 // Derive cardLabel from notes if not stored directly (backcompat)
                 const cardLabel = entry.cardLabel || (entry.cardId && entry.notes?.[0]?.startsWith('Cobro automático — ')
                   ? entry.notes[0].replace('Cobro automático — ', '') : '');
@@ -1134,7 +1176,7 @@ export default function Finance() {
                         </div>
                         <button
                           className="clabe-remove-btn"
-                          onClick={() => setEditExpenseModal({ index: globalIdx, entry })}
+                          onClick={() => setEditExpenseModal({ entry })}
                           title="Editar gasto"
                           style={{ marginLeft: '2px', fontSize: '11px' }}
                         >
@@ -1142,7 +1184,7 @@ export default function Finance() {
                         </button>
                         <button
                           className="clabe-remove-btn"
-                          onClick={() => setRemoveExpenseConfirm({ index: globalIdx, entry })}
+                          onClick={() => setRemoveExpenseConfirm({ entry })}
                           title="Eliminar gasto"
                         >
                           <TrashIcon size={16} />
@@ -1177,7 +1219,8 @@ export default function Finance() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {depositEntries.map((entry, i) => {
-                const globalIdx = allEntries.indexOf(entry);
+                const entryId = getEntryIdentifier(entry);
+                const entryIndex = allEntries.findIndex(currentEntry => currentEntry.entryId === entryId);
                 return (
                   <div className="ledger-entry" key={`deposit-${i}`} style={{ borderLeft: '3px solid #10b981' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
@@ -1195,7 +1238,7 @@ export default function Finance() {
                         </div>
                         <button
                           className="clabe-remove-btn"
-                          onClick={() => setEditDepositModal({ index: globalIdx, entry })}
+                          onClick={() => setEditDepositModal({ entry })}
                           title="Editar ingreso"
                           style={{ marginLeft: '2px', fontSize: '11px' }}
                         >
@@ -1203,7 +1246,7 @@ export default function Finance() {
                         </button>
                         <button
                           className="clabe-remove-btn"
-                          onClick={() => setRemoveDepositConfirm({ index: globalIdx, entry })}
+                          onClick={() => setRemoveDepositConfirm({ entry })}
                           title="Eliminar ingreso"
                         >
                           <TrashIcon size={16} />
@@ -1247,7 +1290,6 @@ export default function Finance() {
                     {[...allDebitBanks].map(bankName => {
                       const bankMeta = getBankMeta(bankName);
                       const clabeEntry = debitClabes.find(c => c.bank === bankName);
-                      const clabeGlobalIdx = clabeEntry ? clabes.indexOf(clabeEntry) : -1;
                       const isCopied = clabeEntry && copiedClabe === clabeEntry.clabe;
                       const bankData = byBank[bankName];
                       const isOpen = expandedBank === bankName;
@@ -1329,7 +1371,6 @@ export default function Finance() {
                     {clabes.filter(c => c.type === 'credito').map((c, idx) => {
                       const bankMeta = getBankMeta(c.bank);
                       const isCopied = copiedClabe === c.clabe;
-                      const globalIdx = clabes.indexOf(c);
                       const bankData = byBank[c.bank];
                       const isOpen = expandedBank === c.bank;
 
@@ -1516,8 +1557,8 @@ export default function Finance() {
                           </div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                             {histManualEntries.map((e, ei) => {
-                              const globalIdx = allEntries.indexOf(e);
-                              const canEdit = globalIdx >= 0 && e.effectiveAt >= minDate && e.effectiveAt <= maxDate;
+                              const entryIndex = findLedgerEntryIndex(allEntries, e);
+                              const canEdit = entryIndex >= 0 && e.effectiveAt >= minDate && e.effectiveAt <= maxDate;
                               return (
                               <div key={ei} style={{
                                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -1535,14 +1576,14 @@ export default function Finance() {
                                     <>
                                       <button
                                         className="clabe-remove-btn"
-                                        onClick={() => e.type === 'deposit' ? setEditDepositModal({ index: globalIdx, entry: e }) : setEditExpenseModal({ index: globalIdx, entry: e })}
+                                        onClick={() => e.type === 'deposit' ? setEditDepositModal({ index: entryIndex, entry: e }) : setEditExpenseModal({ index: entryIndex, entry: e })}
                                         title={e.type === 'deposit' ? 'Editar ingreso' : 'Editar gasto'}
                                       >
                                         <EditIcon size={16} />
                                       </button>
                                       <button
                                         className="clabe-remove-btn"
-                                        onClick={() => e.type === 'deposit' ? setRemoveDepositConfirm({ index: globalIdx, entry: e }) : setRemoveExpenseConfirm({ index: globalIdx, entry: e })}
+                                        onClick={() => e.type === 'deposit' ? setRemoveDepositConfirm({ index: entryIndex, entry: e }) : setRemoveExpenseConfirm({ index: entryIndex, entry: e })}
                                         title={e.type === 'deposit' ? 'Eliminar ingreso' : 'Eliminar gasto'}
                                       >
                                         <TrashIcon size={16} />

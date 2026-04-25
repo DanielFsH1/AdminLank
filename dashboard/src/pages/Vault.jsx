@@ -9,6 +9,7 @@ import { ConfirmDialog, Toast } from '../components/EditModal';
 import { seedGooglePasswords } from '../utils/seedGooglePasswords';
 import { BadgeIcon, BankIcon, CalendarIcon, CashIcon, CheckCircleIcon, ClipboardIcon, CloseIcon, CreditCardIcon, DotRed, EditIcon, EmailIcon, HashIcon, HourglassIcon, KeyIcon, LinkIcon, LockIcon, LockKeyIcon, NotesIcon, PhoneIcon, PlusIcon, ReceiptIcon, RefreshIcon, SaveIcon, SearchIcon, SeedlingIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, WarningIcon } from '../components/Icons';
 import { normalizeSearch, nMatch } from '../utils/normalize';
+import { normalizeCardExpiryInput } from '../utils/cardExpiry';
 import SearchBar from '../components/SearchBar';
 import BankManager from '../components/BankManager';
 import CryptoJS from 'crypto-js';
@@ -795,10 +796,12 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
  const handleSaveCard = async (cardId, values) => {
  const cleanNum = cleanCardNumber(values.number || '');
  const derivedLast4 = getLast4(cleanNum);
+ const normalizedExpiry = normalizeCardExpiryInput(values.expiry);
  const encrypted = encryptFields({
       ...values,
       number: cleanNum,
       lastFour: derivedLast4,
+      expiry: normalizedExpiry,
  }, CARD_SENSITIVE);
  encrypted.updatedAt = new Date().toISOString();
  const ref = doc(db, 'vault-cards', cardId);
@@ -1002,11 +1005,12 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
  const derivedLast4 = getLast4(cleanNum);
  const label = `${createValues.bank || 'Tarjeta'} ****${derivedLast4}`;
  const id = getCardIdFromLabel(label);
+ const normalizedExpiry = normalizeCardExpiryInput(createValues.expiry);
  const data = {
       bank: createValues.bank, lastFour: derivedLast4,
       number: cleanNum ? encrypt(cleanNum) : '',
       cvv: createValues.cvv ? encrypt(createValues.cvv) : '',
-      expiry: createValues.expiry, holder: createValues.holder, notes: createValues.notes,
+      expiry: normalizedExpiry, holder: createValues.holder, notes: createValues.notes,
  };
  await createVaultCard(id, data);
  showToast(`Tarjeta "${createValues.bank} ****${derivedLast4}" creada`);
@@ -2302,7 +2306,14 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
               <div className="vault-form-row">
                 <div className="vault-form-group">
                   <label><CalendarIcon size={16} /> Expiración</label>
-                  <input type="text" value={cardEditValues.expiry} onChange={e => setCardEditValues(p => ({ ...p, expiry: e.target.value }))} placeholder="MM/AA" />
+                  <input
+                    type="text"
+                    value={cardEditValues.expiry}
+                    onChange={e => setCardEditValues(p => ({ ...p, expiry: normalizeCardExpiryInput(e.target.value) }))}
+                    placeholder="MM/YYYY"
+                    inputMode="numeric"
+                    autoComplete="off"
+                  />
                 </div>
                 <div className="vault-form-group">
                   <label><LockIcon size={16} /> CVV</label>
@@ -2512,7 +2523,14 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
                   <div className="vault-form-row">
                     <div className="vault-form-group">
                       <label><CalendarIcon size={16} /> Expiración</label>
-                      <input type="text" value={createValues.expiry} onChange={e => setCreateValues(p => ({ ...p, expiry: e.target.value }))} placeholder="MM/AA" />
+                      <input
+                        type="text"
+                        value={createValues.expiry}
+                        onChange={e => setCreateValues(p => ({ ...p, expiry: normalizeCardExpiryInput(e.target.value) }))}
+                        placeholder="MM/YYYY"
+                        inputMode="numeric"
+                        autoComplete="off"
+                      />
                     </div>
                     <div className="vault-form-group">
                       <label><LockIcon size={16} /> CVV</label>

@@ -3,7 +3,7 @@
  * Solo el admin (UID Ls1vtEv0rvY8DIyKKKmQY5SlOOQ2) puede escribir,
  * garantizado por las Firestore Security Rules.
  */
-import { doc, updateDoc, setDoc, deleteDoc, deleteField, arrayUnion, Timestamp, getDoc as firestoreGetDoc, collection, addDoc, query, orderBy, getDocs, limit, writeBatch, where } from 'firebase/firestore';
+import { doc, updateDoc, setDoc, deleteDoc, deleteField, arrayUnion, Timestamp, getDoc as firestoreGetDoc, collection, addDoc, query, orderBy, getDocs, limit, writeBatch, where, runTransaction } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SERVICES, getServiceMeta, getServiceKeyByName } from '../config/services';
 import { encrypt } from '../utils/crypto';
@@ -15,6 +15,71 @@ function nowISO() {
 
 function normalize(str) {
   return (str || '').trim().toLowerCase();
+}
+
+function buildLegacyManualEntryIdentifier(entry) {
+  if (!entry || entry.entryId) return entry?.entryId || null;
+
+  return [
+    'legacy',
+    entry.type || '',
+    entry.effectiveAt || '',
+    entry.description || '',
+    String(entry.amount ?? ''),
+    entry.subscription || '',
+    entry.bankAccount || '',
+    entry.cardId || '',
+    entry.status || '',
+  ].join('|');
+}
+
+function findLedgerEntryIndex(entries, entryIdentifier) {
+  return entries.findIndex((entry) => (
+    entry.entryId === entryIdentifier
+    || buildLegacyManualEntryIdentifier(entry) === entryIdentifier
+  ));
+}
+
+function parseRecurringExpenseAmount(amount) {
+  const parsedAmount = Number(amount);
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+    throw new Error('Ingresa un monto válido mayor a cero');
+  }
+
+  return parsedAmount;
+}
+
+async function applyCreditCardBalanceAdjustment(transaction, cardId, amount, timestamp) {
+  if (!cardId) return;
+
+  const cardRef = doc(db, 'vault-cards', cardId);
+  const cardSnap = await transaction.get(cardRef);
+  if (!cardSnap.exists()) {
+    throw new Error('No se encontró la tarjeta vinculada al cobro');
+  }
+
+  const card = cardSnap.data();
+  if (card.accountType !== 'credit') return;
+  if (!card.bankId) {
+    throw new Error('La tarjeta de crédito no tiene una cuenta bancaria vinculada');
+  }
+
+  const bankRef = doc(db, 'banks', card.bankId);
+  const bankSnap = await transaction.get(bankRef);
+  if (!bankSnap.exists()) {
+    throw new Error('No se encontró la cuenta bancaria vinculada a la tarjeta');
+  }
+
+  const bank = bankSnap.data();
+  if (!bank.creditAccount) {
+    throw new Error('La cuenta bancaria vinculada no tiene crédito configurado');
+  }
+
+  transaction.update(bankRef, {
+    'creditAccount.currentBalance': Number(bank.creditAccount.currentBalance || 0) + amount,
+    'creditAccount.updatedAt': timestamp,
+    updatedAt: timestamp,
+  });
 }
 
 function buildVaultEmailDocId(type, { email, lankAccountId }) {
@@ -2061,63 +2126,69 @@ export async function generateRecurringExpenses(allCards, allPools = {}) {
 /**
  * Confirma un cobro recurrente pendiente.
  * Cambia status de 'pending' a 'confirmed' y actualiza los totales del mes.
- * @param {number} entryIndex - Índice de la entrada en el array entries
- * @param {Array} currentEntries - Array actual de entradas
+ * @param {string} entryId - ID estable de la entrada en entries
  * @param {number|null} overrideAmount - Monto a usar (si el usuario lo editó al confirmar)
  */
-export async function confirmRecurringExpense(entryIndex, currentEntries, overrideAmount = null) {
-  const entry = currentEntries[entryIndex];
-  if (!entry || entry.status !== 'pending') return;
-
-  const finalAmount = overrideAmount !== null ? overrideAmount : (entry.amount || 0);
-
-  const updatedEntries = [...currentEntries];
-  updatedEntries[entryIndex] = {
-    ...entry,
-    amount: finalAmount,
-    status: 'confirmed',
-    confirmedAt: nowISO(),
-  };
+export async function confirmRecurringExpense(entryId, overrideAmount = null) {
+  if (!entryId) return;
 
   const ledgerRef = doc(db, 'finance', 'manual-ledger');
-  await updateDoc(ledgerRef, { entries: updatedEntries });
 
-  // Actualizar totales del mes correspondiente
-  if (finalAmount > 0) {
+  await runTransaction(db, async (transaction) => {
+    const ledgerSnap = await transaction.get(ledgerRef);
+    if (!ledgerSnap.exists()) {
+      throw new Error('No se encontró el ledger manual');
+    }
+
+    const currentEntries = ledgerSnap.data().entries || [];
+    const entryIndex = findLedgerEntryIndex(currentEntries, entryId);
+    if (entryIndex < 0) {
+      throw new Error('No se encontró el cobro pendiente a confirmar');
+    }
+
+    const entry = currentEntries[entryIndex];
+    if (!entry || entry.status !== 'pending') return;
+
+    const finalAmount = parseRecurringExpenseAmount(overrideAmount !== null ? overrideAmount : (entry.amount || 0));
+    const timestamp = nowISO();
     const entryMonth = (entry.effectiveAt || '').slice(0, 7);
+    if (!entryMonth) {
+      throw new Error('El cobro pendiente no tiene un mes válido');
+    }
+
     const now = new Date();
     const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-
-    if (entryMonth === currentMonthKey) {
-      // Actualizar overview (mes actual)
-      const overviewRef = doc(db, 'finance', 'overview');
-      const overviewSnap = await firestoreGetDoc(overviewRef);
-      if (overviewSnap.exists()) {
-        const ov = overviewSnap.data();
-        const totals = { ...(ov.totals || {}) };
-        totals.manualExpensesGross = (totals.manualExpensesGross || 0) + finalAmount;
-        totals.bankNetAfterExpenses = (totals.withdrawalCompletedGross || 0)
-          - (totals.manualExpensesGross || 0) - (totals.manualInvestmentsGross || 0);
-        totals.estimatedNetWallet = (totals.walletCreditsGross || 0)
-          - (totals.manualExpensesGross || 0) - (totals.manualInvestmentsGross || 0);
-        await updateDoc(overviewRef, { totals });
-      }
-    } else {
-      // Actualizar monthly-{monthKey}
-      const monthRef = doc(db, 'finance', `monthly-${entryMonth}`);
-      const monthSnap = await firestoreGetDoc(monthRef);
-      if (monthSnap.exists()) {
-        const mData = monthSnap.data();
-        const totals = { ...(mData.totals || {}) };
-        totals.manualExpensesGross = (totals.manualExpensesGross || 0) + finalAmount;
-        totals.bankNetAfterExpenses = (totals.withdrawalCompletedGross || 0)
-          - (totals.manualExpensesGross || 0) - (totals.manualInvestmentsGross || 0);
-        totals.estimatedNetWallet = (totals.walletCreditsGross || 0)
-          - (totals.manualExpensesGross || 0) - (totals.manualInvestmentsGross || 0);
-        await updateDoc(monthRef, { totals });
-      }
+    const summaryRef = entryMonth === currentMonthKey
+      ? doc(db, 'finance', 'overview')
+      : doc(db, 'finance', `monthly-${entryMonth}`);
+    const summarySnap = await transaction.get(summaryRef);
+    if (!summarySnap.exists()) {
+      throw new Error(`No existe el resumen financiero del mes ${entryMonth}`);
     }
-  }
+
+    await applyCreditCardBalanceAdjustment(transaction, entry.cardId, finalAmount, timestamp);
+
+    const updatedEntries = [...currentEntries];
+    updatedEntries[entryIndex] = {
+      ...entry,
+      amount: finalAmount,
+      status: 'confirmed',
+      confirmedAt: timestamp,
+    };
+    transaction.update(ledgerRef, { entries: updatedEntries });
+
+    const summaryData = summarySnap.data();
+    const totals = { ...(summaryData.totals || {}) };
+    totals.manualExpensesGross = (totals.manualExpensesGross || 0) + finalAmount;
+    totals.bankNetAfterExpenses = (totals.withdrawalCompletedGross || 0)
+      + (totals.manualDepositsGross || 0)
+      - (totals.manualExpensesGross || 0) - (totals.manualInvestmentsGross || 0);
+    totals.estimatedNetWallet = (totals.walletCreditsGross || 0)
+      + (totals.manualDepositsGross || 0)
+      - (totals.manualExpensesGross || 0) - (totals.manualInvestmentsGross || 0);
+
+    transaction.update(summaryRef, { totals });
+  });
 }
 
 export async function updateGroupEnabledSlots(serviceKey, accountId, slotIndex, enabled, currentUsers = [], currentDisabledSlots = []) {

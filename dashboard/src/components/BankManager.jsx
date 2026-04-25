@@ -7,11 +7,12 @@ import {
   updateDebitAccount,
   createCreditAccount, updateCreditAccount, deleteCreditAccount,
   addCreditInstallment, removeCreditInstallment, saveCreditStatement,
-  linkCardToBank, unlinkCardFromBank,
+  unlinkCardFromBank,
   getLogoGallery, uploadBankLogo, deleteBankLogo,
 } from '../hooks/bankActions';
 import { createVaultCard } from '../hooks/firestoreActions';
 import { encrypt } from '../utils/crypto';
+import { normalizeCardExpiryInput } from '../utils/cardExpiry';
 import { ConfirmDialog, Toast } from './EditModal';
 import {
   BankIcon, PlusIcon, EditIcon, TrashIcon, CloseIcon, SaveIcon,
@@ -42,7 +43,6 @@ export default function BankManager({ vaultCards = {} }) {
   const [logoModal, setLogoModal] = useState(null);
   const [logoGallery, setLogoGallery] = useState([]);
   const [logoUploading, setLogoUploading] = useState(false);
-  const [linkModal, setLinkModal] = useState(null);
 
   const [cardCreateModal, setCardCreateModal] = useState(null);
   const [cardCreateValues, setCardCreateValues] = useState({ number: '', cvv: '', expiry: '', holder: '', notes: '' });
@@ -279,23 +279,6 @@ export default function BankManager({ vaultCards = {} }) {
   };
 
   // ─── Card linking ───
-  const openLinkCard = (bankId, accountType) => {
-    setLinkModal({ bankId, accountType, cardId: '' });
-  };
-
-  const handleLinkCard = async () => {
-    if (!linkModal?.cardId) return;
-    setSaving(true);
-    try {
-      await linkCardToBank(linkModal.cardId, linkModal.bankId, linkModal.accountType);
-      showToast('Tarjeta vinculada');
-      setLinkModal(null);
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
-    setSaving(false);
-  };
-
   const handleUnlinkCard = (cardId, label) => {
     setConfirmDialog({
       title: 'Desvincular tarjeta',
@@ -380,6 +363,7 @@ export default function BankManager({ vaultCards = {} }) {
     const derivedLast4 = getLast4(cleanNum);
     const label = `${bankName} ****${derivedLast4}`;
     const id = getCardIdFromLabel(label);
+    const normalizedExpiry = normalizeCardExpiryInput(cardCreateValues.expiry);
     setSaving(true);
     try {
       const data = {
@@ -387,7 +371,7 @@ export default function BankManager({ vaultCards = {} }) {
         lastFour: derivedLast4,
         number: cleanNum ? encrypt(cleanNum) : '',
         cvv: cardCreateValues.cvv ? encrypt(cardCreateValues.cvv) : '',
-        expiry: cardCreateValues.expiry,
+        expiry: normalizedExpiry,
         holder: cardCreateValues.holder,
         notes: cardCreateValues.notes,
         bankId: modal.bankId,
@@ -401,12 +385,6 @@ export default function BankManager({ vaultCards = {} }) {
     }
     setSaving(false);
   };
-
-  // ─── Available cards for linking ───
-  const availableCards = useMemo(() => {
-    if (!linkModal) return [];
-    return Object.values(vaultCards).filter(c => !c.bankId || c.bankId === '');
-  }, [vaultCards, linkModal]);
 
   // ─── Modal overlay handler ───
   const overlayProps = (onClose) => ({
@@ -493,10 +471,7 @@ export default function BankManager({ vaultCards = {} }) {
                           ))}
                         </div>
                       )}
-                      <button className="vault-action-btn edit" style={{ marginTop: '6px', padding: '3px 8px', fontSize: '11px' }} onClick={() => openLinkCard(bank.id, 'debit')}>
-                        <PlusIcon size={12} /> Vincular tarjeta débito
-                      </button>
-                      <button className="vault-action-btn edit" style={{ marginTop: '6px', padding: '3px 8px', fontSize: '11px', marginLeft: '6px' }} onClick={() => openCardCreate(bank.id, 'debit')}>
+                      <button className="vault-action-btn edit" style={{ marginTop: '6px', padding: '3px 8px', fontSize: '11px' }} onClick={() => openCardCreate(bank.id, 'debit')}>
                         <CreditCardIcon size={12} /> Nueva tarjeta débito
                       </button>
                     </div>
@@ -838,40 +813,6 @@ export default function BankManager({ vaultCards = {} }) {
         </div>
       )}
 
-      {/* Link Card Modal */}
-      {linkModal && (
-        <div className="vault-modal-overlay" {...overlayProps(() => setLinkModal(null))}>
-          <div className="vault-modal" style={{ maxWidth: '400px' }}>
-            <div className="vault-modal-header">
-              <h3><CreditCardIcon size={16} /> Vincular tarjeta ({linkModal.accountType})</h3>
-              <button className="vault-modal-close" onClick={() => setLinkModal(null)}><CloseIcon size={16} /></button>
-            </div>
-            <div className="vault-modal-form">
-              <div className="vault-form-group">
-                <label>Seleccionar tarjeta</label>
-                <select value={linkModal.cardId} onChange={e => setLinkModal(p => ({ ...p, cardId: e.target.value }))}>
-                  <option value="">Elegir tarjeta...</option>
-                  {availableCards.map(c => (
-                    <option key={c.id} value={c.id}>{c.bank || 'Tarjeta'} ****{c.lastFour || '????'}</option>
-                  ))}
-                </select>
-                {availableCards.length === 0 && (
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    Todas las tarjetas ya están vinculadas a un banco.
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="vault-modal-actions">
-              <button className="vault-modal-btn cancel" onClick={() => setLinkModal(null)}>Cancelar</button>
-              <button className="vault-modal-btn save" onClick={handleLinkCard} disabled={saving || !linkModal.cardId}>
-                {saving ? <><span className="spinner" /> Vinculando...</> : <><SaveIcon size={14} /> Vincular</>}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Card Create Modal */}
       {cardCreateModal && (
         <div className="vault-modal-overlay" {...overlayProps(() => setCardCreateModal(null))}>
@@ -892,7 +833,17 @@ export default function BankManager({ vaultCards = {} }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div className="vault-form-group">
                   <label>Vencimiento</label>
-                  <input type="text" value={cardCreateValues.expiry} onChange={e => setCardCreateValues(p => ({ ...p, expiry: e.target.value }))} placeholder="MM/AA" maxLength={5} />
+                  <input
+                    type="text"
+                    value={cardCreateValues.expiry}
+                    onChange={e => setCardCreateValues(p => ({
+                      ...p,
+                      expiry: normalizeCardExpiryInput(e.target.value),
+                    }))}
+                    placeholder="MM/YYYY"
+                    inputMode="numeric"
+                    autoComplete="off"
+                  />
                 </div>
                 <div className="vault-form-group">
                   <label>CVV</label>
@@ -1014,10 +965,7 @@ export default function BankManager({ vaultCards = {} }) {
             ))}
           </div>
         )}
-        <button className="vault-action-btn edit" style={{ marginTop: '4px', padding: '3px 8px', fontSize: '11px' }} onClick={() => openLinkCard(bank.id, 'credit')}>
-          <PlusIcon size={12} /> Vincular tarjeta crédito
-        </button>
-        <button className="vault-action-btn edit" style={{ marginTop: '4px', padding: '3px 8px', fontSize: '11px', marginLeft: '6px' }} onClick={() => openCardCreate(bank.id, 'credit')}>
+        <button className="vault-action-btn edit" style={{ marginTop: '4px', padding: '3px 8px', fontSize: '11px' }} onClick={() => openCardCreate(bank.id, 'credit')}>
           <CreditCardIcon size={12} /> Nueva tarjeta crédito
         </button>
 
