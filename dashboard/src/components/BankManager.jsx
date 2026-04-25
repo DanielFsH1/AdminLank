@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { BANKS, formatMXN } from '../config/services';
 import {
@@ -57,12 +57,11 @@ export default function BankManager({ vaultCards = {} }) {
 
   // ─── Load banks from Firestore ───
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'banks'), snap => {
+    getDocs(collection(db, 'banks')).then(snap => {
       const data = {};
       snap.docs.forEach(d => { data[d.id] = { id: d.id, ...d.data() }; });
       setBanks(data);
-    });
-    return () => unsub();
+    }).catch(() => {});
   }, []);
 
   // ─── Derived data ───

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { doc, getDoc, setDoc, updateDoc, collection, getDocs, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { getServiceMeta, getServiceKeyByName, getPoolServiceKeys } from '../config/services';
 import { AnalyzeIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClipboardIcon, ClockIcon, CloudSunIcon, DoorIcon, EmailIcon, EmptyMailIcon, HourglassIcon, InboxIcon, LightningIcon, MoneyIcon, MoonIcon, PinIcon, RefreshIcon, SatelliteIcon, SearchIcon, SleepIcon, StopwatchIcon, TargetIcon, UsersIcon, WarningIcon, WrenchIcon, XCircleIcon } from '../components/Icons';
@@ -132,7 +132,7 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
         }
       }
 
-      // Notificaciones se cargan via onSnapshot en useEffect separado
+      // Notificaciones se cargan en useEffect separado
 
       // Cargar cuentas reales de cada servicio para mapear usuarios → cuenta real
       const serviceKeys = getPoolServiceKeys();
@@ -154,33 +154,37 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
 
  useEffect(() => { fetchData(); }, [fetchData]);
 
- // ─── Listener de UIDs leídos ───
- useEffect(() => {
-   const unsub = onSnapshot(doc(db, 'config', 'notification-reads'), snap => {
-     if (snap.exists()) setReadUids(new Set(snap.data().readUids || []));
-   });
-   return () => unsub();
+ const loadReadUids = useCallback(async () => {
+   const snap = await getDoc(doc(db, 'config', 'notification-reads'));
+   if (snap.exists()) setReadUids(new Set(snap.data().readUids || []));
  }, []);
 
- // ─── Listener de notificaciones (real-time) ───
- useEffect(() => {
-   const unsub = onSnapshot(collection(db, 'notifications'), snap => {
-     const notifs = snap.docs.map(d => ({ docId: d.id, ...d.data() }));
-     notifs.sort((a, b) => {
-       const aLatest = (a.items || []).reduce((max, i) => {
-         const d = i.emailDate || i.date || '';
-         return d > max ? d : max;
-       }, '');
-       const bLatest = (b.items || []).reduce((max, i) => {
-         const d = i.emailDate || i.date || '';
-         return d > max ? d : max;
-       }, '');
-       return bLatest.localeCompare(aLatest);
-     });
-     setNotifications(notifs);
+ const loadNotifications = useCallback(async () => {
+   const snap = await getDocs(collection(db, 'notifications'));
+   const notifs = snap.docs.map(d => ({ docId: d.id, ...d.data() }));
+   notifs.sort((a, b) => {
+     const aLatest = (a.items || []).reduce((max, i) => {
+       const d = i.emailDate || i.date || '';
+       return d > max ? d : max;
+     }, '');
+     const bLatest = (b.items || []).reduce((max, i) => {
+       const d = i.emailDate || i.date || '';
+       return d > max ? d : max;
+     }, '');
+     return bLatest.localeCompare(aLatest);
    });
-   return () => unsub();
+   setNotifications(notifs);
  }, []);
+
+ const refreshAnalyzeData = useCallback(async () => {
+   await Promise.all([fetchData(), loadReadUids(), loadNotifications()]);
+ }, [fetchData, loadReadUids, loadNotifications]);
+
+ // ─── Cargar UIDs leídos ───
+ useEffect(() => { loadReadUids(); }, [loadReadUids]);
+
+ // ─── Cargar notificaciones (one-shot) ───
+ useEffect(() => { loadNotifications(); }, [loadNotifications]);
 
  const markNotifAsRead = useCallback(async (uid) => {
    const newSet = new Set(readUids);

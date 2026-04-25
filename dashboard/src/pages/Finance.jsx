@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useDocument } from '../hooks/useFirestore';
-import { collection, getDocs, onSnapshot, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { formatMXN, getBankMeta, getProfileImage, BANKS, setCustomBankAccounts } from '../config/services';
 import { confirmRecurringExpense, generateRecurringExpenses, logManualChange } from '../hooks/firestoreActions';
@@ -104,11 +104,10 @@ export default function Finance() {
  useEffect(() => {
  const monthName = MONTH_NAMES_EN[currentMonth];
  const colRef = collection(db, `finance/withdrawals-${monthName}/records`);
- const unsub = onSnapshot(colRef, snap => {
+ getDocs(colRef).then(snap => {
       const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setWithdrawals(docs.sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || '')));
- });
- return () => unsub();
+ }).catch(err => console.error('Error cargando retiros:', err));
  }, [currentMonth, currentYear]);
 
  // Cargar historial de meses anteriores
@@ -158,9 +157,9 @@ export default function Finance() {
  // Ref: si la colección banks tiene datos, es fuente primaria (post-migración)
  const banksSourceRef = useRef(false);
 
- // Listener de colección banks — fuente primaria post-migración
+ // Cargar colección banks — fuente primaria post-migración
  useEffect(() => {
-   const unsub = onSnapshot(collection(db, 'banks'), snap => {
+   getDocs(collection(db, 'banks')).then(snap => {
      if (!snap.empty) {
        banksSourceRef.current = true;
        const derivedClabes = [];
@@ -200,13 +199,12 @@ export default function Finance() {
        setLoadingCredit(false);
      }
    });
-   return () => unsub();
  }, []);
 
  // Cargar CLABEs bancarias (fallback pre-migración)
  useEffect(() => {
  const clabeRef = doc(db, 'finance', 'bank-clabes');
- const unsub = onSnapshot(clabeRef, snap => {
+ getDoc(clabeRef).then(snap => {
       if (banksSourceRef.current) return;
       if (snap.exists()) {
         const data = snap.data();
@@ -215,14 +213,13 @@ export default function Finance() {
         setClabes([]);
       }
       setLoadingClabes(false);
- });
- return () => unsub();
+ }).catch(() => setLoadingClabes(false));
  }, []);
 
  // Cargar cuentas bancarias custom (con logos subidos)
  useEffect(() => {
    const bankAccRef = doc(db, 'finance', 'bank-accounts');
-   const unsub = onSnapshot(bankAccRef, snap => {
+   getDoc(bankAccRef).then(snap => {
      if (snap.exists()) {
        const accounts = snap.data().accounts || {};
        setCustomBankAccountsState(accounts);
@@ -231,14 +228,16 @@ export default function Finance() {
        setCustomBankAccountsState({});
        setCustomBankAccounts({});
      }
+   }).catch(() => {
+     setCustomBankAccountsState({});
+     setCustomBankAccounts({});
    });
-   return () => unsub();
  }, []);
 
  // Cargar cuentas de crédito (fallback pre-migración)
  useEffect(() => {
    const creditRef = doc(db, 'finance', 'credit-accounts');
-   const unsub = onSnapshot(creditRef, snap => {
+   getDoc(creditRef).then(snap => {
      if (banksSourceRef.current) return;
      if (snap.exists()) {
        setCreditAccounts(snap.data().accounts || []);
@@ -246,14 +245,13 @@ export default function Finance() {
        setCreditAccounts([]);
      }
      setLoadingCredit(false);
-   }, (err) => {
-     console.warn('credit-accounts listener error:', err);
+   }).catch(err => {
+     console.warn('credit-accounts fetch error:', err);
      if (!banksSourceRef.current) {
        setCreditAccounts([]);
        setLoadingCredit(false);
      }
    });
-   return () => unsub();
  }, []);
 
  // Cargar vault-cards (para vincular tarjetas con cuentas de crédito)

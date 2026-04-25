@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { markSimRechargeComplete, addSimCard, saveSimCardConfig } from '../hooks/firestoreActions';
 import EditModal, { Toast } from '../components/EditModal';
@@ -301,15 +301,13 @@ export default function SimCards() {
     setToast({ message: msg, type });
   }, []);
 
-  // Real-time SIM config
+  // Load SIM config
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'config', 'sim-cards'), (snap) => {
+    getDoc(doc(db, 'config', 'sim-cards')).then(snap => {
       if (snap.exists()) {
         const data = snap.data();
-        // Migrate from groups to flat if needed
         const flatSims = data.sims || migrateGroupsToFlat(data);
         setSims(flatSims);
-        // Auto-migrate to new structure if still using groups
         if (data.groups && !data.sims) {
           saveSimCardConfig({ sims: flatSims }).catch(() => {});
         }
@@ -317,13 +315,12 @@ export default function SimCards() {
         setSims([]);
       }
       setLoading(false);
-    });
-    return () => unsub();
+    }).catch(() => setLoading(false));
   }, []);
 
   // Account registry for adding new SIMs
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'config', 'account-registry'), (snap) => {
+    getDoc(doc(db, 'config', 'account-registry')).then(snap => {
       if (snap.exists()) {
         const accounts = (snap.data().accounts || []).map(a => ({
           id: Number(a.id),
@@ -333,8 +330,7 @@ export default function SimCards() {
         }));
         setLankRegistry(accounts);
       }
-    });
-    return () => unsub();
+    }).catch(() => {});
   }, []);
 
   // Set default year to earliest year with pending/overdue sims, or current year

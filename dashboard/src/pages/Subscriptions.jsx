@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { collection, onSnapshot, doc, getDoc, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useCollection, useDocument } from '../hooks/useFirestore';
 import { SERVICES, getServiceMeta, getProfileImage, getPoolServiceKeys, getNonPoolServiceKeys, getAllServiceKeys, getSlotFields, getExpectedSlotFields, getUserFields } from '../config/services';
@@ -225,35 +225,40 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  return () => observer.disconnect();
  }, [selectedService]);
 
+ // ─── Data loading functions ───
+ const loadPoolDetailsFn = useCallback(async () => {
+   if (pools.length === 0) return;
+   const results = {};
+   await Promise.all(pools.map(async pool => {
+     const snap = await getDocs(collection(db, `service-pools/${pool.id}/real-accounts`));
+     results[pool.id] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+   }));
+   setPoolDetails(results);
+ }, [pools]);
+
+ const loadGroupDetailsFn = useCallback(async () => {
+   const svcs = getAllServiceKeys();
+   const results = {};
+   await Promise.all(svcs.map(async svc => {
+     const snap = await getDocs(collection(db, `groups/${svc}/lank-accounts`));
+     results[svc] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+   }));
+   setGroupDetails(results);
+ }, []);
+
+ const refreshSubscriptionsData = useCallback(async () => {
+   await Promise.all([loadPoolDetailsFn(), loadGroupDetailsFn()]);
+ }, [loadPoolDetailsFn, loadGroupDetailsFn]);
+
  // Cargar cuentas reales
  useEffect(() => {
- if (pools.length === 0) return;
- const unsubs = [];
- pools.forEach(pool => {
-      const colRef = collection(db, `service-pools/${pool.id}/real-accounts`);
-      const unsub = onSnapshot(colRef, snap => {
-        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setPoolDetails(prev => ({ ...prev, [pool.id]: docs }));
-      });
-      unsubs.push(unsub);
- });
- return () => unsubs.forEach(u => u());
- }, [pools]);
+ loadPoolDetailsFn().catch(() => {});
+ }, [loadPoolDetailsFn]);
 
  // Cargar grupos Lank
  useEffect(() => {
- const svcs = getAllServiceKeys();
- const unsubs = [];
- svcs.forEach(svc => {
-      const colRef = collection(db, `groups/${svc}/lank-accounts`);
-      const unsub = onSnapshot(colRef, snap => {
-        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setGroupDetails(prev => ({ ...prev, [svc]: docs }));
-      });
-      unsubs.push(unsub);
- });
- return () => unsubs.forEach(u => u());
- }, []);
+ loadGroupDetailsFn().catch(() => {});
+ }, [loadGroupDetailsFn]);
 
  // Estadísticas por servicio
  const getStats = (svcId) => {

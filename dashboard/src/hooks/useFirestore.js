@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { collection, doc, getDoc, getDocs, onSnapshot, query } from 'firebase/firestore';
 import { db } from '../firebase';
 import { normalizeFirestoreOptions } from './firestoreQueryHelpers';
@@ -27,7 +27,10 @@ export function useCollection(collectionPath, options = {}) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const constraintRef = useMemo(() => constraints, deps);
+
+  const refetch = useCallback(() => setRefreshKey(k => k + 1), []);
 
   useEffect(() => {
     if (!enabled) {
@@ -64,9 +67,9 @@ export function useCollection(collectionPath, options = {}) {
     });
 
     return () => unsub();
-  }, [collectionPath, enabled, realtime, constraintRef]);
+  }, [collectionPath, enabled, realtime, constraintRef, refreshKey]);
 
-  return { data, loading, error };
+  return { data, loading, error, refetch };
 }
 
 export function useDocument(collectionOrPath, docIdOrOptions, maybeOptions) {
@@ -75,7 +78,10 @@ export function useDocument(collectionOrPath, docIdOrOptions, maybeOptions) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState(null);
-  const effectDeps = deps.length ? deps : [fullPath, enabled, realtime];
+  const [refreshKey, setRefreshKey] = useState(0);
+  const effectDeps = deps.length ? [...deps, refreshKey] : [fullPath, enabled, realtime, refreshKey];
+
+  const refetch = useCallback(() => setRefreshKey(k => k + 1), []);
 
   useEffect(() => {
     if (!enabled) {
@@ -129,7 +135,7 @@ export function useDocument(collectionOrPath, docIdOrOptions, maybeOptions) {
     };
   }, effectDeps);
 
-  return { data, loading, error };
+  return { data, loading, error, refetch };
 }
 
 export function useSubCollection(parentPath, subCollectionId, options = {}) {
