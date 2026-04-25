@@ -1,0 +1,29 @@
+# Python virtual environments
+venv/
+.venv/
+env/
+
+# Byte-compiled / cached
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Tests (not needed in production)
+tests/
+test_*.py
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Git
+.git/
+.gitignore
+
+# Local dev files
+*.log
+.env
+.env.local
