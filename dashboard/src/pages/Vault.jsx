@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { collection, onSnapshot, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useDocument } from '../hooks/useFirestore';
 import { SERVICES, BANKS, getServiceMeta, getBankMeta, getPoolServiceKeys, getAllServiceKeys } from '../config/services';
 import { encrypt, decrypt, encryptFields, decryptFields } from '../utils/crypto';
-import { completeAlert, createManualAlert, createRealAccount, createLinkedRealAccount, deleteRealAccount, createVaultCard, deleteVaultCard, DEFAULT_MASTER_CONFIG, addRecurringCharge, removeRecurringCharge, toggleRecurringCharge, updateRecurringCharge, createVaultEmailAccount, updateVaultEmailAccount, syncVaultEmailPassword } from '../hooks/firestoreActions';
+import { completeAlert, createManualAlert, createRealAccount, createLinkedRealAccount, deleteRealAccount, createVaultCard, deleteVaultCard, DEFAULT_MASTER_CONFIG, addRecurringCharge, removeRecurringCharge, toggleRecurringCharge, updateRecurringCharge, createVaultEmailAccount, updateVaultEmailAccount, deleteVaultEmailAccount, createLankMasterAccount, syncVaultEmailPassword } from '../hooks/firestoreActions';
 import { ConfirmDialog, Toast } from '../components/EditModal';
 import { seedGooglePasswords } from '../utils/seedGooglePasswords';
 import { BadgeIcon, BankIcon, CalendarIcon, CashIcon, CheckCircleIcon, ClipboardIcon, CloseIcon, CreditCardIcon, DotRed, EditIcon, EmailIcon, HashIcon, HourglassIcon, KeyIcon, LinkIcon, LockIcon, LockKeyIcon, NotesIcon, PhoneIcon, PlusIcon, ReceiptIcon, RefreshIcon, SaveIcon, SearchIcon, SeedlingIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, WarningIcon } from '../components/Icons';
@@ -91,7 +91,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
  const [googleEditModal, setGoogleEditModal] = useState(null); // { id, type, email, ... }
  const [googleEditValues, setGoogleEditValues] = useState({ email: '', password: '', notes: '', fullName: '', canonicalAlias: '', whatsapp: '' });
  const [googleCreateModal, setGoogleCreateModal] = useState(null); // { type: 'lank_google' | 'tertiary' }
- const [googleCreateValues, setGoogleCreateValues] = useState({ type: 'tertiary', lankAccountId: '', email: '', password: '', notes: '' });
+ const [googleCreateValues, setGoogleCreateValues] = useState({ type: 'tertiary', lankAccountId: '', email: '', password: '', notes: '', canonicalAlias: '', fullName: '', whatsapp: '' });
  const [lankRegistry, setLankRegistry] = useState([]);
 
  // ─── SEGURIDAD: PIN de Bóveda ───
@@ -399,27 +399,56 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
  return () => { if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current); };
  }, [navData]);
 
+ // ─── Data loading functions ───
+ const loadPools = useCallback(async () => {
+   const serviceKeys = getPoolServiceKeys();
+   const results = {};
+   await Promise.all(serviceKeys.map(async svc => {
+     const snap = await getDocs(collection(db, `service-pools/${svc}/real-accounts`));
+     results[svc] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+   }));
+   setPools(results);
+ }, []);
+
+ const loadSecrets = useCallback(async () => {
+   const snap = await getDocs(collection(db, 'secrets'));
+   const data = {};
+   snap.docs.forEach(d => { data[d.id] = d.data(); });
+   setSecrets(data);
+ }, []);
+
+ const loadCards = useCallback(async () => {
+   const snap = await getDocs(collection(db, 'vault-cards'));
+   const data = {};
+   snap.docs.forEach(d => { data[d.id] = { id: d.id, ...d.data() }; });
+   setCards(data);
+ }, []);
+
+ const loadAlerts = useCallback(async () => {
+   const q = query(collection(db, 'alerts'),
+     where('type', '==', 'password_change'),
+     where('status', '==', 'pending'));
+   const snap = await getDocs(q);
+   setAlerts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+ }, []);
+
+ const refreshVaultData = useCallback(async () => {
+   await Promise.all([loadPools(), loadSecrets(), loadCards(), loadAlerts()]);
+ }, [loadPools, loadSecrets, loadCards, loadAlerts]);
+
  // Load real accounts
  useEffect(() => {
- const serviceKeys = getPoolServiceKeys();
- const unsubs = serviceKeys.map(svc => {
-      return onSnapshot(collection(db, `service-pools/${svc}/real-accounts`), snap => {
-        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setPools(prev => ({ ...prev, [svc]: docs }));
-      });
- });
- return () => unsubs.forEach(u => u());
- }, []);
+ let cancelled = false;
+ loadPools().catch(() => {});
+ return () => { cancelled = true; };
+ }, [loadPools]);
 
  // Load secrets
  useEffect(() => {
- const unsub = onSnapshot(collection(db, 'secrets'), snap => {
-      const data = {};
-      snap.docs.forEach(d => { data[d.id] = d.data(); });
-      setSecrets(data);
- });
- return () => unsub();
- }, []);
+ let cancelled = false;
+ loadSecrets().catch(() => {});
+ return () => { cancelled = true; };
+ }, [loadSecrets]);
 
  // Load Lank account registry for principal email accounts
  useEffect(() => {
@@ -465,24 +494,13 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
 
  // Load cards
  useEffect(() => {
- const unsub = onSnapshot(collection(db, 'vault-cards'), snap => {
-      const data = {};
-      snap.docs.forEach(d => { data[d.id] = { id: d.id, ...d.data() }; });
-      setCards(data);
- });
- return () => unsub();
- }, []);
+ loadCards().catch(() => {});
+ }, [loadCards]);
 
  // Load pending password_change alerts
  useEffect(() => {
- const unsub = onSnapshot(collection(db, 'alerts'), snap => {
-      const passwordAlerts = snap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .filter(a => a.type === 'password_change' && a.status === 'pending');
-      setAlerts(passwordAlerts);
- });
- return () => unsub();
- }, []);
+ loadAlerts().catch(() => {});
+ }, [loadAlerts]);
 
  // Helpers
  const getEmailLabel = (email) => {
@@ -577,14 +595,6 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
 
  // Card labels for dropdown
  const cardLabels = useMemo(() => Object.values(allCards).map(c => c.label).sort(), [allCards]);
-
- const availablePrincipalAccounts = useMemo(() => {
-   return lankRegistry
-     .filter(account => !Object.values(secrets).some(secret =>
-       secret.type === 'lank_google' && String(secret.lankAccountId || '') === String(account.id)
-     ))
-     .sort((a, b) => (parseInt(a.id, 10) || 999) - (parseInt(b.id, 10) || 999));
- }, [lankRegistry, secrets]);
 
  // All vault email accounts for the email picker in real account creation
  const vaultEmailOptions = useMemo(() => {
@@ -751,28 +761,30 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
      return;
    }
 
-   if (googleCreateModal.type === 'lank_google' && !googleCreateValues.lankAccountId) {
-     showToast('Debes seleccionar una cuenta Lank', 'error');
-     return;
-   }
-
-   const selectedAccount = googleCreateModal.type === 'lank_google'
-     ? lankRegistry.find(account => account.id === String(googleCreateValues.lankAccountId))
-     : null;
-
    try {
-     await createVaultEmailAccount({
-       type: googleCreateModal.type,
-       lankAccountId: selectedAccount?.id || '',
-       fullName: selectedAccount?.fullName || '',
-       canonicalAlias: selectedAccount?.canonicalAlias || '',
-       email: googleCreateValues.email,
-       password: googleCreateValues.password,
-       notes: googleCreateValues.notes,
-     });
-
-     const label = googleCreateModal.type === 'lank_google' ? 'Cuenta principal' : 'Cuenta secundaria';
-     showToast(`${label} creada correctamente`);
+     if (googleCreateModal.type === 'lank_google') {
+       if (!googleCreateValues.canonicalAlias && !googleCreateValues.fullName) {
+         showToast('Se requiere al menos un alias o nombre', 'error');
+         return;
+       }
+       await createLankMasterAccount({
+         canonicalAlias: googleCreateValues.canonicalAlias,
+         fullName: googleCreateValues.fullName,
+         lankGmailAddress: googleCreateValues.email,
+         whatsapp: googleCreateValues.whatsapp,
+         notes: [],
+         googlePassword: googleCreateValues.password,
+       });
+       showToast('Cuenta principal creada correctamente');
+     } else {
+       await createVaultEmailAccount({
+         type: 'tertiary',
+         email: googleCreateValues.email,
+         password: googleCreateValues.password,
+         notes: googleCreateValues.notes,
+       });
+       showToast('Cuenta secundaria creada correctamente');
+     }
      setGoogleCreateModal(null);
    } catch (err) {
      showToast(err.message || 'Error al crear la cuenta', 'error');
@@ -1791,6 +1803,24 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
                      Ver cuenta Lank
                   </button>
                 )}
+                <button className="vault-action-btn delete" onClick={() => {
+                  const label = s.isPrincipal ? `cuenta principal Lank #${s.lankAccountId} (${s.email})` : `cuenta secundaria (${s.email})`;
+                  const cascade = s.isPrincipal ? '\n\nEsto también eliminará la cuenta Lank y la entrada de SIM vinculadas.' : '';
+                  setConfirmDialog({
+                    message: `¿Eliminar ${label}?${cascade}`,
+                    onConfirm: async () => {
+                      try {
+                        await deleteVaultEmailAccount(s.id);
+                        showToast(`Cuenta "${s.email}" eliminada`);
+                      } catch (err) {
+                        showToast(err.message || 'Error al eliminar', 'error');
+                      }
+                      setConfirmDialog(null);
+                    },
+                  });
+                }}>
+                  <TrashIcon size={16} /> Eliminar
+                </button>
               </div>
             </div>
           );
@@ -1825,7 +1855,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
                 className="vault-action-btn create"
                 style={{ padding: '10px 20px', fontSize: '13px' }}
                 onClick={() => {
-                  setGoogleCreateValues({ type: 'lank_google', lankAccountId: '', email: '', password: '', notes: '' });
+                  setGoogleCreateValues({ type: 'lank_google', lankAccountId: '', email: '', password: '', notes: '', canonicalAlias: '', fullName: '', whatsapp: '' });
                   setGoogleCreateModal({ type: 'lank_google' });
                 }}
               >
@@ -1835,7 +1865,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
                 className="vault-action-btn create"
                 style={{ padding: '10px 20px', fontSize: '13px' }}
                 onClick={() => {
-                  setGoogleCreateValues({ type: 'tertiary', lankAccountId: '', email: '', password: '', notes: '' });
+                  setGoogleCreateValues({ type: 'tertiary', lankAccountId: '', email: '', password: '', notes: '', canonicalAlias: '', fullName: '', whatsapp: '' });
                   setGoogleCreateModal({ type: 'tertiary' });
                 }}
               >
@@ -2736,24 +2766,16 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
             </div>
             <div className="vault-modal-form">
               {googleCreateModal.type === 'lank_google' && (
-                <div className="vault-form-group">
-                  <label><UserIcon size={16} /> Cuenta Lank</label>
-                  <select
-                    value={googleCreateValues.lankAccountId}
-                    onChange={e => setGoogleCreateValues(p => ({ ...p, lankAccountId: e.target.value }))}
-                    disabled={availablePrincipalAccounts.length === 0}
-                  >
-                    <option value="">{availablePrincipalAccounts.length === 0 ? 'No hay cuentas disponibles' : 'Selecciona una cuenta'}</option>
-                    {availablePrincipalAccounts.map(account => (
-                      <option key={account.id} value={account.id}>
-                        #{account.id} — {account.canonicalAlias || account.fullName}
-                      </option>
-                    ))}
-                  </select>
-                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    Solo se muestran cuentas Lank que aún no tienen una cuenta principal registrada en la Bóveda.
-                  </span>
-                </div>
+                <>
+                  <div className="vault-form-group">
+                    <label><UserIcon size={16} /> Alias</label>
+                    <input type="text" value={googleCreateValues.canonicalAlias} onChange={e => setGoogleCreateValues(p => ({ ...p, canonicalAlias: e.target.value }))} placeholder="Alias canónico (ej: daniellank)" autoComplete="off" />
+                  </div>
+                  <div className="vault-form-group">
+                    <label><UserIcon size={16} /> Nombre completo</label>
+                    <input type="text" value={googleCreateValues.fullName} onChange={e => setGoogleCreateValues(p => ({ ...p, fullName: e.target.value }))} placeholder="Nombre completo del titular" autoComplete="off" />
+                  </div>
+                </>
               )}
               <div className="vault-form-group">
                 <label><EmailIcon size={16} /> Email</label>
@@ -2771,10 +2793,21 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
                   <RevealBtn fieldKey="create-sec-pw" />
                 </div>
               </div>
+              {googleCreateModal.type === 'lank_google' && (
+                <div className="vault-form-group">
+                  <label><PhoneIcon size={16} /> WhatsApp</label>
+                  <input type="text" value={googleCreateValues.whatsapp} onChange={e => setGoogleCreateValues(p => ({ ...p, whatsapp: e.target.value }))} placeholder="+52 1234567890" autoComplete="off" />
+                </div>
+              )}
               <div className="vault-form-group">
                 <label><NotesIcon size={16} /> Notas / Comentarios</label>
                 <textarea value={googleCreateValues.notes} onChange={e => setGoogleCreateValues(p => ({ ...p, notes: e.target.value }))} placeholder="Para que se usa esta cuenta, quien la creo, etc." rows={3} />
               </div>
+              {googleCreateModal.type === 'lank_google' && (
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  Se creará automáticamente la cuenta Lank, la entrada en SIM Cards y el acceso de correo vinculado.
+                </span>
+              )}
             </div>
             <div className="vault-modal-actions">
               <button className="vault-modal-btn cancel" onClick={() => setGoogleCreateModal(null)}>Cancelar</button>

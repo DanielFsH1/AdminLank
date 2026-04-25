@@ -1,9 +1,9 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useCollection, useDocument } from '../hooks/useFirestore';
-import { collection, onSnapshot, doc, getDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SERVICES, getServiceMeta, getProfileImage, getAllServiceKeys, getPoolServiceKeys, getUserFields } from '../config/services';
-import { updateGroupUser, removeGroupUser, addGroupUser, createLankGroup, deleteLankGroup, DEFAULT_MASTER_CONFIG, updateGroupEnabledSlots, updateLankGroupStatus, updateSlot, createManualAlert, updateLankMasterAccount, createLankMasterAccount } from '../hooks/firestoreActions';
+import { updateGroupUser, removeGroupUser, addGroupUser, createLankGroup, deleteLankGroup, DEFAULT_MASTER_CONFIG, updateGroupEnabledSlots, updateLankGroupStatus, updateSlot, createManualAlert, updateLankMasterAccount } from '../hooks/firestoreActions';
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
 import { BlockIcon, CalendarIcon, CashIcon, ClipboardIcon, CloseIcon, EditIcon, EmailIcon, FolderIcon, LinkIcon, PhoneIcon, PlusIcon, SaveIcon, SearchIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, UsersIcon, WarningIcon } from '../components/Icons';
 import { normalizeSearch, nMatch } from '../utils/normalize';
@@ -59,36 +59,42 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
  setToast({ visible: true, message: msg, type });
  }, []);
 
+ // ─── Data loading functions ───
+ const loadGroups = useCallback(async () => {
+   const services = getAllServiceKeys();
+   const results = {};
+   await Promise.all(services.map(async svc => {
+     const snap = await getDocs(collection(db, `groups/${svc}/lank-accounts`));
+     const docs = {};
+     snap.docs.forEach(d => { docs[d.id] = d.data(); });
+     results[svc] = docs;
+   }));
+   setGroups(results);
+ }, []);
+
+ const loadPoolDetails = useCallback(async () => {
+   const poolSvcs = getPoolServiceKeys();
+   const results = {};
+   await Promise.all(poolSvcs.map(async svc => {
+     const snap = await getDocs(collection(db, `service-pools/${svc}/real-accounts`));
+     results[svc] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+   }));
+   setPoolDetails(results);
+ }, []);
+
+ const refreshAccountsData = useCallback(async () => {
+   await Promise.all([loadGroups(), loadPoolDetails()]);
+ }, [loadGroups, loadPoolDetails]);
+
  // Cargar grupos de todos los servicios
  useEffect(() => {
- const services = getAllServiceKeys();
- const unsubs = [];
- services.forEach(svc => {
-      const colRef = collection(db, `groups/${svc}/lank-accounts`);
-      const unsub = onSnapshot(colRef, snap => {
-        const docs = {};
-        snap.docs.forEach(d => { docs[d.id] = d.data(); });
-        setGroups(prev => ({ ...prev, [svc]: docs }));
-      });
-      unsubs.push(unsub);
- });
- return () => unsubs.forEach(u => u());
- }, []);
+ loadGroups().catch(() => {});
+ }, [loadGroups]);
 
  // Cargar cuentas reales (service-pools) para sincronización bidireccional
  useEffect(() => {
- const poolSvcs = getPoolServiceKeys();
- const unsubs = [];
- poolSvcs.forEach(svc => {
-      const colRef = collection(db, `service-pools/${svc}/real-accounts`);
-      const unsub = onSnapshot(colRef, snap => {
-        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setPoolDetails(prev => ({ ...prev, [svc]: docs }));
-      });
-      unsubs.push(unsub);
- });
- return () => unsubs.forEach(u => u());
- }, []);
+ loadPoolDetails().catch(() => {});
+ }, [loadPoolDetails]);
 
  // Derivar aliases con acción pendiente desde alertas pendientes
  useEffect(() => {
@@ -464,7 +470,6 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
 
  // ─── CRUD: Editar cuenta Lank maestra ───
 
- const [createAccountModal, setCreateAccountModal] = useState(false);
 
  const handleEditAccount = (acctId, acct) => {
    setEditAccountModal({ acctId });
@@ -511,9 +516,7 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
  <>
       <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div className="section-title"><UsersIcon size={16} /> Cuentas Lank ({filtered.length})</div>
-        <button className="crud-add-service-btn" onClick={() => setCreateAccountModal(true)} style={{ margin: 0, width: 'auto' }}>
-          <PlusIcon size={14} /> Nueva cuenta
-        </button>
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Crear / eliminar desde Bóveda → Cuentas de Correo</span>
       </div>
 
       {/* Buscador y filtros */}
@@ -1010,34 +1013,7 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
         icon={<WarningIcon size={16} />}
       />
 
-      {/* Modal: Crear cuenta Lank maestra */}
-      <EditModal
-        open={createAccountModal}
-        onClose={() => setCreateAccountModal(false)}
-        onSave={async (values) => {
-          const newId = await createLankMasterAccount({
-            canonicalAlias: values.canonicalAlias,
-            fullName: values.fullName,
-            lankGmailAddress: values.email,
-            whatsapp: values.whatsapp,
-            notes: [],
-          });
-          showToast(`Cuenta Lank #${newId} creada exitosamente`);
-          setCreateAccountModal(false);
-          setExpandedId(String(newId));
-        }}
-        title="Nueva Cuenta Lank"
-        icon={<PlusIcon size={16} />}
-        fields={[
-          { key: 'canonicalAlias', label: 'Alias', placeholder: 'Ej. Juan Pérez' },
-          { key: 'fullName', label: 'Nombre completo', placeholder: 'Nombre legal completo' },
-          { key: 'email', label: 'Correo Gmail Lank', type: 'email', placeholder: 'correo@gmail.com' },
-          { key: 'whatsapp', label: 'WhatsApp', placeholder: '+52 1234567890' },
-        ]}
-        initialValues={{ canonicalAlias: '', fullName: '', email: '', whatsapp: '' }}
-        saveLabel={<><PlusIcon size={16} /> Crear cuenta</>}
-        confirmMessage="Se generará un número de cuenta Lank secuencial automáticamente y se creará el registro en la base de datos."
-      />
+      {/* Modal: Crear cuenta Lank — ahora se gestiona desde Bóveda → Cuentas de Correo */}
 
       {/* Modal: Editar cuenta Lank maestra */}
       <EditModal

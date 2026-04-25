@@ -959,6 +959,43 @@ export async function createVaultEmailAccount(accountData) {
   return docId;
 }
 
+export async function deleteVaultEmailAccount(accountId) {
+  const ref = doc(db, 'secrets', accountId);
+  const snap = await firestoreGetDoc(ref);
+  if (!snap.exists()) {
+    throw new Error('La cuenta de correo no existe');
+  }
+  const data = snap.data();
+  await deleteDoc(ref);
+
+  // Cascade: delete linked Lank account + SIM for lank_google
+  if (data.type === 'lank_google' && data.lankAccountId) {
+    const acctId = String(data.lankAccountId);
+    try {
+      const acctRef = doc(db, 'accounts', acctId);
+      const acctSnap = await firestoreGetDoc(acctRef);
+      if (acctSnap.exists()) await deleteDoc(acctRef);
+    } catch (_) {}
+
+    try {
+      const numId = parseInt(acctId, 10) || acctId;
+      const simSnap = await firestoreGetDoc(doc(db, 'config', 'sim-cards'));
+      if (simSnap.exists()) {
+        const currentSims = simSnap.data().sims || [];
+        const filtered = currentSims.filter(s => s.lankAccountId !== numId);
+        if (filtered.length !== currentSims.length) {
+          await saveSimCardConfig({ sims: filtered });
+        }
+      }
+    } catch (_) {}
+  }
+
+  logManualChange('delete_vault_email_account', `Cuenta de correo eliminada: ${data.email || accountId}`, {
+    collection: 'secrets', documentId: accountId,
+    before: { type: data.type, email: data.email, lankAccountId: data.lankAccountId || null },
+  });
+}
+
 export async function updateVaultEmailAccount(accountId, updates, options = {}) {
   const ref = doc(db, 'secrets', accountId);
   const existingSnap = await firestoreGetDoc(ref);
@@ -1016,6 +1053,29 @@ export async function updateVaultEmailAccount(accountId, updates, options = {}) 
         await updateDoc(acctRef, acctPayload);
       } catch (syncErr) {
         console.error('Error syncing vault update to accounts:', syncErr);
+      }
+
+      // Sync to SIM cards for phone/name changes
+      try {
+        const simSnap = await firestoreGetDoc(doc(db, 'config', 'sim-cards'));
+        if (simSnap.exists()) {
+          const currentSims = simSnap.data().sims || [];
+          const numId = parseInt(acctId, 10) || acctId;
+          let changed = false;
+          const updatedSims = currentSims.map(s => {
+            if (s.lankAccountId === numId) {
+              const updated = { ...s };
+              if (updates.whatsapp !== undefined) { updated.phone = updates.whatsapp; changed = true; }
+              if (payload.fullName !== undefined) { updated.fullName = payload.fullName; changed = true; }
+              if (payload.canonicalAlias !== undefined) { updated.canonicalAlias = payload.canonicalAlias; changed = true; }
+              return updated;
+            }
+            return s;
+          });
+          if (changed) await saveSimCardConfig({ sims: updatedSims });
+        }
+      } catch (_) {
+        // SIM sync is best-effort
       }
     }
   }
@@ -1156,7 +1216,7 @@ export async function createLankMasterAccount(accountData) {
         email: payload.lankGmailAddress,
         fullName: payload.fullName,
         canonicalAlias: payload.canonicalAlias,
-        password: '',
+        password: accountData.googlePassword || '',
         notes: '',
       });
     } catch (_) {
@@ -2379,6 +2439,14 @@ export async function deleteLankMasterAccount(accountId) {
   const before = snap.data();
 
   await deleteDoc(ref);
+
+  // Auto-remove linked vault secret
+  try {
+    const secretDocId = `lank_google_${String(numId).trim()}`;
+    const secretRef = doc(db, 'secrets', secretDocId);
+    const secretSnap = await firestoreGetDoc(secretRef);
+    if (secretSnap.exists()) await deleteDoc(secretRef);
+  } catch (_) {}
 
   // Auto-remove linked SIM card entry
   try {
