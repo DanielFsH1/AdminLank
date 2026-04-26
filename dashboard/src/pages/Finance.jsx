@@ -656,10 +656,19 @@ export default function Finance() {
  { label: 'Ganancia neta', value: netProfit, color: netProfit >= 0 ? '#10b981' : '#ef4444', icon: <TrendUpIcon size={16} />, isAmount: true, isNet: true },
  ];
 
- // Agrupar retiros por banco — usar nombre de la CLABE conocida si existe
+ const resolveBankName = (w) => {
+   if (w.knownBankAccount?.bank) return w.knownBankAccount.bank;
+   if (w.accountNumber) {
+     const match = clabes.find(c => c.clabe === w.accountNumber);
+     if (match) return match.type === 'credito' ? `${match.bank} Crédito` : match.bank;
+   }
+   return w.bank || 'Desconocido';
+ };
+
+ // Agrupar retiros por banco — resolver nombre vía knownBankAccount o CLABE
  const byBank = {};
  withdrawals.forEach(w => {
- const bank = w.knownBankAccount?.bank || w.bank || 'Desconocido';
+ const bank = resolveBankName(w);
  if (!byBank[bank]) byBank[bank] = { total: 0, count: 0, items: [] };
  byBank[bank].total += w.amount || 0;
  byBank[bank].count += 1;
@@ -903,7 +912,7 @@ export default function Finance() {
             <span className="finance-withdrawal-chevron" style={{ transform: withdrawalsCollapsed ? 'rotate(0)' : 'rotate(180deg)' }}>▼</span>
           </div>
 
-          <div className={`finance-withdrawal-body ${withdrawalsCollapsed ? '' : 'expanded'}`}>
+          <div className={`finance-withdrawal-body ${withdrawalsCollapsed ? '' : 'expanded'}`} style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
 
           {/* Sub-tabs: Todos / Por cuenta */}
           <div className="alerts-tabs" style={{ marginBottom: '12px' }}>
@@ -919,7 +928,7 @@ export default function Finance() {
           {wTab === 'all' && (
             <div className="withdrawal-list">
               {withdrawals.map((w, i) => {
-                const wBankName = w.knownBankAccount?.bank || w.bank;
+                const wBankName = resolveBankName(w);
                 const bankMeta = getBankMeta(wBankName);
                 const dateDisplay = formatDateTime(w.completedAt || w.requestedAt);
                 const isPending = !w.completedAt;
@@ -987,7 +996,7 @@ export default function Finance() {
                           {data.items
                             .sort((a, b) => (b.completedAt || b.requestedAt || '').localeCompare(a.completedAt || a.requestedAt || ''))
                             .map((w, wi) => {
-                              const wBankName = w.knownBankAccount?.bank || w.bank;
+                              const wBankName = resolveBankName(w);
                               const bankMeta = getBankMeta(wBankName);
                               const isPending = !w.completedAt;
                               return (
@@ -1040,7 +1049,7 @@ export default function Finance() {
           {expenseEntries.length === 0 ? (
             <div className="empty-state" style={{ padding: '20px' }}><p>Sin gastos registrados este mes</p></div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '400px', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, minHeight: 0, overflowY: 'auto' }}>
               {/* Pendientes primero */}
               {expenseEntries.filter(e => e.status === 'pending').length > 0 && (
                 <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent-warning)', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '4px 0' }}>
@@ -1634,7 +1643,7 @@ export default function Finance() {
                           </div>
                           <div className="withdrawal-list" style={{ maxHeight: '300px', overflow: 'auto' }}>
                             {histWds.map((w, i) => {
-                              const wBankName = w.knownBankAccount?.bank || w.bank;
+                              const wBankName = resolveBankName(w);
                               const bankMeta = getBankMeta(wBankName);
                               const isPending = !w.completedAt;
                               return (
