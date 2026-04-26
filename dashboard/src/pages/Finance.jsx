@@ -1473,7 +1473,7 @@ export default function Finance() {
               // Agrupar retiros por banco para meses no recientes
               const histByBank = {};
               histWds.forEach(w => {
-                const bank = w.knownBankAccount?.bank || w.bank || 'Desconocido';
+                const bank = resolveBankName(w);
                 if (!histByBank[bank]) histByBank[bank] = { total: 0, count: 0 };
                 histByBank[bank].total += w.amount || 0;
                 histByBank[bank].count += 1;
