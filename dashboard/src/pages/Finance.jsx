@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useDocument } from '../hooks/useFirestore';
-import { collection, getDocs, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { formatMXN, getBankMeta, getProfileImage, BANKS, setCustomBankAccounts } from '../config/services';
 import { confirmRecurringExpense, generateRecurringExpenses, logManualChange } from '../hooks/firestoreActions';
@@ -236,7 +236,6 @@ export default function Finance() {
        setCustomBankAccounts({});
      }
    }).catch(() => {
-     setCustomBankAccountsState({});
      setCustomBankAccounts({});
    });
  }, []);
