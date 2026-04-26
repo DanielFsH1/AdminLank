@@ -71,6 +71,8 @@ export default function Finance() {
  const [removeDepositConfirm, setRemoveDepositConfirm] = useState(null);
  const [depositToast, setDepositToast] = useState({ visible: false, message: '', type: 'success' });
 
+ const [ledgerFilter, setLedgerFilter] = useState('all'); // 'all' | 'expenses' | 'income'
+
  const showDepositToast = useCallback((msg, type = 'success') => {
    setDepositToast({ visible: true, message: msg, type });
  }, []);
@@ -1027,243 +1029,223 @@ export default function Finance() {
           </div>{/* fin finance-withdrawal-body */}
         </div>
 
-        {/* COLUMNA DERECHA: Gastos */}
+        {/* COLUMNA DERECHA: Movimientos (Gastos + Ingresos) */}
         <div className="finance-col">
-          <div className="finance-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className="finance-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
             <span>
-              <ExpenseIcon size={16} /> Gastos
-              <span className="badge badge-danger" style={{ marginLeft: '8px' }}>{expenseEntries.length}</span>
+              <ReceiptIcon size={16} /> Movimientos
+              <span className="badge badge-info" style={{ marginLeft: '8px' }}>{entries.length}</span>
               {expenseEntries.filter(e => e.status === 'pending').length > 0 && (
                 <span className="badge badge-warning" style={{ marginLeft: '4px' }}>{expenseEntries.filter(e => e.status === 'pending').length} pendiente{expenseEntries.filter(e => e.status === 'pending').length !== 1 ? 's' : ''}</span>
               )}
             </span>
-            <button
-              className="alert-action-btn edit"
-              onClick={() => setAddExpenseModal(true)}
-              style={{ fontSize: '12px' }}
-            >
-              <PlusIcon size={16} /> Agregar gasto
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button className="alert-action-btn edit" onClick={() => setAddExpenseModal(true)} style={{ fontSize: '12px' }}>
+                <PlusIcon size={14} /> Gasto
+              </button>
+              <button className="alert-action-btn edit" onClick={() => setAddDepositModal(true)} style={{ fontSize: '12px', background: 'rgba(16,185,129,0.1)', color: '#10b981' }}>
+                <PlusIcon size={14} /> Ingreso
+              </button>
+            </div>
+          </div>
+
+          {/* Filtros */}
+          <div className="alerts-tabs" style={{ marginBottom: '8px' }}>
+            <button className={`alert-tab ${ledgerFilter === 'all' ? 'active' : ''}`} onClick={() => setLedgerFilter('all')}>
+              Todos ({entries.length})
+            </button>
+            <button className={`alert-tab ${ledgerFilter === 'expenses' ? 'active' : ''}`} onClick={() => setLedgerFilter('expenses')}>
+              <ExpenseIcon size={12} /> Gastos ({expenseEntries.length})
+            </button>
+            <button className={`alert-tab ${ledgerFilter === 'income' ? 'active' : ''}`} onClick={() => setLedgerFilter('income')}>
+              <DepositIcon size={12} /> Ingresos ({depositEntries.length})
             </button>
           </div>
 
-          {expenseEntries.length === 0 ? (
-            <div className="empty-state" style={{ padding: '20px' }}><p>Sin gastos registrados este mes</p></div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, minHeight: 0, overflowY: 'auto' }}>
-              {/* Pendientes primero */}
-              {expenseEntries.filter(e => e.status === 'pending').length > 0 && (
-                <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent-warning)', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '4px 0' }}>
-                  <HourglassIcon size={14} /> Cobros pendientes de confirmación
+          {(() => {
+            const filteredEntries = ledgerFilter === 'expenses' ? expenseEntries
+              : ledgerFilter === 'income' ? depositEntries
+              : entries;
+
+            const pendingEntries = filteredEntries.filter(e => e.status === 'pending');
+            const confirmedEntries = filteredEntries.filter(e => e.status !== 'pending');
+
+            if (filteredEntries.length === 0) {
+              return (
+                <div className="empty-state" style={{ padding: '20px' }}>
+                  <p>{ledgerFilter === 'expenses' ? 'Sin gastos este mes' : ledgerFilter === 'income' ? 'Sin ingresos este mes' : 'Sin movimientos este mes'}</p>
                 </div>
-              )}
-              {expenseEntries.filter(e => e.status === 'pending').map((entry, i) => {
-                const entryId = getEntryIdentifier(entry);
-                const editedAmount = entryId ? pendingAmounts[entryId] : undefined;
-                const displayAmount = editedAmount !== undefined ? editedAmount : (entry.amount || '');
-                const finalAmount = editedAmount !== undefined ? parseFloat(editedAmount) : (entry.amount || 0);
-                const needsAmount = !entry.amount || entry.amount <= 0;
-                // Derive cardLabel from notes if not stored directly (backcompat)
-                const cardLabel = entry.cardLabel || (entry.cardId && entry.notes?.[0]?.startsWith('Cobro automático — ')
-                  ? entry.notes[0].replace('Cobro automático — ', '') : '');
-                return (
-                  <div className="ledger-entry" key={`pending-${i}`} style={{ borderLeft: '3px solid var(--accent-warning)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600, fontSize: '14px' }}>
-                          {entry.description}
-                          <span className="badge badge-warning" style={{ marginLeft: '8px', fontSize: '10px' }}>Pendiente</span>
-                        </div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                          {entry.effectiveAt && <span><CalendarIcon size={16} /> {entry.effectiveAt}</span>}
-                          {entry.subscription && <span> | {entry.subscription}</span>}
-                          {entry.isRecurring && <span> | <RefreshIcon size={12} /> Cobro recurrente</span>}
-                          {cardLabel && <span> | <CreditCardIcon size={12} /> {cardLabel}</span>}
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <div style={{ textAlign: 'right' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>$</span>
-                            <input
-                              type="number"
-                              value={displayAmount}
-                              onChange={e => {
-                                if (!entryId) return;
-                                setPendingAmounts(prev => ({ ...prev, [entryId]: e.target.value }));
-                              }}
-                              placeholder={needsAmount ? 'Ingresa monto' : '0.00'}
-                              style={{
-                                width: '100%', maxWidth: needsAmount ? '120px' : '90px', minWidth: '70px',
-                                fontWeight: 700, fontSize: '16px',
-                                color: needsAmount ? 'var(--accent-warning)' : 'var(--text-primary)',
-                                background: 'var(--bg-input)', border: '1px solid var(--border-color)',
-                                borderRadius: 'var(--radius-sm)', padding: '4px 8px',
-                                textAlign: 'right',
-                              }}
-                            />
+              );
+            }
+
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minHeight: 0, overflowY: 'auto' }}>
+                {/* Pendientes */}
+                {pendingEntries.length > 0 && (
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-warning)', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '4px 0' }}>
+                    <HourglassIcon size={14} /> Cobros pendientes de confirmación
+                  </div>
+                )}
+                {pendingEntries.map((entry, i) => {
+                  const entryId = getEntryIdentifier(entry);
+                  const editedAmount = entryId ? pendingAmounts[entryId] : undefined;
+                  const displayAmount = editedAmount !== undefined ? editedAmount : (entry.amount || '');
+                  const finalAmount = editedAmount !== undefined ? parseFloat(editedAmount) : (entry.amount || 0);
+                  const needsAmount = !entry.amount || entry.amount <= 0;
+                  const cardLabel = entry.cardLabel || (entry.cardId && entry.notes?.[0]?.startsWith('Cobro automático — ')
+                    ? entry.notes[0].replace('Cobro automático — ', '') : '');
+                  const entryBankMeta = entry.bankAccount ? getBankMeta(entry.bankAccount) : null;
+                  return (
+                    <div className="ledger-entry" key={`pending-${i}`} style={{ borderLeft: '3px solid var(--accent-warning)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, fontSize: '14px' }}>
+                            {entry.description}
+                            <span className="badge badge-warning" style={{ marginLeft: '8px', fontSize: '10px' }}>Pendiente</span>
                           </div>
-                          {needsAmount && <div style={{ fontSize: '10px', color: 'var(--accent-warning)', marginTop: '2px' }}>Monto requerido</div>}
+                          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            {entry.effectiveAt && <span><CalendarIcon size={12} /> {entry.effectiveAt}</span>}
+                            {entry.subscription && <span>· {entry.subscription}</span>}
+                            {entry.isRecurring && <span>· <RefreshIcon size={12} /> Recurrente</span>}
+                            {cardLabel && <span>· <CreditCardIcon size={12} /> {cardLabel}</span>}
+                            {entryBankMeta && (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                · {entryBankMeta.logo && <img src={entryBankMeta.logo} style={{ width: '14px', height: '14px', borderRadius: '3px', objectFit: 'cover' }} alt="" onError={e => { e.target.style.display = 'none'; }} />}
+                                {entry.bankAccount}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <button
-                          className="alert-action-btn edit"
-                          disabled={confirmingExpenseIdx === entryId || (finalAmount <= 0 && !editedAmount)}
-                          onClick={async () => {
-                            const amountToConfirm = parseFloat(displayAmount);
-                            if (!amountToConfirm || amountToConfirm <= 0) {
-                              showExpenseToast('Ingresa un monto válido antes de confirmar', 'error');
-                              return;
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>$</span>
+                              <input
+                                type="number"
+                                value={displayAmount}
+                                onChange={e => {
+                                  if (!entryId) return;
+                                  setPendingAmounts(prev => ({ ...prev, [entryId]: e.target.value }));
+                                }}
+                                placeholder={needsAmount ? 'Monto' : '0.00'}
+                                style={{
+                                  width: '100%', maxWidth: needsAmount ? '100px' : '80px', minWidth: '60px',
+                                  fontWeight: 700, fontSize: '15px',
+                                  color: needsAmount ? 'var(--accent-warning)' : 'var(--text-primary)',
+                                  background: 'var(--bg-input)', border: '1px solid var(--border-color)',
+                                  borderRadius: 'var(--radius-sm)', padding: '3px 6px', textAlign: 'right',
+                                }}
+                              />
+                            </div>
+                            {needsAmount && <div style={{ fontSize: '10px', color: 'var(--accent-warning)', marginTop: '2px' }}>Requerido</div>}
+                          </div>
+                          <button
+                            className="alert-action-btn edit"
+                            disabled={confirmingExpenseIdx === entryId || (finalAmount <= 0 && !editedAmount)}
+                            onClick={async () => {
+                              const amountToConfirm = parseFloat(displayAmount);
+                              if (!amountToConfirm || amountToConfirm <= 0) {
+                                showExpenseToast('Ingresa un monto válido antes de confirmar', 'error');
+                                return;
+                              }
+                              if (!entryId) {
+                                showExpenseToast('No se pudo identificar el cobro a confirmar', 'error');
+                                return;
+                              }
+                              if (confirmingExpenseIdx !== null) return;
+                              setConfirmingExpenseIdx(entryId);
+                              try {
+                                await confirmRecurringExpense(entryId, amountToConfirm !== entry.amount ? amountToConfirm : null);
+                                showExpenseToast(`Cobro "${entry.description}" confirmado — ${formatMXN(amountToConfirm)}`);
+                                setPendingAmounts(prev => { const next = {...prev}; delete next[entryId]; return next; });
+                              } catch (err) {
+                                showExpenseToast('Error: ' + err.message, 'error');
+                              } finally {
+                                setConfirmingExpenseIdx(null);
+                              }
+                            }}
+                            title="Confirmar cobro"
+                            style={{ fontSize: '11px', whiteSpace: 'nowrap' }}
+                          >
+                            {confirmingExpenseIdx === entryId
+                              ? <><span className="spinner" /> ...</>
+                              : <><CheckCircleIcon size={14} /> OK</>
                             }
-                            if (!entryId) {
-                              showExpenseToast('No se pudo identificar el cobro a confirmar', 'error');
-                              return;
-                            }
-                            if (confirmingExpenseIdx !== null) return;
-                            setConfirmingExpenseIdx(entryId);
-                            try {
-                              await confirmRecurringExpense(entryId, amountToConfirm !== entry.amount ? amountToConfirm : null);
-                              showExpenseToast(`Cobro "${entry.description}" confirmado — ${formatMXN(amountToConfirm)}`);
-                              setPendingAmounts(prev => { const next = {...prev}; delete next[entryId]; return next; });
-                            } catch (err) {
-                              showExpenseToast('Error: ' + err.message, 'error');
-                            } finally {
-                              setConfirmingExpenseIdx(null);
-                            }
-                          }}
-                          title="Confirmar que el cobro se realizó"
-                          style={{ fontSize: '11px', whiteSpace: 'nowrap' }}
-                        >
-                          {confirmingExpenseIdx === entryId
-                            ? <><span className="spinner" /> Confirmando...</>
-                            : <><CheckCircleIcon size={16} /> Confirmar</>
-                          }
-                        </button>
-                        <button
-                          className="clabe-remove-btn"
-                          onClick={() => setRemoveExpenseConfirm({ entry })}
-                          title="Eliminar cobro"
-                        >
-                          <TrashIcon size={16} />
-                        </button>
+                          </button>
+                          <button
+                            className="clabe-remove-btn"
+                            onClick={() => setRemoveExpenseConfirm({ entry })}
+                            title="Eliminar cobro"
+                          >
+                            <TrashIcon size={14} />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-              {/* Confirmados */}
-              {expenseEntries.filter(e => e.status !== 'pending').length > 0 && expenseEntries.filter(e => e.status === 'pending').length > 0 && (
-                <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '4px 0' }}>
-                  <CheckCircleIcon size={14} /> Gastos confirmados
-                </div>
-              )}
-              {expenseEntries.filter(e => e.status !== 'pending').map((entry, i) => {
-                const typeLabels = { expense: <><ExpenseIcon size={16} /> Gasto</>, investment: <><ExpenseIcon size={16} /> Gasto (inversión)</>, income_adjustment: <><MoneyIcon size={16} /> Ajuste +</>, expense_refund: <><RefreshIcon size={16} /> Devolución</> };
-                const typeBadge = { expense: 'badge-danger', investment: 'badge-danger', income_adjustment: 'badge-success', expense_refund: 'badge-info' };
-                const entryId = getEntryIdentifier(entry);
-                const entryIndex = allEntries.findIndex(currentEntry => currentEntry.entryId === entryId);
-                // Derive cardLabel from notes if not stored directly (backcompat)
-                const cardLabel = entry.cardLabel || (entry.cardId && entry.notes?.[0]?.startsWith('Cobro automático — ')
-                  ? entry.notes[0].replace('Cobro automático — ', '') : '');
-                return (
-                  <div className="ledger-entry" key={`confirmed-${i}`}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600, fontSize: '14px' }}>{entry.description}</div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                          {entry.effectiveAt && <span><CalendarIcon size={16} /> {entry.effectiveAt}</span>}
-                          {entry.subscription && <span> | {entry.subscription}</span>}
-                          {entry.isRecurring && <span> | <RefreshIcon size={12} /> Recurrente</span>}
-                          {cardLabel && <span> | <CreditCardIcon size={12} /> {cardLabel}</span>}
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <div style={{ textAlign: 'right' }}>
-                          <span className={`badge ${typeBadge[entry.type] || 'badge-danger'}`}>{typeLabels[entry.type] || <><ExpenseIcon size={16} /> Gasto</>}</span>
-                          <div style={{ fontWeight: 700, fontSize: '17px', marginTop: '4px' }}>{formatMXN(entry.amount)}</div>
-                        </div>
-                        <button
-                          className="clabe-remove-btn"
-                          onClick={() => setEditExpenseModal({ entry })}
-                          title="Editar gasto"
-                          style={{ marginLeft: '2px', fontSize: '11px' }}
-                        >
-                          <EditIcon size={16} />
-                        </button>
-                        <button
-                          className="clabe-remove-btn"
-                          onClick={() => setRemoveExpenseConfirm({ entry })}
-                          title="Eliminar gasto"
-                        >
-                          <TrashIcon size={16} />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+                  );
+                })}
 
-        {/* ─── Depósitos / Ingresos ─── */}
-        <div className="finance-col">
-          <div className="finance-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span>
-              <DepositIcon size={16} /> Ingresos
-              <span className="badge badge-success" style={{ marginLeft: '8px' }}>{depositEntries.length}</span>
-            </span>
-            <button
-              className="alert-action-btn edit"
-              onClick={() => setAddDepositModal(true)}
-              style={{ fontSize: '12px' }}
-            >
-              <PlusIcon size={16} /> Agregar ingreso
-            </button>
-          </div>
-
-          {depositEntries.length === 0 ? (
-            <div className="empty-state" style={{ padding: '20px' }}><p>Sin ingresos registrados este mes</p></div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {depositEntries.map((entry, i) => {
-                const entryId = getEntryIdentifier(entry);
-                const entryIndex = allEntries.findIndex(currentEntry => currentEntry.entryId === entryId);
-                return (
-                  <div className="ledger-entry" key={`deposit-${i}`} style={{ borderLeft: '3px solid #10b981' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600, fontSize: '14px' }}>{entry.description}</div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                          {entry.effectiveAt && <span><CalendarIcon size={16} /> {entry.effectiveAt}</span>}
-                          {entry.bankAccount && <span> | <BankIcon size={12} /> {entry.bankAccount}</span>}
+                {/* Confirmados / Registrados */}
+                {pendingEntries.length > 0 && confirmedEntries.length > 0 && (
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '4px 0' }}>
+                    <CheckCircleIcon size={14} /> Registrados
+                  </div>
+                )}
+                {confirmedEntries.map((entry, i) => {
+                  const isDeposit = entry.type === 'deposit';
+                  const typeLabels = { expense: <><ExpenseIcon size={14} /> Gasto</>, investment: <><ExpenseIcon size={14} /> Inversión</>, income_adjustment: <><MoneyIcon size={14} /> Ajuste +</>, expense_refund: <><RefreshIcon size={14} /> Devolución</>, deposit: <><DepositIcon size={14} /> Ingreso</> };
+                  const typeBadge = { expense: 'badge-danger', investment: 'badge-danger', income_adjustment: 'badge-success', expense_refund: 'badge-info', deposit: 'badge-success' };
+                  const cardLabel = entry.cardLabel || (entry.cardId && entry.notes?.[0]?.startsWith('Cobro automático — ')
+                    ? entry.notes[0].replace('Cobro automático — ', '') : '');
+                  const entryBankMeta = entry.bankAccount ? getBankMeta(entry.bankAccount) : null;
+                  return (
+                    <div className="ledger-entry" key={`confirmed-${i}`} style={{ borderLeft: `3px solid ${isDeposit ? '#10b981' : 'var(--accent-danger, #ef4444)'}` }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '6px' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            {entry.description}
+                            <span className={`badge ${typeBadge[entry.type] || 'badge-danger'}`} style={{ fontSize: '10px' }}>{typeLabels[entry.type] || <><ExpenseIcon size={14} /> Gasto</>}</span>
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            {entry.effectiveAt && <span><CalendarIcon size={12} /> {entry.effectiveAt}</span>}
+                            {entry.subscription && <span>· {entry.subscription}</span>}
+                            {entry.isRecurring && <span>· <RefreshIcon size={12} /> Recurrente</span>}
+                            {cardLabel && <span>· <CreditCardIcon size={12} /> {cardLabel}</span>}
+                            {entryBankMeta && (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                · {entryBankMeta.logo && <img src={entryBankMeta.logo} style={{ width: '14px', height: '14px', borderRadius: '3px', objectFit: 'cover' }} alt="" onError={e => { e.target.style.display = 'none'; }} />}
+                                {entry.bankAccount}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <div style={{ textAlign: 'right' }}>
-                          <span className="badge badge-success"><DepositIcon size={16} /> Ingreso</span>
-                          <div style={{ fontWeight: 700, fontSize: '17px', marginTop: '4px', color: '#10b981' }}>+{formatMXN(entry.amount)}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <div style={{ fontWeight: 700, fontSize: '16px', color: isDeposit ? '#10b981' : 'inherit' }}>
+                            {isDeposit ? '+' : '-'}{formatMXN(entry.amount)}
+                          </div>
+                          <button
+                            className="clabe-remove-btn"
+                            onClick={() => isDeposit ? setEditDepositModal({ entry }) : setEditExpenseModal({ entry })}
+                            title="Editar"
+                            style={{ fontSize: '11px' }}
+                          >
+                            <EditIcon size={14} />
+                          </button>
+                          <button
+                            className="clabe-remove-btn"
+                            onClick={() => isDeposit ? setRemoveDepositConfirm({ entry }) : setRemoveExpenseConfirm({ entry })}
+                            title="Eliminar"
+                          >
+                            <TrashIcon size={14} />
+                          </button>
                         </div>
-                        <button
-                          className="clabe-remove-btn"
-                          onClick={() => setEditDepositModal({ entry })}
-                          title="Editar ingreso"
-                          style={{ marginLeft: '2px', fontSize: '11px' }}
-                        >
-                          <EditIcon size={16} />
-                        </button>
-                        <button
-                          className="clabe-remove-btn"
-                          onClick={() => setRemoveDepositConfirm({ entry })}
-                          title="Eliminar ingreso"
-                        >
-                          <TrashIcon size={16} />
-                        </button>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       </div>
 
