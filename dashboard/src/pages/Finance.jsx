@@ -170,9 +170,9 @@ export default function Finance() {
  // Ref: si la colección banks tiene datos, es fuente primaria (post-migración)
  const banksSourceRef = useRef(false);
 
- // Cargar colección banks — fuente primaria post-migración
+ // Cargar colección banks — fuente primaria post-migración (tiempo real)
  useEffect(() => {
-   getDocs(collection(db, 'banks')).then(snap => {
+   const unsub = onSnapshot(collection(db, 'banks'), (snap) => {
      if (!snap.empty) {
        banksSourceRef.current = true;
        const derivedClabes = [];
@@ -211,6 +211,7 @@ export default function Finance() {
        setLoadingCredit(false);
      }
    });
+   return () => unsub();
  }, []);
 
  // Cargar CLABEs bancarias (fallback pre-migración)
@@ -901,7 +902,7 @@ export default function Finance() {
         )}
       </div>
 
-      {/* ═══ DOS COLUMNAS: Historial de Retiros | Gastos ═══ */}
+      {/* ═══ DOS COLUMNAS: Historial de Retiros | Gastos e Ingresos ═══ */}
       <div className="finance-two-cols">
         {/* COLUMNA IZQUIERDA: Historial de Retiros */}
         <div className="finance-col">
@@ -1029,11 +1030,11 @@ export default function Finance() {
           </div>{/* fin finance-withdrawal-body */}
         </div>
 
-        {/* COLUMNA DERECHA: Movimientos (Gastos + Ingresos) */}
+        {/* COLUMNA DERECHA: Gastos e Ingresos */}
         <div className="finance-col">
           <div className="finance-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
             <span>
-              <ReceiptIcon size={16} /> Movimientos
+              <ReceiptIcon size={16} /> Gastos e Ingresos
               <span className="badge badge-info" style={{ marginLeft: '8px' }}>{entries.length}</span>
               {expenseEntries.filter(e => e.status === 'pending').length > 0 && (
                 <span className="badge badge-warning" style={{ marginLeft: '4px' }}>{expenseEntries.filter(e => e.status === 'pending').length} pendiente{expenseEntries.filter(e => e.status === 'pending').length !== 1 ? 's' : ''}</span>
@@ -1067,10 +1068,12 @@ export default function Finance() {
               : ledgerFilter === 'income' ? depositEntries
               : entries;
 
-            const pendingEntries = filteredEntries.filter(e => e.status === 'pending');
-            const confirmedEntries = filteredEntries.filter(e => e.status !== 'pending');
+            const sortedEntries = [...filteredEntries].sort((a, b) => (b.effectiveAt || '').localeCompare(a.effectiveAt || ''));
 
-            if (filteredEntries.length === 0) {
+            const pendingEntries = sortedEntries.filter(e => e.status === 'pending');
+            const confirmedEntries = sortedEntries.filter(e => e.status !== 'pending');
+
+            if (sortedEntries.length === 0) {
               return (
                 <div className="empty-state" style={{ padding: '20px' }}>
                   <p>{ledgerFilter === 'expenses' ? 'Sin gastos este mes' : ledgerFilter === 'income' ? 'Sin ingresos este mes' : 'Sin movimientos este mes'}</p>
@@ -1079,7 +1082,7 @@ export default function Finance() {
             }
 
             return (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minHeight: 0, overflowY: 'auto' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '500px', overflowY: 'auto' }}>
                 {/* Pendientes */}
                 {pendingEntries.length > 0 && (
                   <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-warning)', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '4px 0' }}>
@@ -1200,7 +1203,7 @@ export default function Finance() {
                   const entryBankMeta = entry.bankAccount ? getBankMeta(entry.bankAccount) : null;
                   return (
                     <div className="ledger-entry" key={`confirmed-${i}`} style={{ borderLeft: `3px solid ${isDeposit ? '#10b981' : 'var(--accent-danger, #ef4444)'}` }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '6px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
                         <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 600, fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                             {entry.description}

@@ -46,12 +46,15 @@ export async function createBank({ name, color, logoUrl, clabe, note }) {
     updatedAt: nowISO(),
   };
   await setDoc(ref_, bankData);
+  syncBankAccountsConfig().catch(() => {});
   return { id: bankId, ...bankData };
 }
 
 export async function updateBank(bankId, updates) {
   const ref_ = doc(db, 'banks', bankId);
   await updateDoc(ref_, { ...updates, updatedAt: nowISO() });
+  if (updates.name) await cascadeBankRename(bankId, updates.name);
+  syncBankAccountsConfig().catch(() => {});
 }
 
 export async function deleteBank(bankId) {
@@ -73,6 +76,7 @@ export async function deleteBank(bankId) {
   });
   batch.delete(doc(db, 'banks', bankId));
   await batch.commit();
+  syncBankAccountsConfig().catch(() => {});
   return { deletedCards: linkedCards.length };
 }
 
@@ -85,6 +89,7 @@ export async function updateDebitAccount(bankId, { clabe, note }) {
     'debitAccount.note': (note || '').trim(),
     updatedAt: nowISO(),
   });
+  syncBankAccountsConfig().catch(() => {});
 }
 
 // ─── CREDIT ACCOUNT ────────────────────────────────────────────────
@@ -111,6 +116,7 @@ export async function createCreditAccount(bankId, creditData) {
     updatedAt: nowISO(),
   };
   await updateDoc(ref_, { creditAccount: credit, updatedAt: nowISO() });
+  syncBankAccountsConfig().catch(() => {});
   return credit;
 }
 
@@ -135,6 +141,7 @@ export async function updateCreditAccount(bankId, creditData) {
     updatedAt: nowISO(),
   };
   await updateDoc(ref_, { creditAccount: updated, updatedAt: nowISO() });
+  syncBankAccountsConfig().catch(() => {});
   return updated;
 }
 
@@ -152,6 +159,7 @@ export async function deleteCreditAccount(bankId) {
   });
   batch.update(doc(db, 'banks', bankId), { creditAccount: null, updatedAt: nowISO() });
   await batch.commit();
+  syncBankAccountsConfig().catch(() => {});
 }
 
 export async function addCreditInstallment(bankId, installment) {
@@ -275,6 +283,56 @@ export async function deleteBankLogo(logoId) {
     try { await deleteObject(ref(storage, logo.storagePath)); } catch (e) { /* ignore */ }
   }
   await updateDoc(configRef, { logos: logos.filter(l => l.id !== logoId) });
+}
+
+// ─── SYNC config/bank-accounts ─────────────────────────────────────
+
+export async function syncBankAccountsConfig() {
+  const banksSnap = await getDocs(collection(db, 'banks'));
+  const accounts = [];
+
+  banksSnap.docs.forEach((d) => {
+    const bank = d.data();
+    if (bank.debitAccount?.clabe) {
+      accounts.push({
+        bank: bank.name,
+        clabe: bank.debitAccount.clabe,
+        type: 'debito',
+        note: bank.debitAccount.note || '',
+      });
+    }
+    if (bank.creditAccount?.paymentClabe) {
+      accounts.push({
+        bank: `${bank.name} Crédito`,
+        clabe: bank.creditAccount.paymentClabe,
+        type: 'credito',
+        note: bank.creditAccount.paymentClabeNote || '',
+      });
+    }
+  });
+
+  await setDoc(doc(db, 'config', 'bank-accounts'), { accounts, updatedAt: nowISO() });
+}
+
+// ─── CASCADE: rename bank across vault-cards ───────────────────────
+
+async function cascadeBankRename(bankId, newName) {
+  const cardsSnap = await getDocs(collection(db, 'vault-cards'));
+  const batch = writeBatch(db);
+  let updated = 0;
+
+  cardsSnap.docs.forEach((d) => {
+    const data = d.data();
+    if (data.bankId !== bankId) return;
+    const expectedName = data.accountType === 'credit' ? `${newName} Crédito` : newName;
+    if (data.bank !== expectedName) {
+      batch.update(doc(db, 'vault-cards', d.id), { bank: expectedName, updatedAt: nowISO() });
+      updated++;
+    }
+  });
+
+  if (updated > 0) await batch.commit();
+  return updated;
 }
 
 // ─── MIGRATION ─────────────────────────────────────────────────────
