@@ -1040,7 +1040,7 @@ export default function Finance() {
           {expenseEntries.length === 0 ? (
             <div className="empty-state" style={{ padding: '20px' }}><p>Sin gastos registrados este mes</p></div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '400px', overflowY: 'auto' }}>
               {/* Pendientes primero */}
               {expenseEntries.filter(e => e.status === 'pending').length > 0 && (
                 <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent-warning)', textTransform: 'uppercase', letterSpacing: '0.5px', padding: '4px 0' }}>
