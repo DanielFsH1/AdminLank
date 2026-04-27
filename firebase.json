@@ -42,7 +42,21 @@
     {
       "source": "functions",
       "codebase": "default",
-      "runtime": "python312"
+      "runtime": "python312",
+      "ignore": [
+        "venv",
+        ".venv",
+        "env",
+        "__pycache__",
+        "*.pyc",
+        "tests",
+        ".git",
+        ".gitignore",
+        ".gcloudignore",
+        "*.log",
+        ".env",
+        ".env.local"
+      ]
     }
   ],
   "firestore": {
