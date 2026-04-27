@@ -147,8 +147,9 @@ class FakeBatch:
 
 
 class FakeDb:
-    def __init__(self, groups=None, pending_events=None, alerts=None):
+    def __init__(self, groups=None, pending_events=None, alerts=None, documents=None):
         self.groups = groups or {}
+        self.documents = documents or {}
         self.collections = {
             "alerts": FakeCollection(alerts or {}),
             "pending-events": FakeCollection(pending_events or {}),
@@ -163,7 +164,30 @@ class FakeDb:
         if path.startswith("groups/"):
             data = self.groups.get(path)
             return types.SimpleNamespace(get=lambda: FakeDocSnapshot(data or {}, exists=data is not None))
-        return types.SimpleNamespace(delete=lambda: self.deleted_docs.append(path))
+
+        db = self
+
+        class _DocRef:
+            def get(self):
+                if path in db.documents:
+                    return FakeDocSnapshot(db.documents[path], exists=True)
+                return FakeDocSnapshot({}, exists=False)
+
+            def set(self, data, merge=False):
+                current = db.documents.get(path, {}) if merge else {}
+                current.update(data)
+                db.documents[path] = current
+
+            def update(self, data):
+                current = db.documents.get(path, {})
+                current.update(data)
+                db.documents[path] = current
+
+            def delete(self):
+                db.deleted_docs.append(path)
+                db.documents.pop(path, None)
+
+        return _DocRef()
 
     def batch(self):
         batch = FakeBatch()
@@ -610,3 +634,247 @@ def test_purge_legacy_event_state_deletes_analysis_doc_and_pending_events():
     assert db.batch_instances[0].commit_calls == 1
     deleted_ids = {ref.id for ref in db.batch_instances[0].deleted_refs}
     assert deleted_ids == {"evt_1", "evt_2"}
+
+
+
+def test_analyze_emails_enqueues_adminbot_work_after_saving_latest_report(monkeypatch):
+    db = FakeDb()
+    enqueued_jobs = []
+
+    monkeypatch.setattr(main.firestore, "client", lambda: db)
+    monkeypatch.setattr(main, "load_service_config", lambda _db: ({}, {}, set()))
+    monkeypatch.setattr(main, "load_imap_credentials", lambda _db: [
+        {"accountId": 12, "email": "owner@example.com", "appPassword": "secret", "enabled": True}
+    ])
+    monkeypatch.setattr(main, "load_account_registry", lambda _db: [
+        {"id": 12, "canonicalAlias": "Cuenta 12", "fullName": "Cuenta Principal"}
+    ])
+    monkeypatch.setattr(main, "load_rates", lambda _db: {})
+    monkeypatch.setattr(main, "load_current_state_context", lambda _db, _name_to_key: {})
+    monkeypatch.setattr(main, "load_analysis_state", lambda _db: {"lastRun": None, "accounts": {}})
+    monkeypatch.setattr(main, "load_system_flags", lambda _db: {})
+    monkeypatch.setattr(main, "load_alerts_from_firestore", lambda _db: {"alerts": [], "completedAlerts": []})
+    monkeypatch.setattr(main, "analyze_account", lambda *args, **kwargs: {
+        "accountId": 12,
+        "accountAlias": "Cuenta 12",
+        "access": "ok",
+        "summary": {
+            "pending": 0,
+            "relevant": 1,
+            "totalEvents": 1,
+            "ignored": 0,
+            "review": 0,
+            "rawEmailCount": 1,
+        },
+        "rawEmails": [{"uid": 101, "subject": "Alta"}],
+        "events": [],
+        "maxUid": 101,
+    })
+    monkeypatch.setattr(main, "save_notifications", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main, "purge_legacy_event_state", lambda _db: None)
+    monkeypatch.setattr(main, "generate_alerts_for_accounts", lambda *args, **kwargs: (0, {}, [], []))
+    monkeypatch.setattr(main, "save_analysis_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(main, "update_finance_from_analysis", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main, "cleanup_old_data", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(main.lank_alerts, "generate_missing_renewal_alerts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main.lank_alerts, "generate_missing_phone_alerts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main.lank_alerts, "generate_credit_alerts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main.lank_alerts, "generate_sim_recharge_alerts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main, "load_schedule_config", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(main.lank_agent_review, "build_review_document", lambda *args, **kwargs: {"shouldNotify": False})
+    monkeypatch.setattr(main.lank_agent_review, "build_notification_text", lambda *_args, **_kwargs: None)
+
+    class FakeTelegramBot:
+        is_enabled = False
+
+        def __init__(self, _db):
+            pass
+
+    def fake_enqueue_analysis_job(_db, *, idempotency_key, payload):
+        assert "analysis/latest-report" in db.documents
+        enqueued_jobs.append({"idempotency_key": idempotency_key, "payload": payload})
+        return {"jobId": "job_123", "status": "pending", **payload}
+
+    monkeypatch.setattr(main.lank_telegram, "TelegramBot", FakeTelegramBot)
+    monkeypatch.setattr(main.adminbot_work_queue, "enqueue_analysis_job", fake_enqueue_analysis_job)
+
+    response = main.analyze_emails(types.SimpleNamespace(method="POST"))
+
+    assert response.status == 200
+    assert len(enqueued_jobs) == 1
+    payload = enqueued_jobs[0]["payload"]
+    assert payload["type"] == "manual_analysis"
+    assert payload["runSource"] == "dashboard"
+    assert payload["reportRef"] == "analysis/latest-report"
+    assert payload["failedAccounts"] == []
+    assert payload["notificationAccountIds"] == ["12"]
+    assert payload["summary"] == {
+        "accountsOk": 1,
+        "totalAccounts": 1,
+        "totalRawEmails": 1,
+        "alertsGeneratedByBackend": 0,
+    }
+
+
+def test_scheduled_analysis_enqueues_adminbot_work_for_current_slot(monkeypatch):
+    db = FakeDb(documents={"config/schedule": {"enabled": True, "frequencyHours": 6, "startTime": "2026-04-26T00:00:00+00:00"}})
+    enqueued_jobs = []
+    frozen_now = main.datetime(2026, 4, 26, 18, 5, tzinfo=main.timezone.utc)
+
+    class FrozenDateTime(main.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return frozen_now
+            return frozen_now.astimezone(tz)
+
+    monkeypatch.setattr(main, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main.firestore, "client", lambda: db)
+    monkeypatch.setattr(main, "load_analysis_state", lambda _db: {"lastRun": None, "accounts": {}})
+    monkeypatch.setattr(main, "load_system_flags", lambda _db: {})
+    monkeypatch.setattr(main, "load_service_config", lambda _db: ({}, {}, set()))
+    monkeypatch.setattr(main, "load_imap_credentials", lambda _db: [
+        {"accountId": 12, "email": "owner@example.com", "appPassword": "secret", "enabled": True}
+    ])
+    monkeypatch.setattr(main, "load_account_registry", lambda _db: [
+        {"id": 12, "canonicalAlias": "Cuenta 12", "fullName": "Cuenta Principal"}
+    ])
+    monkeypatch.setattr(main, "load_rates", lambda _db: {})
+    monkeypatch.setattr(main, "load_current_state_context", lambda _db, _name_to_key: {})
+    monkeypatch.setattr(main, "load_alerts_from_firestore", lambda _db: {"alerts": [], "completedAlerts": []})
+    monkeypatch.setattr(main, "analyze_account", lambda *args, **kwargs: {
+        "accountId": 12,
+        "accountAlias": "Cuenta 12",
+        "access": "ok",
+        "summary": {
+            "pending": 0,
+            "relevant": 1,
+            "totalEvents": 1,
+            "ignored": 0,
+            "review": 0,
+            "rawEmailCount": 1,
+        },
+        "rawEmails": [{"uid": 101, "subject": "Alta"}],
+        "events": [],
+        "maxUid": 101,
+    })
+    monkeypatch.setattr(main, "save_notifications", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main, "purge_legacy_event_state", lambda _db: None)
+    monkeypatch.setattr(main, "generate_alerts_for_accounts", lambda *args, **kwargs: (0, {}, [], []))
+    monkeypatch.setattr(main, "save_analysis_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(main, "update_finance_from_analysis", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main, "cleanup_old_data", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(main, "load_schedule_config", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(main.lank_alerts, "generate_renewal_alerts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main.lank_alerts, "generate_missing_renewal_alerts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main.lank_alerts, "generate_missing_phone_alerts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main.lank_alerts, "generate_credit_alerts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main.lank_alerts, "generate_sim_recharge_alerts", lambda *_args, **_kwargs: 0)
+
+    def fake_enqueue_analysis_job(_db, *, idempotency_key, payload):
+        assert "analysis/latest-report" in db.documents
+        enqueued_jobs.append({"idempotency_key": idempotency_key, "payload": payload})
+        return {"jobId": "job_123", "status": "pending", **payload}
+
+    monkeypatch.setattr(main.adminbot_work_queue, "enqueue_analysis_job", fake_enqueue_analysis_job)
+
+    main.scheduled_analysis(types.SimpleNamespace())
+
+    assert len(enqueued_jobs) == 1
+    assert enqueued_jobs[0]["idempotency_key"] == "scheduled:2026-04-26T18:00:00+00:00"
+    payload = enqueued_jobs[0]["payload"]
+    assert payload["type"] == "scheduled_analysis"
+    assert payload["runSource"] == "scheduler"
+    assert payload["scheduleSlot"] == "2026-04-26T18:00:00+00:00"
+    assert payload["analysisGeneratedAt"] == db.documents["analysis/latest-report"]["generatedAt"]
+    assert payload["reportRef"] == "analysis/latest-report"
+    assert payload["failedAccounts"] == []
+    assert payload["notificationAccountIds"] == ["12"]
+    assert payload["summary"] == {
+        "accountsOk": 1,
+        "totalAccounts": 1,
+        "totalRawEmails": 1,
+        "alertsGeneratedByBackend": 0,
+    }
+    assert payload["telegramPolicy"] == {"sendStart": True, "sendFinal": True}
+
+
+def test_analyze_emails_persists_adminbot_latest_state_snapshot(monkeypatch):
+    db = FakeDb()
+
+    monkeypatch.setattr(main.firestore, "client", lambda: db)
+    monkeypatch.setattr(main, "load_service_config", lambda _db: ({}, {}, set()))
+    monkeypatch.setattr(main, "load_imap_credentials", lambda _db: [])
+    monkeypatch.setattr(main, "load_account_registry", lambda _db: [])
+    monkeypatch.setattr(main, "load_rates", lambda _db: {})
+    monkeypatch.setattr(main, "load_current_state_context", lambda _db, _name_to_key: {})
+    monkeypatch.setattr(main, "load_analysis_state", lambda _db: {"accounts": {}})
+    monkeypatch.setattr(main, "load_system_flags", lambda _db: {})
+    monkeypatch.setattr(main, "load_alerts_from_firestore", lambda _db: {"alerts": [], "completedAlerts": []})
+    monkeypatch.setattr(main, "purge_legacy_event_state", lambda _db: None)
+    monkeypatch.setattr(main, "generate_alerts_for_accounts", lambda *args, **kwargs: (0, {}, [], []))
+    monkeypatch.setattr(main, "save_analysis_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(main, "update_finance_from_analysis", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main, "cleanup_old_data", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(main.lank_alerts, "generate_missing_renewal_alerts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main.lank_alerts, "generate_missing_phone_alerts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main.lank_alerts, "generate_credit_alerts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main.lank_alerts, "generate_sim_recharge_alerts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main, "load_schedule_config", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(main.lank_agent_review, "build_review_document", lambda *args, **kwargs: {"shouldNotify": False})
+    monkeypatch.setattr(main.lank_agent_review, "build_notification_text", lambda *_args, **_kwargs: None)
+
+    class FakeTelegramBot:
+        is_enabled = False
+
+        def __init__(self, _db):
+            pass
+
+    monkeypatch.setattr(main.lank_telegram, "TelegramBot", FakeTelegramBot)
+    monkeypatch.setattr(
+        main.adminbot_work_queue,
+        "enqueue_analysis_job",
+        lambda _db, *, idempotency_key, payload: {"jobId": "job_abc", "status": "pending", **payload},
+    )
+
+    main.analyze_emails(types.SimpleNamespace(method="POST"))
+
+    latest = db.document("analysis/adminbot-latest").get().to_dict()
+    assert latest["jobId"] == "job_abc"
+    assert latest["status"] == "pending"
+    assert latest["runSource"] == "dashboard"
+
+
+def test_scheduled_analysis_skips_duplicate_slot_when_last_run_is_same_slot(monkeypatch):
+    db = FakeDb(
+        documents={
+            "config/schedule": {
+                "enabled": True,
+                "frequencyHours": 2,
+                "startTime": "2026-04-26T18:00:00+00:00",
+            }
+        }
+    )
+    frozen_now = main.datetime(2026, 4, 26, 18, 5, tzinfo=main.timezone.utc)
+
+    class FrozenDateTime(main.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return frozen_now
+            return frozen_now.astimezone(tz)
+
+    monkeypatch.setattr(main, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main.firestore, "client", lambda: db)
+    monkeypatch.setattr(
+        main,
+        "load_analysis_state",
+        lambda _db: {"accounts": {}, "lastRun": "2026-04-26T18:00:00+00:00"},
+    )
+
+    result = main.scheduled_analysis(types.SimpleNamespace())
+
+    assert result is None
+    assert db.collection("adminbot-work").store == {}
+
+

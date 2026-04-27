@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { getServiceMeta, getServiceKeyByName, getPoolServiceKeys } from '../config/services';
+import { useAdminbotState } from '../hooks/adminbotState';
 import { AnalyzeIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClipboardIcon, ClockIcon, CloudSunIcon, DoorIcon, EmailIcon, EmptyMailIcon, HourglassIcon, InboxIcon, LightningIcon, MoneyIcon, MoonIcon, PinIcon, RefreshIcon, SatelliteIcon, SearchIcon, SleepIcon, StopwatchIcon, TargetIcon, UsersIcon, WarningIcon, WrenchIcon, XCircleIcon } from '../components/Icons';
 
 const CLOUD_FUNCTIONS_URL = '***REMOVED***';
@@ -79,6 +80,7 @@ function getProfileImg(accountId) {
 }
 
 export default function Analyze({ onNavigate, navData, servicesConfig }) {
+ const adminbotState = useAdminbotState();
  const [report, setReport] = useState(null);
  const [rawEmails, setRawEmails] = useState(null);
  const [notifications, setNotifications] = useState([]); // Firestore notifications with 7-day retention
@@ -581,6 +583,16 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
         </div>
       )}
 
+      {adminbotState.data && (
+        <div className="schedule-next-run" style={{ marginTop: '8px' }}>
+          <div className="schedule-next-main">
+            <span className="schedule-next-label">AdminBot:</span>
+            <span className="schedule-next-value">
+              {adminbotState.data.statusLabel}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Analysis result toast */}
       {analysisResult && (

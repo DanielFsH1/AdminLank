@@ -10,6 +10,7 @@ Fuentes de cambios:
   - ai_chat:      Acciones ejecutadas desde el chat con IA
   - manual:       Ediciones manuales desde el dashboard
   - system:       Cambios automáticos del sistema (scheduler, scripts)
+  - adminbot:     Acciones ejecutadas por AdminBot Hermes (@lankadminbot)
 """
 from datetime import datetime, timezone
 
@@ -198,6 +199,28 @@ def log_manual_action(db, *, action, description, collection=None,
         after=after,
         actor='admin',
         ai_involved=False,
+    )
+
+
+def log_adminbot_action(db, *, action, description, collection=None,
+                        document_id=None, field=None, before=None, after=None,
+                        ai_model=None, confirmed=True, metadata=None):
+    """Registra una acción ejecutada por AdminBot Hermes (@lankadminbot)."""
+    return log_change(
+        db,
+        source='adminbot',
+        action=action,
+        description=description,
+        collection=collection,
+        document_id=document_id,
+        field=field,
+        before=before,
+        after=after,
+        actor='admin',
+        ai_involved=True,
+        ai_model=ai_model,
+        confirmed=confirmed,
+        metadata=metadata,
     )
 
 

@@ -27,6 +27,7 @@ import lank_alerts
 import lank_agent_review
 import lank_audit
 import lank_telegram
+import adminbot_work_queue
 from alert_pipeline import build_direct_alerts
 
 app = initialize_app()
@@ -1386,6 +1387,13 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
 
         failed_accounts = [a for a in report['accounts'] if a['access'] != 'ok']
 
+        failed_accounts_payload = [{
+            'accountId': a['accountId'],
+            'accountAlias': a.get('accountAlias', ''),
+            'access': a.get('access', 'unknown'),
+            'error': a.get('error', 'Error desconocido'),
+        } for a in failed_accounts]
+
         db.document('analysis/latest-report').set({
             'generatedAt': report['generatedAt'],
             'mode': 'UID tracking' if report.get('usedUidTracking') else 'date fallback',
@@ -1408,13 +1416,40 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
                 'review': a['summary']['review'],
                 'relevant': a['summary']['relevant'],
             } for a in ok_accounts],
-            'failedAccounts': [{
-                'accountId': a['accountId'],
-                'accountAlias': a.get('accountAlias', ''),
-                'access': a.get('access', 'unknown'),
-                'error': a.get('error', 'Error desconocido'),
-            } for a in failed_accounts],
+            'failedAccounts': failed_accounts_payload,
         })
+
+        queued_job = adminbot_work_queue.enqueue_analysis_job(
+            db,
+            idempotency_key=f"manual:{report['generatedAt']}",
+            payload={
+                'type': 'manual_analysis',
+                'runSource': 'dashboard',
+                'analysisGeneratedAt': report['generatedAt'],
+                'reportRef': 'analysis/latest-report',
+                'failedAccounts': failed_accounts_payload,
+                'notificationAccountIds': [
+                    str(a['accountId']) for a in ok_accounts if a.get('rawEmails')
+                ],
+                'summary': {
+                    'accountsOk': len(ok_accounts),
+                    'totalAccounts': len(report['accounts']),
+                    'totalRawEmails': total_raw,
+                    'alertsGeneratedByBackend': alerts_generated,
+                },
+                'telegramPolicy': {
+                    'sendStart': True,
+                    'sendFinal': True,
+                },
+            },
+        )
+        adminbot_work_queue.write_latest_adminbot_state(
+            db,
+            job_id=str(queued_job['jobId']),
+            status=str(queued_job['status']),
+            run_source='dashboard',
+            analysis_generated_at=report['generatedAt'],
+        )
 
         # Update finance documents from withdrawal events
         finance_records = 0
@@ -2121,6 +2156,12 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
     total_review = sum(a['summary']['review'] for a in ok_accounts)
 
     failed_accounts = [a for a in report['accounts'] if a['access'] != 'ok']
+    failed_accounts_payload = [{
+        'accountId': a['accountId'],
+        'accountAlias': a.get('accountAlias', ''),
+        'access': a.get('access', 'unknown'),
+        'error': a.get('error', 'Error desconocido'),
+    } for a in failed_accounts]
 
     db.document('analysis/latest-report').set({
         'generatedAt': report['generatedAt'],
@@ -2138,13 +2179,42 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
         'accounts': [{'accountId': a['accountId'], 'accountAlias': a.get('accountAlias', ''),
                       'access': 'ok', 'pending': a['summary']['pending'],
                       'relevant': a['summary']['relevant']} for a in ok_accounts],
-        'failedAccounts': [{
-            'accountId': a['accountId'],
-            'accountAlias': a.get('accountAlias', ''),
-            'access': a.get('access', 'unknown'),
-            'error': a.get('error', 'Error desconocido'),
-        } for a in failed_accounts],
+        'failedAccounts': failed_accounts_payload,
     })
+
+    queued_job = adminbot_work_queue.enqueue_analysis_job(
+        db,
+        idempotency_key=f"scheduled:{current_slot.isoformat()}",
+        payload={
+            'type': 'scheduled_analysis',
+            'runSource': 'scheduler',
+            'scheduleSlot': current_slot.isoformat(),
+            'analysisGeneratedAt': report['generatedAt'],
+            'reportRef': 'analysis/latest-report',
+            'failedAccounts': failed_accounts_payload,
+            'notificationAccountIds': [
+                str(a['accountId']) for a in ok_accounts if a.get('rawEmails')
+            ],
+            'summary': {
+                'accountsOk': len(ok_accounts),
+                'totalAccounts': len(report['accounts']),
+                'totalRawEmails': total_raw,
+                'alertsGeneratedByBackend': alerts_generated,
+            },
+            'telegramPolicy': {
+                'sendStart': True,
+                'sendFinal': True,
+            },
+        },
+    )
+    adminbot_work_queue.write_latest_adminbot_state(
+        db,
+        job_id=str(queued_job['jobId']),
+        status=str(queued_job['status']),
+        run_source='scheduler',
+        analysis_generated_at=report['generatedAt'],
+        schedule_slot=current_slot.isoformat(),
+    )
 
     # Update finance documents from withdrawal events
     try:

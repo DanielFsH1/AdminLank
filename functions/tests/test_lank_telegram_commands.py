@@ -172,3 +172,13 @@ def test_cmd_alertas_returns_empty_when_only_legacy_events_exist():
     response = bot._cmd_alertas()
 
     assert response == "✅ No hay alertas pendientes."
+
+
+def test_cmd_analizar_returns_hermes_handoff_message():
+    bot = make_bot()
+    response = bot._cmd_analizar()
+
+    assert 'AdminBot' in response
+    assert 'Hermes' in response
+    assert '@lankadminbot' in response
+    assert 'dashboard' in response

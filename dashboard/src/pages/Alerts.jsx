@@ -579,7 +579,11 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
               <span style={{ color: 'var(--text-muted)' }}><XCircleIcon size={16} /> {new Date(alert.discardedAt).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}</span>
             )}
             {alert.discardReason && <span className="alert-v2-discard-reason"><ChatIcon size={16} /> {alert.discardReason}</span>}
-            {alert.source && <span className="badge badge-muted" style={{ fontSize: '11px' }}><EmailIcon size={16} /> {alert.source}</span>}
+            {alert.source && alert.source !== 'system' && (
+              <span className="badge badge-muted" style={{ fontSize: '11px', marginLeft: '6px', background: 'rgba(139,92,246,0.1)', color: '#8b5cf6' }}>
+                {alert.source === 'adminbot' ? 'AdminBot' : alert.source}
+              </span>
+            )}
           </div>
         </div>
       </div>

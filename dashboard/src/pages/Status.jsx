@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { limit } from 'firebase/firestore';
 import { useCollection, useDocument } from '../hooks/useFirestore';
+import { useAdminbotState } from '../hooks/adminbotState';
 import { AnalyzeIcon, BarChartIcon, BellIcon, BuildIcon, CheckIcon, ClipboardIcon, ClockIcon, CloseIcon, DotGray, DotGreen, DotRed, DotYellow, EmailIcon, GlobeIcon, InboxIcon, KeyIcon, LightningIcon, LockKeyIcon, MailboxIcon, RefreshIcon, SatelliteIcon, SaveIcon, ServerIcon, TrendUpIcon, WarningIcon } from '../components/Icons';
 
 const CLOUD_FN_BASE = '***REMOVED***';
@@ -273,6 +274,7 @@ function renderGroupsDetails(check) {
 /* ── Main component ───────────────────────────────────────────────────────── */
 
 export default function Status() {
+ const adminbotState = useAdminbotState();
  const [healthData, setHealthData] = useState(null);
  const [loading, setLoading] = useState(false);
  const [error, setError] = useState(null);
@@ -497,6 +499,25 @@ export default function Status() {
         <h3 className="status-section-title"><span className="status-section-icon"><TrendUpIcon size={16} /></span> Datos Operativos</h3>
         <div className="status-services-list">{allServices.slice(10).map(renderServiceCard)}</div>
       </div>
+
+      {adminbotState.data && (
+        <div className="status-section">
+          <h3 className="status-section-title"><span className="status-section-icon"><SatelliteIcon size={16} /></span> AdminBot Hermes</h3>
+          <div className="status-services-list">
+            <div className="status-service-card" style={{ borderLeftColor: adminbotState.data.status === 'completed' ? '#10b981' : adminbotState.data.status === 'pending' ? '#f59e0b' : '#8b5cf6' }}>
+              <div className="status-service-header">
+                <span className="status-service-name">Estado del operador</span>
+                <span className="status-service-badge" style={{ color: '#8b5cf6', background: 'rgba(139,92,246,0.1)' }}>{adminbotState.data.statusLabel}</span>
+              </div>
+              <div className="status-detail-info">
+                <DetailRow label="Último análisis" value={adminbotState.data.analysisGeneratedAt ? formatDate(adminbotState.data.analysisGeneratedAt) : '—'} />
+                <DetailRow label="Fuente" value={adminbotState.data.runSource === 'scheduler' ? 'Programado' : 'Dashboard'} />
+                <DetailRow label="Job ID" value={adminbotState.data.jobId || '—'} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="status-uptime-bar">
         <div className="status-uptime-label">

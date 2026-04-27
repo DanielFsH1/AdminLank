@@ -31,6 +31,7 @@ const SOURCE_META = {
   ai_chat:     { label: 'Chat IA',     color: '#06b6d4' },
   manual:      { label: 'Manual',      color: '#10b981' },
   system:      { label: 'Sistema',     color: '#64748b' },
+  adminbot:    { label: 'AdminBot',    color: '#8b5cf6' },
 };
 
 const ACTOR_META = {
@@ -88,6 +89,7 @@ const SOURCE_FILTER_OPTIONS = [
   { value: 'ai_chat',     label: 'Chat IA' },
   { value: 'manual',      label: 'Manual' },
   { value: 'system',      label: 'Sistema' },
+  { value: 'adminbot',    label: 'AdminBot' },
 ];
 
 const ACTOR_FILTER_OPTIONS = [

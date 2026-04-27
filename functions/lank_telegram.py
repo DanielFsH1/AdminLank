@@ -208,7 +208,7 @@ class TelegramBot:
             "📋 *Comandos disponibles:*\n\n"
             "/estado — Resumen rápido del sistema\n"
             "/alertas — Ver alertas pendientes\n"
-            "/analizar — Ejecutar análisis de correos ahora\n"
+            "/analizar — Info sobre análisis operativo\n"
             "/ayuda — Esta lista de comandos"
         )
 
@@ -279,24 +279,12 @@ class TelegramBot:
             return f"❌ Error al leer alertas: {e}"
 
     def _cmd_analizar(self):
-        """Dispara un análisis de correos. Respuesra inmediata, análisis en background."""
-        try:
-            # Llamar a la Cloud Function de análisis
-            url = '***REMOVED***/analyze_emails'
-            resp = requests.post(url, json={}, timeout=300)
-            data = resp.json()
-            if data.get('success'):
-                return (
-                    f"✅ *Análisis completado*\n\n"
-                    f"📧 Cuentas analizadas: {data.get('analyzedAccounts', '?')}/{data.get('totalAccounts', '?')}\n"
-                    f"📩 Correos procesados: {data.get('totalRawEmails', 0)}\n"
-                    f"⚠️ Alertas generadas: {data.get('alertsGenerated', 0)}\n"
-                    f"📅 Hora: {data.get('generatedAt', 'N/A')}"
-                )
-            else:
-                return f"❌ Error en análisis: {data.get('error', 'desconocido')}"
-        except Exception as e:
-            return f"❌ Error ejecutando análisis: {e}"
+        """Informa que el análisis ahora lo gestiona AdminBot en Hermes."""
+        return (
+            'ℹ️ El análisis operativo ahora lo procesa AdminBot en Hermes.\n\n'
+            'Usa el dashboard para disparar la corrida técnica o consulta a @lankadminbot '
+            'para revisar pendientes, estado y resultados.'
+        )
 
     # ─── SETUP ──────────────────────────────────────────────────────────
 
