@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useDocument } from '../hooks/useFirestore';
 import { SERVICES, BANKS, getServiceMeta, getBankMeta, getPoolServiceKeys, getAllServiceKeys } from '../config/services';
@@ -427,15 +427,17 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
 
  const loadAlerts = useCallback(async () => {
    const q = query(collection(db, 'alerts'),
-     where('type', '==', 'password_change'),
      where('status', '==', 'pending'));
    const snap = await getDocs(q);
-   setAlerts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+   const allPending = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+   setAlerts(allPending.filter(a =>
+     a.type === 'password_change' || a.type === 'access_verify' || a.type === 'slot_pending_deletion'
+   ));
  }, []);
 
  const refreshVaultData = useCallback(async () => {
-   await Promise.all([loadPools(), loadSecrets(), loadCards(), loadAlerts()]);
- }, [loadPools, loadSecrets, loadCards, loadAlerts]);
+   await loadAlerts();
+ }, [loadAlerts]);
 
  // Load real accounts
  useEffect(() => {
@@ -519,7 +521,15 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
  const c = cards[id];
  return c ? decryptFields(c, CARD_SENSITIVE) : null;
  };
- const getPendingAlert = (ref) => alerts.find(a => a.serviceAccountRef === ref);
+ const getPasswordChangeAlert = (ref) => alerts.find(a => a.serviceAccountRef === ref && a.type === 'password_change');
+ const getAccessVerifyAlerts = (ref) => alerts.filter(a => a.serviceAccountRef === ref && a.type === 'access_verify');
+ const getSlotDeletionAlerts = (ref) => alerts.filter(a => a.serviceAccountRef === ref && a.type === 'slot_pending_deletion');
+ const getPendingAlert = (ref) => getPasswordChangeAlert(ref);
+ const getVaultAlertState = (ref) => {
+   if (getPasswordChangeAlert(ref)) return 'password_change';
+   if (getAccessVerifyAlerts(ref).length > 0 || getSlotDeletionAlerts(ref).length > 0) return 'access_verify';
+   return null;
+ };
  // Normalizar ID de tarjeta: misma lógica que handleCreateCard usa al crear
  const getCardIdFromLabel = (label) => label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '').toLowerCase();
 
@@ -663,7 +673,49 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
  };
 
  // ─── SAVE CREDENTIAL ───
- const handleSaveCredential = async (serviceAccountRef, values, alertToComplete = null) => {
+ const generateAccessVerifyAlerts = async (serviceAccountRef) => {
+   try {
+     const svcKey = serviceAccountRef.replace(/_\d+$/, '');
+     const realAccountRef = doc(db, `service-pools/${svcKey}/real-accounts/${serviceAccountRef}`);
+     const realSnap = await getDoc(realAccountRef);
+
+     if (realSnap.exists()) {
+       const realData = realSnap.data();
+       const svcMeta = getServiceMeta(svcKey);
+       const isPasswordShared = svcMeta.accessType === 'credentials' || svcMeta.accessType === 'profile_project';
+       if (!isPasswordShared) return;
+
+       const activeSlots = (realData.slots || []).filter(s => s.memberAlias && s.status === 'active');
+       if (activeSlots.length === 0) return;
+
+       const serviceName = svcMeta.name || svcKey;
+       const acctLabel = realData.email ? `${serviceAccountRef} (${realData.email})` : serviceAccountRef;
+       const dateStr = new Date().toLocaleDateString('es-MX', { day: '2-digit', month: 'short' });
+
+       for (const slot of activeSlots) {
+         await createManualAlert({
+           service: serviceName,
+           serviceAccountRef,
+           realAccountEmail: realData.email || null,
+           source: 'password_changed',
+           type: 'access_verify',
+           priority: 'medium',
+           title: `Verificar acceso - ${serviceName}`,
+           description: `La contrasena de ${acctLabel} fue cambiada. Verificar acceso de ${slot.memberAlias}.`,
+           reason: `Contrasena cambiada ${dateStr}`,
+           userAlias: slot.memberAlias,
+           slotNumber: slot.slotNumber || 0,
+           accountId: slot.assignedFrom?.accountId ? String(slot.assignedFrom.accountId) : '',
+           affectedUsers: [slot.memberAlias],
+         });
+       }
+     }
+   } catch (err) {
+     console.error('Error generando alertas access_verify:', err);
+   }
+ };
+
+ const handleSaveCredential = async (serviceAccountRef, values, alertToComplete = null, independentPasswordChange = false) => {
  const encrypted = encryptFields(values, SERVICE_SENSITIVE);
  encrypted.updatedAt = new Date().toISOString();
  const ref = doc(db, 'secrets', serviceAccountRef);
@@ -689,43 +741,11 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
  }
  if (alertToComplete) {
       await completeAlert(alertToComplete.id, { resolvedVia: 'vault' });
-
-      // Generar alertas access_verify para usuarios restantes de esta cuenta real
-      try {
-        // Determinar el serviceKey desde el serviceAccountRef (ej: "chatgpt_1" → "chatgpt")
-        const svcKey = serviceAccountRef.replace(/_\d+$/, '');
-        const realAccountRef = doc(db, `service-pools/${svcKey}/real-accounts/${serviceAccountRef}`);
-        const realSnap = await getDoc(realAccountRef);
-
-        if (realSnap.exists()) {
-          const realData = realSnap.data();
-          const activeSlots = (realData.slots || []).filter(s => s.memberAlias && s.status === 'active');
-
-          if (activeSlots.length > 0) {
-            const svcMeta = getServiceMeta(svcKey);
-            const serviceName = svcMeta.name || svcKey;
-            const acctLabel = realData.email ? `${serviceAccountRef} (${realData.email})` : serviceAccountRef;
-            const userNames = activeSlots.map(s => s.memberAlias);
-
-            await createManualAlert({
-              service: serviceName,
-              serviceAccountRef,
-              realAccountEmail: realData.email || null,
-              source: 'password_changed',
-              type: 'access_verify',
-              priority: 'medium',
-              title: `Verificar acceso - ${serviceName}`,
-              description: `La contrasena de ${acctLabel} fue cambiada. Verificar que estos usuarios aun tengan acceso: ${userNames.join(', ')}`,
-              dependsOn: 'password_change',
-              affectedUsers: userNames,
-            });
-          }
-        }
-      } catch (err) {
-        console.error('Error generando alertas access_verify:', err);
-      }
-
-      showToast('Contraseña actualizada y alerta completada ');
+      await generateAccessVerifyAlerts(serviceAccountRef);
+      showToast('Contrasena actualizada y alerta completada');
+ } else if (independentPasswordChange) {
+      await generateAccessVerifyAlerts(serviceAccountRef);
+      showToast('Contrasena actualizada — verificar acceso de usuarios');
  } else {
       showToast('Credencial guardada correctamente');
  }
@@ -850,10 +870,13 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
  try {
       if (pendingAlert && passwordChanged) {
         await handleSaveCredential(acct.serviceAccountRef, saveValues, pendingAlert);
+      } else if (passwordChanged && !pendingAlert) {
+        await handleSaveCredential(acct.serviceAccountRef, saveValues, null, true);
       } else {
         await handleSaveCredential(acct.serviceAccountRef, saveValues);
       }
       setEditModal(null);
+      await refreshVaultData();
  } catch (err) {
       console.error('Error al guardar credencial:', err);
       showToast('Error al guardar: ' + err.message, 'error');
@@ -1367,7 +1390,9 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
             const isExpanded = expandedServices.has(svc);
             const isPasswordService = PASSWORD_SERVICES.includes(svc);
             const accts = accounts || [];
-            const pendingForService = accts.filter(a => getPendingAlert(a.serviceAccountRef)).length;
+            const pendingForService = accts.filter(a => getVaultAlertState(a.serviceAccountRef) !== null).length;
+            const redCountForService = accts.filter(a => getVaultAlertState(a.serviceAccountRef) === 'password_change').length;
+            const blueCountForService = pendingForService - redCountForService;
 
             return (
               <div className="vault-service-group" key={svc}>
@@ -1387,9 +1412,14 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
                     </div>
                   </div>
                   <div className="vault-service-header-right">
-                    {pendingForService > 0 && (
+                    {redCountForService > 0 && (
                       <span className="badge badge-danger" style={{ fontSize: '11px' }}>
-                        <DotRed /> {pendingForService}
+                        <DotRed /> {redCountForService}
+                      </span>
+                    )}
+                    {blueCountForService > 0 && (
+                      <span className="badge" style={{ fontSize: '11px', background: 'rgba(59,130,246,0.15)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.3)', borderRadius: '10px', padding: '2px 8px' }}>
+                        🔵 {blueCountForService}
                       </span>
                     )}
                     <span className="vault-chevron">{isExpanded ? '▲' : '▼'}</span>
@@ -1400,22 +1430,32 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
                   <div className="vault-accounts-grid">
                     {accts.map(acct => {
                       const secret = getSecret(acct.serviceAccountRef);
-                      const pendingAlert = getPendingAlert(acct.serviceAccountRef);
+                      const alertState = getVaultAlertState(acct.serviceAccountRef);
+                      const passwordAlert = getPasswordChangeAlert(acct.serviceAccountRef);
+                      const accessAlerts = getAccessVerifyAlerts(acct.serviceAccountRef);
+                      const slotAlerts = getSlotDeletionAlerts(acct.serviceAccountRef);
                       const hasPassword = secret?.password;
                       const hasGooglePw = secret?.googlePassword;
                       const pwKey = `pw-${acct.serviceAccountRef}`;
                       const gpKey = `gp-${acct.serviceAccountRef}`;
+                      const cardColorClass = alertState === 'password_change' ? 'has-pending-alert' : alertState === 'access_verify' ? 'has-access-verify' : '';
 
                       return (
                         <div
-                          className={`vault-credential-card ${pendingAlert ? 'has-pending-alert' : ''} ${highlightRef === acct.serviceAccountRef ? 'vault-highlight-pulse' : ''}`}
+                          className={`vault-credential-card ${cardColorClass} ${highlightRef === acct.serviceAccountRef ? 'vault-highlight-pulse' : ''}`}
                           key={acct.id}
                           id={`vault-${acct.serviceAccountRef}`}
                         >
-                          {pendingAlert && (
+                          {alertState === 'password_change' && passwordAlert && (
                             <div className="vault-pending-banner">
                               <DotRed /> Cambio de contraseña pendiente
-                              <span className="vault-pending-reason">{pendingAlert.title}</span>
+                              <span className="vault-pending-reason">{passwordAlert.reason || passwordAlert.title}</span>
+                            </div>
+                          )}
+                          {alertState === 'access_verify' && (
+                            <div className="vault-pending-banner blue">
+                              🔵 Verificar acceso de {accessAlerts.length + slotAlerts.length} usuario{(accessAlerts.length + slotAlerts.length) !== 1 ? 's' : ''}
+                              <span className="vault-pending-reason">Ir a Suscripciones para confirmar</span>
                             </div>
                           )}
 

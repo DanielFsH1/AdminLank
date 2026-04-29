@@ -28,14 +28,14 @@ const COLLECTIONS = [
  { key: 'vault-cards', label: 'Tarjetas (Bóveda)', icon: <CreditCardIcon size={16} />, type: 'collection', desc: 'Datos de tarjetas de pago', sensitive: true },
  { key: 'analysis/state', label: 'Estado de Análisis', icon: <AnalyzeIcon size={16} />, type: 'doc', desc: 'UIDs procesados' },
  { key: 'analysis/latest-report', label: 'Último Reporte', icon: <BarChartIcon size={16} />, type: 'doc', desc: 'Resumen del análisis' },
- { key: 'analysis/raw-emails', label: 'Correos Crudos', icon: <EmailIcon size={16} />, type: 'doc', desc: 'Emails sin procesar (legacy)' },
+ { key: 'analysis/raw-emails', label: 'Correos Crudos', icon: <EmailIcon size={16} />, type: 'doc', desc: 'Emails sin procesar' },
  { key: 'alerts', label: 'Alertas', icon: <BellIcon size={16} />, type: 'collection', desc: 'Alertas del sistema' },
  { key: 'notifications', label: 'Notificaciones', icon: <MailboxIcon size={16} />, type: 'collection', desc: 'Correos detectados (7 días)' },
  { key: 'groups', label: 'Grupos de Suscripción', icon: <KeyIcon size={16} />, type: 'collection-deep', desc: 'Pools con sub-colecciones', subs: ['lank-accounts'] },
  { key: 'service-pools', label: 'Cuentas Reales', icon: <BankIcon size={16} />, type: 'collection-deep', desc: 'Real accounts con sub-colecciones', subs: ['real-accounts'], sensitive: true },
  { key: 'subscriptions', label: 'Suscripciones', icon: <CreditCardIcon size={16} />, type: 'collection', desc: 'Datos de suscripciones' },
  { key: 'finance', label: 'Finanzas', icon: <MoneyIcon size={16} />, type: 'collection-deep', desc: 'Datos financieros', subs: ['history'] },
- { key: 'accounts', label: 'Cuentas (Legacy)', icon: <UsersIcon size={16} />, type: 'collection', desc: 'Registro original de cuentas Lank' },
+ { key: 'accounts', label: 'Cuentas', icon: <UsersIcon size={16} />, type: 'collection', desc: 'Registro original de cuentas Lank' },
  { key: 'audit-log', label: 'Historial de Cambios', icon: <ClockIcon size={16} />, type: 'collection', desc: 'Registro de todas las acciones del sistema' },
 ];
 
@@ -1017,7 +1017,7 @@ export default function Tools() {
             <div className="tools-maint-info">
               <div className="tools-maint-icon"><EmailIcon size={16} /></div>
               <div>
-                <div className="tools-maint-title">Eliminar raw-emails (legacy)</div>
+                <div className="tools-maint-title">Eliminar raw-emails</div>
                 <div className="tools-maint-desc">Elimina el documento analysis/raw-emails que ya no se utiliza en el pipeline actual.</div>
               </div>
             </div>
@@ -1060,7 +1060,7 @@ export default function Tools() {
             <p>
               {purgeConfirm === 'notifications' && '¿Eliminar notificaciones con más de 7 días? Esta acción no se puede deshacer.'}
               {purgeConfirm === 'completed-alerts' && '¿Eliminar alertas completadas/descartadas con más de 30 días? Esta acción no se puede deshacer.'}
-              {purgeConfirm === 'raw-emails' && '¿Eliminar el documento analysis/raw-emails? Este documento es legacy y ya no se utiliza.'}
+              {purgeConfirm === 'raw-emails' && '¿Eliminar el documento analysis/raw-emails?'}
             </p>
             <div className="tools-modal-actions">
               <button className="tools-btn tools-btn-secondary" onClick={() => setPurgeConfirm(null)}>

@@ -1562,7 +1562,45 @@ body {
   100% { opacity: 0; }
 }
 
-/* ═══ Animación PERMANENTE para usuarios con acción pendiente ═══ */
+/* ═══ Slot pendiente de eliminación (ROJO) ═══ */
+.slot-pending-deletion {
+  position: relative;
+  animation: slotRedPulse 2.5s ease-in-out infinite;
+  border: 1px solid rgba(239, 68, 68, 0.5) !important;
+  background: rgba(239, 68, 68, 0.06) !important;
+}
+.slot-pending-deletion::before {
+  content: '🔴';
+  position: absolute; top: 4px; right: 6px;
+  font-size: 12px; line-height: 1;
+  animation: pendingIconPulse 2s ease-in-out infinite;
+  z-index: 2;
+}
+@keyframes slotRedPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+  50% { box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25), 0 0 12px rgba(239, 68, 68, 0.15); }
+}
+
+/* ═══ Slot verificación de acceso pendiente (AZUL) ═══ */
+.slot-access-verify {
+  position: relative;
+  animation: slotBluePulse 2.5s ease-in-out infinite;
+  border: 1px solid rgba(59, 130, 246, 0.5) !important;
+  background: rgba(59, 130, 246, 0.06) !important;
+}
+.slot-access-verify::before {
+  content: '🔵';
+  position: absolute; top: 4px; right: 6px;
+  font-size: 12px; line-height: 1;
+  animation: pendingIconPulse 2s ease-in-out infinite;
+  z-index: 2;
+}
+@keyframes slotBluePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+  50% { box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25), 0 0 12px rgba(59, 130, 246, 0.15); }
+}
+
+/* ═══ Animación PERMANENTE para usuarios con acción pendiente (legacy amarillo) ═══ */
 .pending-action-slot {
   position: relative;
   animation: pendingSlotPulse 2.5s ease-in-out infinite;
@@ -1583,6 +1621,34 @@ body {
 @keyframes pendingIconPulse {
   0%, 100% { opacity: 0.6; transform: scale(1); }
   50% { opacity: 1; transform: scale(1.15); }
+}
+
+/* ═══ Botones de acción en slots ═══ */
+.slot-action-btn {
+  font-size: 11px; font-weight: 600; padding: 3px 10px;
+  border-radius: 4px; border: none; cursor: pointer;
+  margin-top: 4px; display: inline-flex; align-items: center; gap: 4px;
+  transition: opacity 0.15s, transform 0.1s;
+}
+.slot-action-btn:hover { opacity: 0.85; transform: scale(1.02); }
+.slot-action-btn:active { transform: scale(0.98); }
+.slot-action-btn.red {
+  background: #ef4444; color: #fff;
+}
+.slot-action-btn.blue {
+  background: #3b82f6; color: #fff;
+}
+.slot-alert-reason {
+  font-size: 11px; margin-top: 3px; padding: 2px 6px;
+  border-radius: 3px; display: inline-flex; align-items: center; gap: 4px;
+}
+.slot-alert-reason.red {
+  color: #ef4444; background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+.slot-alert-reason.blue {
+  color: #3b82f6; background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.2);
 }
 
 /* ═══ Tarjeta de cuenta clickeable en Analyze ═══ */
@@ -3697,6 +3763,10 @@ body {
   border-color: rgba(239,68,68,0.5);
   box-shadow: 0 0 0 2px rgba(239,68,68,0.15);
 }
+.vault-credential-card.has-access-verify {
+  border-color: rgba(59,130,246,0.5);
+  box-shadow: 0 0 0 2px rgba(59,130,246,0.15);
+}
 
 /* Pending alert banner */
 .vault-pending-banner {
@@ -3706,6 +3776,11 @@ body {
   font-size: 12px; font-weight: 600; color: #ef4444;
   display: flex; align-items: center; gap: 8px;
   animation: pulse 2s infinite;
+}
+.vault-pending-banner.blue {
+  background: rgba(59,130,246,0.1);
+  border-bottom: 1px solid rgba(59,130,246,0.25);
+  color: #3b82f6;
 }
 .vault-pending-reason {
   font-weight: 400; color: var(--text-muted); font-size: 11px;

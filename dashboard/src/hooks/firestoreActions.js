@@ -446,7 +446,6 @@ export async function removeGroupUser(serviceKey, accountId, userAlias, currentU
       const slots = realData.slots || [];
       const accountStatus = realData.status || '';
 
-      if (accountStatus === 'legacy_in_use') continue;
 
       // Buscar slots asignados a este usuario desde este grupo Lank
       for (let idx = 0; idx < slots.length; idx++) {
@@ -1407,8 +1406,6 @@ export async function deleteLankGroup(serviceKey, accountId) {
     const slots = realData.slots || [];
     const accountStatus = realData.status || '';
 
-    // No procesar cuentas legacy
-    if (accountStatus === 'legacy_in_use') continue;
 
     let modified = false;
     const newSlots = slots.map((slot, idx) => {
@@ -1753,6 +1750,61 @@ export async function propagateSlotsToRealAccounts(serviceKey, newMaxSlots, real
   }
 
   return { success: errors.length === 0, updated, errors };
+}
+
+export async function addSlotToRealAccount(serviceKey, accountRef, currentSlots) {
+  const ref = doc(db, `service-pools/${serviceKey}/real-accounts/${accountRef}`);
+  const newSlotNumber = currentSlots.length + 1;
+  const newSlot = {
+    slotNumber: newSlotNumber,
+    status: 'free',
+    memberAlias: '',
+    memberEmail: '',
+    profileName: '',
+    projectName: '',
+    assignedFrom: null,
+  };
+  const updatedSlots = [...currentSlots, newSlot];
+
+  await updateDoc(ref, {
+    slots: updatedSlots,
+    totalSlots: updatedSlots.length,
+  });
+  logManualChange('add_slot', `Cupo ${newSlotNumber} agregado a ${accountRef} (${serviceKey})`, {
+    collection: `service-pools/${serviceKey}/real-accounts`, documentId: accountRef,
+    field: 'slots', after: newSlot,
+  });
+  appendEntityHistory(ref, 'slotHistory', {
+    action: 'add_slot',
+    slotNumber: newSlotNumber,
+  });
+}
+
+export async function removeSlotFromRealAccount(serviceKey, accountRef, slotIndex, currentSlots) {
+  const slot = currentSlots[slotIndex];
+  if (slot.memberAlias && slot.memberAlias.trim() && slot.status !== 'free') {
+    throw new Error('No se puede eliminar un cupo ocupado. Libera el cupo primero.');
+  }
+
+  const ref = doc(db, `service-pools/${serviceKey}/real-accounts/${accountRef}`);
+  const removedNumber = slot.slotNumber || slotIndex + 1;
+  const updatedSlots = currentSlots.filter((_, i) => i !== slotIndex);
+  updatedSlots.forEach((s, i) => { s.slotNumber = i + 1; });
+  const occupied = updatedSlots.filter(s => s.memberAlias && s.memberAlias.trim()).length;
+
+  await updateDoc(ref, {
+    slots: updatedSlots,
+    totalSlots: updatedSlots.length,
+    occupiedSlots: occupied,
+  });
+  logManualChange('remove_slot', `Cupo ${removedNumber} eliminado de ${accountRef} (${serviceKey})`, {
+    collection: `service-pools/${serviceKey}/real-accounts`, documentId: accountRef,
+    field: 'slots', before: slot,
+  });
+  appendEntityHistory(ref, 'slotHistory', {
+    action: 'remove_slot',
+    slotNumber: removedNumber,
+  });
 }
 
 /**

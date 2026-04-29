@@ -7,11 +7,11 @@ import { UsersIcon, CheckCircleIcon, KeyIcon, BellIcon, AtmIcon, ClipboardIcon, 
 
 export default function Overview({ onNavigate, servicesConfig }) {
   const SERVICE_KEYS = useMemo(() => getPoolServiceKeys(), [servicesConfig]);
-  const { data: accounts, loading: loadingAccounts } = useCollection('accounts', { realtime: false });
-  const { data: groups, loading: loadingGroups } = useCollection('groups', { realtime: false });
-  const { data: pools } = useCollection('service-pools', { realtime: false });
-  const { data: alerts } = useCollection('alerts', { realtime: false });
-  const { data: finOverview } = useDocument('finance', 'overview', { realtime: false });
+  const { data: accounts, loading: loadingAccounts } = useCollection('accounts', { realtime: true });
+  const { data: groups, loading: loadingGroups } = useCollection('groups', { realtime: true });
+  const { data: pools } = useCollection('service-pools', { realtime: true });
+  const { data: alerts } = useCollection('alerts', { realtime: true });
+  const { data: finOverview } = useDocument('finance', 'overview', { realtime: true });
   const [serviceStats, setServiceStats] = useState({});
   const [statsReady, setStatsReady] = useState(false);
 

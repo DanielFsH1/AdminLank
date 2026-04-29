@@ -132,7 +132,7 @@ export default function History({ navData }) {
   const [searchQuery, setSearchQuery]   = useState('');
   const [displayLimit, setDisplayLimit] = useState(50);
   const { data: allEntries, loading } = useCollection('audit-log', {
-    realtime: false,
+    realtime: true,
     constraints: [orderBy('timestamp', 'desc'), limit(displayLimit)],
     deps: [displayLimit],
   });

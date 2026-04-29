@@ -1,15 +1,16 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { collection, doc, getDoc, getDocs, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useCollection, useDocument } from '../hooks/useFirestore';
 import { SERVICES, getServiceMeta, getProfileImage, getPoolServiceKeys, getNonPoolServiceKeys, getAllServiceKeys, getSlotFields, getExpectedSlotFields, getUserFields } from '../config/services';
 import {
   updateSlot, updateGroupUser, removeGroupUser, moveUserBetweenAccounts,
-  updateServiceMasterConfig, updateServiceConfig, propagateSlotsToRealAccounts, DEFAULT_MASTER_CONFIG,
-  initSubscriptionMasterConfig, toggleSlotEnabled, updateGroupEnabledSlots, createManualAlert,
+  DEFAULT_MASTER_CONFIG, initSubscriptionMasterConfig,
+  addSlotToRealAccount, removeSlotFromRealAccount,
+  updateGroupEnabledSlots, createManualAlert,
 } from '../hooks/firestoreActions';
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
-import { BlockIcon, CalendarIcon, CashIcon, CheckCircleIcon, ClockIcon, CloseIcon, CreditCardIcon, DotGray, DotGreen, EditIcon, EmailIcon, FolderIcon, KeyIcon, LinkIcon, LockKeyIcon, NotesIcon, PlusIcon, PointUpIcon, RefreshIcon, SaveIcon, SearchIcon, SettingsIcon, SlidersIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, WarningIcon } from '../components/Icons';
+import { BlockIcon, CalendarIcon, CashIcon, ClockIcon, CloseIcon, CreditCardIcon, DotGray, DotGreen, EditIcon, EmailIcon, FolderIcon, KeyIcon, LinkIcon, LockKeyIcon, PlusIcon, PointUpIcon, RefreshIcon, SaveIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, WarningIcon } from '../components/Icons';
 import { normalizeSearch, nMatch } from '../utils/normalize';
 import SearchBar from '../components/SearchBar';
 import EntityHistory from '../components/EntityHistory';
@@ -21,38 +22,6 @@ function getExpectedFieldsForService(svcId) {
 
 function getEditableFieldsForService(svcId) {
  return getSlotFields(svcId);
-}
-
-const MASTER_CONFIG_FIELDS = [
- { key: 'maxSlotsPerRealAccount', label: 'Máx. cupos por cuenta real', type: 'number', required: true, placeholder: '1-10', hint: 'No puede exceder 10.' },
- { key: 'maxSlotsPerLankGroup', label: 'Máx. cupos por grupo Lank', type: 'number', required: true, placeholder: '1-10', hint: 'No puede exceder 10.' },
- {
-  key: 'accessType',
-  label: 'Tipo de acceso',
-  type: 'select',
-  required: true,
-  options: [
-    { value: 'credentials', label: 'Credenciales compartidas' },
-    { value: 'email_invitation', label: 'Invitación por correo' },
-    { value: 'profile_project', label: 'Perfil / proyecto' },
-  ],
- },
-];
-
-const ACCESS_TYPE_LABELS = {
- credentials: 'Credenciales compartidas',
- email_invitation: 'Invitación por correo',
- profile_project: 'Perfil / proyecto',
-};
-
-function getDisplayAccessTypeLabel(serviceKey, config) {
- const accessType = config?.accessType;
- // Si el servicio tiene un label personalizado, usarlo
- if (config?.accessTypeLabel) return config.accessTypeLabel;
- // Fallback al servicio meta si tiene accessTypeLabel definido
- const meta = getServiceMeta(serviceKey);
- if (meta?.accessTypeLabel) return meta.accessTypeLabel;
- return ACCESS_TYPE_LABELS[accessType] || 'Sin definir';
 }
 
 function getMissingFields(svcId, slot) {
@@ -75,8 +44,8 @@ function getMissingFields(svcId, slot) {
 }
 
 export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
- const { data: pools } = useCollection('service-pools', { realtime: false });
- const { data: masterConfigDoc, loading: masterConfigLoading } = useDocument('config', 'services', { realtime: false });
+ const { data: pools } = useCollection('service-pools', { realtime: true });
+ const { data: masterConfigDoc, loading: masterConfigLoading } = useDocument('config', 'services', { realtime: true });
  const [poolDetails, setPoolDetails] = useState({});
  const [groupDetails, setGroupDetails] = useState({});
  const [selectedService, setSelectedService] = useState(null);
@@ -95,19 +64,8 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  const [groupBajaConfirm, setGroupBajaConfirm] = useState(null); // { serviceKey, groupId, userIndex, userAlias, allUsers, accountLabel, accountId }
  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
 
- // Configuración maestra
- const [showMasterConfig, setShowMasterConfig] = useState(false);
- const [editMasterModal, setEditMasterModal] = useState(null); // { serviceKey, config }
- const [propagateConfirm, setPropagateConfirm] = useState(null); // { serviceKey, oldMax, newMax }
-
- // Gestión de suscripciones (crear/editar servicio)
- const [svcModal, setSvcModal] = useState(null); // null | { mode: 'create' } | { mode: 'edit', key: string }
- const [svcForm, setSvcForm] = useState({});
- const [svcSaving, setSvcSaving] = useState(false);
- const [svcError, setSvcError] = useState('');
- const [svcAliasInput, setSvcAliasInput] = useState('');
- const [svcSlotFields, setSvcSlotFields] = useState([]);
- const [svcUserFields, setSvcUserFields] = useState([]);
+ // Confirm para eliminar cupo
+ const [removeSlotConfirm, setRemoveSlotConfirm] = useState(null); // { serviceKey, accountRef, slotIndex, slot, allSlots, accountLabel }
 
  // Configuración maestra resuelta (Firestore > defaults)
  const masterConfig = useMemo(() => {
@@ -226,38 +184,48 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  }, [selectedService]);
 
  // ─── Data loading functions ───
- const loadPoolDetailsFn = useCallback(async () => {
-   if (pools.length === 0) return;
-   const results = {};
-   await Promise.all(pools.map(async pool => {
-     const snap = await getDocs(collection(db, `service-pools/${pool.id}/real-accounts`));
-     results[pool.id] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-   }));
-   setPoolDetails(results);
+ const loadPoolDetailsFn = useCallback(() => {
+   if (pools.length === 0) return () => {};
+   const unsubs = [];
+   
+   pools.forEach(pool => {
+     const unsub = onSnapshot(collection(db, `service-pools/${pool.id}/real-accounts`), (snap) => {
+       const accounts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+       setPoolDetails(prev => ({ ...prev, [pool.id]: accounts }));
+     }, (err) => console.error(`Error realtime real-accounts ${pool.id}:`, err));
+     unsubs.push(unsub);
+   });
+   
+   return () => unsubs.forEach(u => u());
  }, [pools]);
 
- const loadGroupDetailsFn = useCallback(async () => {
+ const loadGroupDetailsFn = useCallback(() => {
    const svcs = getAllServiceKeys();
-   const results = {};
-   await Promise.all(svcs.map(async svc => {
-     const snap = await getDocs(collection(db, `groups/${svc}/lank-accounts`));
-     results[svc] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-   }));
-   setGroupDetails(results);
+   const unsubs = [];
+   
+   svcs.forEach(svc => {
+     const unsub = onSnapshot(collection(db, `groups/${svc}/lank-accounts`), (snap) => {
+       const accounts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+       setGroupDetails(prev => ({ ...prev, [svc]: accounts }));
+     }, (err) => console.error(`Error realtime lank-accounts ${svc}:`, err));
+     unsubs.push(unsub);
+   });
+   
+   return () => unsubs.forEach(u => u());
  }, []);
 
- const refreshSubscriptionsData = useCallback(async () => {
-   await Promise.all([loadPoolDetailsFn(), loadGroupDetailsFn()]);
- }, [loadPoolDetailsFn, loadGroupDetailsFn]);
+ const refreshSubscriptionsData = useCallback(() => { /* No-op, realtime handled by onSnapshot */ }, []);
 
- // Cargar cuentas reales
+ // Cargar cuentas reales (Realtime)
  useEffect(() => {
- loadPoolDetailsFn().catch(() => {});
+   const cleanup = loadPoolDetailsFn();
+   return cleanup;
  }, [loadPoolDetailsFn]);
 
- // Cargar grupos Lank
+ // Cargar grupos Lank (Realtime)
  useEffect(() => {
- loadGroupDetailsFn().catch(() => {});
+   const cleanup = loadGroupDetailsFn();
+   return cleanup;
  }, [loadGroupDetailsFn]);
 
  // Estadísticas por servicio
@@ -813,157 +781,41 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
 
  const selectedMeta = selectedService ? getServiceMeta(selectedService) : null;
 
- // ─── Gestión de suscripciones: crear/editar/desactivar ───
- const allSvcKeys = useMemo(() => getAllServiceKeys(), [servicesConfig]);
+ // ─── HANDLERS: Añadir / Eliminar cupos individuales en cuentas reales ───
 
- const generateKey = (name) => {
-   return name.toLowerCase()
-     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-     .replace(/[^a-z0-9]+/g, '')
-     .slice(0, 30);
- };
-
- const openCreateSvcModal = () => {
-   setSvcForm({
-     name: '', color: '#6366f1', logo: '', maxSlots: 4,
-     usesPool: true, accessType: 'credentials', accessTypeLabel: '',
-     displayOrder: allSvcKeys.length + 1, active: true,
-     isRenewalBased: false,
-     maxSlotsPerRealAccount: 4, maxSlotsPerLankGroup: 4,
-   });
-   setSvcSlotFields([
-     { key: 'memberAlias', label: 'Alias del usuario', required: true, placeholder: 'Nombre del usuario' },
-   ]);
-   setSvcUserFields([
-     { key: 'userAlias', label: 'Alias del usuario', required: true, placeholder: 'Nombre visible del usuario' },
-   ]);
-   setSvcAliasInput('');
-   setSvcError('');
-   setSvcModal({ mode: 'create' });
- };
-
- const openEditSvcModal = (key) => {
-   const meta = getServiceMeta(key);
-   setSvcForm({
-     name: meta.name || '', color: meta.color || '#666', logo: meta.logo || '',
-     maxSlots: meta.maxSlots || 4, usesPool: meta.usesPool !== false,
-     accessType: meta.accessType || 'credentials',
-     accessTypeLabel: meta.accessTypeLabel || '',
-     displayOrder: meta.displayOrder || 1, active: meta.active !== false,
-     isRenewalBased: meta.isRenewalBased || false,
-     maxSlotsPerRealAccount: meta.maxSlotsPerRealAccount || meta.maxSlots || 4,
-     maxSlotsPerLankGroup: meta.maxSlotsPerLankGroup || meta.maxSlots || 4,
-   });
-   setSvcSlotFields(meta.slotFields || []);
-   setSvcUserFields(meta.userFields || []);
-   setSvcAliasInput((meta.nameAliases || []).join(', '));
-   setSvcError('');
-   setSvcModal({ mode: 'edit', key });
- };
-
- const handleSvcSave = async () => {
-   setSvcError('');
-   const { name, color, maxSlots, accessType } = svcForm;
-   if (!name.trim()) { setSvcError('El nombre es obligatorio'); return; }
-   if (!accessType) { setSvcError('Debes elegir el tipo de acceso'); return; }
-   if (Number(maxSlots) < 1 || Number(maxSlots) > 20) { setSvcError('Los cupos deben estar entre 1 y 20'); return; }
-
-   const serviceKey = svcModal.mode === 'edit' ? svcModal.key : generateKey(name);
-   if (!serviceKey) { setSvcError('No se pudo generar una clave válida'); return; }
-
-   if (svcModal.mode === 'create') {
-     const existing = getServiceMeta(serviceKey);
-     if (existing && existing.name !== serviceKey) {
-       setSvcError(`Ya existe un servicio con la clave "${serviceKey}"`); return;
-     }
-   }
-
-   const nameAliases = svcAliasInput.split(',').map(a => a.trim()).filter(Boolean);
-   if (!nameAliases.includes(name.trim())) nameAliases.unshift(name.trim());
-
-   const config = {
-     name: name.trim(), color, logo: svcForm.logo || '',
-     maxSlots: Number(maxSlots), usesPool: svcForm.usesPool,
-     accessType, accessTypeLabel: svcForm.accessTypeLabel || '',
-     displayOrder: Number(svcForm.displayOrder) || 1,
-     active: svcForm.active !== false,
-     isRenewalBased: svcForm.isRenewalBased || false,
-     maxSlotsPerRealAccount: Number(svcForm.maxSlotsPerRealAccount) || Number(maxSlots),
-     maxSlotsPerLankGroup: Number(svcForm.maxSlotsPerLankGroup) || Number(maxSlots),
-     nameAliases,
-     slotFields: svcSlotFields.filter(f => f.key && f.label),
-     userFields: svcUserFields.filter(f => f.key && f.label),
-   };
-
-   setSvcSaving(true);
+ const handleAddSlot = async (serviceKey, acct) => {
    try {
-     await updateServiceConfig(serviceKey, config);
-     showToast(svcModal.mode === 'create' ? `Servicio "${name}" creado` : `${name} actualizado`);
-     setSvcModal(null);
-   } catch (err) {
-     setSvcError('Error al guardar: ' + err.message);
-   } finally {
-     setSvcSaving(false);
-   }
- };
-
- const handleSvcToggleActive = async (key) => {
-   const meta = getServiceMeta(key);
-   try {
-     await updateServiceConfig(key, { active: meta.active === false });
-     showToast(`${meta.name} ${meta.active === false ? 'activado' : 'desactivado'}`);
-   } catch (err) {
-     showToast('Error: ' + err.message, 'error');
-   }
- };
-
- const addDynField = (setter) => setter(prev => [...prev, { key: '', label: '', required: false, placeholder: '' }]);
- const updateDynField = (setter, idx, field, value) => setter(prev => prev.map((f, i) => i === idx ? { ...f, [field]: value } : f));
- const removeDynField = (setter, idx) => setter(prev => prev.filter((_, i) => i !== idx));
-
- const handleMasterConfigSave = async (values) => {
-   if (!editMasterModal) return;
-   const { serviceKey, currentConfig } = editMasterModal;
-   const nextConfig = {
-     maxSlotsPerRealAccount: Number(values.maxSlotsPerRealAccount),
-     maxSlotsPerLankGroup: Number(values.maxSlotsPerLankGroup),
-     accessType: values.accessType,
-     accessTypeLabel: ACCESS_TYPE_LABELS[values.accessType] || values.accessType,
-   };
-
-   await updateServiceMasterConfig(serviceKey, nextConfig);
-
-   const oldMax = Number(currentConfig?.maxSlotsPerRealAccount || 0);
-   const newMax = Number(nextConfig.maxSlotsPerRealAccount || 0);
-   if (oldMax !== newMax) {
-     const accounts = poolDetails[serviceKey] || [];
-     const result = await propagateSlotsToRealAccounts(serviceKey, newMax, accounts);
-     if (!result.success) {
-       throw new Error(`No se pudo propagar a todas las cuentas: ${result.errors.join(' | ')}`);
-     }
-   }
-
-   showToast(`Configuración actualizada para ${getServiceMeta(serviceKey).name}`);
-   setEditMasterModal(null);
- };
-
- const validateMasterConfig = (values) => {
-   const real = Number(values.maxSlotsPerRealAccount);
-   const group = Number(values.maxSlotsPerLankGroup);
-   if (!Number.isInteger(real) || real < 1 || real > 10) return 'La cuenta real debe tener entre 1 y 10 cupos.';
-   if (!Number.isInteger(group) || group < 1 || group > 10) return 'El grupo Lank debe tener entre 1 y 10 cupos.';
-   if (!values.accessType) return 'Debes seleccionar el tipo de acceso.';
-   return '';
- };
-
- const handleToggleRealSlot = async (serviceKey, acct, idx, slot) => {
-   try {
-     const enabled = slot.enabled !== false;
-     await toggleSlotEnabled(serviceKey, acct.id, idx, !enabled, acct.slots || []);
-     showToast(`${enabled ? 'Cupo deshabilitado' : 'Cupo habilitado'} en ${acct.label || acct.id}`);
+     await addSlotToRealAccount(serviceKey, acct.id, acct.slots || []);
+     showToast(`Cupo #${(acct.slots || []).length + 1} agregado a ${acct.label || acct.id}`);
+     await refreshSubscriptionsData();
    } catch (err) {
      showToast(err.message, 'error');
    }
+ };
+
+ const handleRemoveSlot = (serviceKey, acct, slotIndex) => {
+   const slot = acct.slots[slotIndex];
+   setRemoveSlotConfirm({
+     serviceKey,
+     accountRef: acct.id,
+     slotIndex,
+     slot,
+     allSlots: acct.slots,
+     accountLabel: acct.label || acct.serviceAccountRef || acct.id,
+   });
+ };
+
+ const handleRemoveSlotConfirm = async () => {
+   if (!removeSlotConfirm) return;
+   const { serviceKey, accountRef, slotIndex, allSlots } = removeSlotConfirm;
+   try {
+     await removeSlotFromRealAccount(serviceKey, accountRef, slotIndex, allSlots);
+     showToast(`Cupo eliminado de ${removeSlotConfirm.accountLabel}`);
+     await refreshSubscriptionsData();
+   } catch (err) {
+     showToast(err.message, 'error');
+   }
+   setRemoveSlotConfirm(null);
  };
 
  const handleToggleGroupSlot = async (serviceKey, group, idx) => {
@@ -1047,11 +899,11 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
             </button>
             {isEmpty && (
               <button
-                className="alert-action-btn assign"
-                onClick={(e) => { e.stopPropagation(); handleToggleRealSlot(serviceKey, acct, idx, slot); }}
-                title={isDisabled ? 'Habilitar este cupo' : 'Deshabilitar este cupo'}
+                className="alert-action-btn danger"
+                onClick={(e) => { e.stopPropagation(); handleRemoveSlot(serviceKey, acct, idx); }}
+                title="Eliminar este cupo"
               >
-                {isDisabled ? <ToggleOffIcon size={16} /> : <ToggleOnIcon size={16} />} {isDisabled ? 'Habilitar' : 'Deshabilitar'}
+                <TrashIcon size={16} /> Eliminar cupo
               </button>
             )}
             {isOccupied && !isDisabled && (
@@ -1082,76 +934,8 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  <>
       <div className="section-header">
         <div className="section-title"><KeyIcon size={16} /> Suscripciones — Pools de cuentas reales</div>
-        <button className="tools-btn tools-btn-secondary" onClick={() => setShowMasterConfig(v => !v)}>
-          <SettingsIcon size={16} /> {showMasterConfig ? 'Ocultar configuración' : 'Configurar suscripciones'}
-        </button>
       </div>
 
-      {showMasterConfig && (
-        <div className="master-config-panel">
-          <div className="master-config-header">
-            <div>
-              <div className="section-title" style={{ gap: '8px' }}><SlidersIcon size={16} /> Gestionar suscripciones</div>
-              <div className="header-subtitle">Cupos, tipo de acceso, campos y reglas globales. Crea nuevos servicios o edita los existentes.</div>
-            </div>
-            <button className="tools-btn tools-btn-primary" onClick={openCreateSvcModal}>
-              <PlusIcon size={16} /> Nueva suscripción
-            </button>
-          </div>
-          <div className="master-config-grid">
-            {allServiceIds.map(svcId => {
-              const meta = getServiceMeta(svcId);
-              const cfg = masterConfig[svcId] || DEFAULT_MASTER_CONFIG[svcId];
-              const isActive = meta.active !== false;
-              return (
-                <div key={svcId} className={`master-config-card ${!isActive ? 'master-config-inactive' : ''}`} style={{ '--svc-color': meta.color }}>
-                  <div className="master-config-card-top">
-                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                      {meta.logo && <img src={meta.logo} alt={meta.name} className="svc-logo" style={{ width: '36px', height: '36px' }} onError={e => { e.target.style.display = 'none'; }} />}
-                      <div>
-                        <div className="master-config-name">
-                          {meta.name}
-                          {!isActive && <span className="badge badge-danger" style={{ fontSize: '9px', marginLeft: '6px' }}>Inactivo</span>}
-                        </div>
-                        <div className="master-config-access">{getDisplayAccessTypeLabel(svcId, cfg)}</div>
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '4px' }}>
-                      <button className="alert-action-btn edit" onClick={() => openEditSvcModal(svcId)} title="Editar servicio completo">
-                        <SettingsIcon size={14} />
-                      </button>
-                      <button className="alert-action-btn edit" onClick={() => setEditMasterModal({ serviceKey: svcId, currentConfig: cfg })} title="Editar cupos y acceso">
-                        <EditIcon size={14} />
-                      </button>
-                      <button
-                        className={`alert-action-btn ${isActive ? 'danger' : 'assign'}`}
-                        onClick={() => handleSvcToggleActive(svcId)}
-                        title={isActive ? 'Desactivar servicio' : 'Activar servicio'}
-                      >
-                        {isActive ? <ToggleOffIcon size={14} /> : <ToggleOnIcon size={14} />}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="master-config-stats">
-                    <div className="master-config-stat">
-                      <span className="master-config-stat-label">Cuenta real</span>
-                      <strong>{cfg?.maxSlotsPerRealAccount || 0} cupos</strong>
-                    </div>
-                    <div className="master-config-stat">
-                      <span className="master-config-stat-label">Grupo Lank</span>
-                      <strong>{cfg?.maxSlotsPerLankGroup || 0} cupos</strong>
-                    </div>
-                    <div className="master-config-stat">
-                      <span className="master-config-stat-label">Tipo</span>
-                      <strong style={{ fontSize: '11px' }}>{meta.usesPool !== false ? 'Pool' : 'Grupo'}</strong>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* ═══ BUSCADOR GLOBAL ═══ */}
       <SearchBar
@@ -1314,6 +1098,7 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
                     <div style={{ display: 'flex', gap: '6px' }}>
                       <span className="badge badge-success"><DotGreen /> {active}</span>
                       <span className="badge badge-muted"><DotGray /> {free}</span>
+                      <button className="alert-action-btn assign" onClick={(e) => { e.stopPropagation(); handleAddSlot(selectedService, acct); }} title="Añadir cupo"><PlusIcon size={14} /> Cupo</button>
                     </div>
                   </div>
                   <div className="real-account-body">
@@ -1738,178 +1523,15 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
         </div>
       )}
 
-      <EditModal
-        open={!!editMasterModal}
-        onClose={() => setEditMasterModal(null)}
-        onSave={handleMasterConfigSave}
-        title={editMasterModal ? `Configurar ${getServiceMeta(editMasterModal.serviceKey).name}` : 'Configurar suscripción'}
-        icon={<SettingsIcon size={16} />}
-        fields={MASTER_CONFIG_FIELDS}
-        initialValues={editMasterModal?.currentConfig || {}}
-        saveLabel={<><SaveIcon size={16} /> Guardar configuración</>}
-        validate={validateMasterConfig}
-        confirmMessage="Se actualizará la configuración global del servicio y, si cambian los cupos de cuenta real, se propagará a todas las cuentas reales existentes."
-      >
-        {editMasterModal && (
-          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-            <strong style={{ color: 'var(--text-primary)' }}>{getServiceMeta(editMasterModal.serviceKey).name}</strong>
-            <div style={{ marginTop: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
-              Límite absoluto: 10 cupos. Los cambios en cuentas reales se aplican inmediatamente si no hay cupos ocupados fuera del nuevo rango.
-            </div>
-          </div>
-        )}
-      </EditModal>
-
-      {/* ═══ Modal: Crear/Editar Suscripción ═══ */}
-      {svcModal && (
-        <div className="edit-modal-overlay" onClick={() => setSvcModal(null)}>
-          <div className="edit-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '720px', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
-            <div className="edit-modal-header">
-              <span className="edit-modal-icon">{svcModal.mode === 'create' ? <PlusIcon size={16} /> : <SettingsIcon size={16} />}</span>
-              <h3 className="edit-modal-title">{svcModal.mode === 'create' ? 'Crear suscripción' : `Editar ${svcForm.name}`}</h3>
-              <button className="edit-modal-close" onClick={() => setSvcModal(null)}><CloseIcon size={16} /></button>
-            </div>
-            <div style={{ padding: '16px 20px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {svcError && <div style={{ background: 'rgba(239,68,68,.1)', color: '#ef4444', padding: '8px 12px', borderRadius: '8px', fontSize: '13px' }}><WarningIcon size={14} /> {svcError}</div>}
-
-              {/* Nombre y clave */}
-              <div className="tools-svc-field-row">
-                <div className="tools-svc-field" style={{ flex: 2 }}>
-                  <label>Nombre del servicio *</label>
-                  <input type="text" className="edit-modal-input" value={svcForm.name} onChange={e => setSvcForm(f => ({ ...f, name: e.target.value }))} placeholder="Ej: Netflix Premium" />
-                </div>
-                <div className="tools-svc-field" style={{ flex: 1 }}>
-                  <label>Clave {svcModal.mode === 'create' ? '(auto)' : ''}</label>
-                  <input type="text" className="edit-modal-input" value={svcModal.mode === 'edit' ? svcModal.key : generateKey(svcForm.name)} disabled style={{ opacity: 0.6 }} />
-                </div>
-              </div>
-
-              {/* Color y Logo */}
-              <div className="tools-svc-field-row">
-                <div className="tools-svc-field">
-                  <label>Color</label>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <input type="color" value={svcForm.color} onChange={e => setSvcForm(f => ({ ...f, color: e.target.value }))} style={{ width: '40px', height: '32px', border: 'none', cursor: 'pointer', borderRadius: '6px' }} />
-                    <input type="text" className="edit-modal-input" value={svcForm.color} onChange={e => setSvcForm(f => ({ ...f, color: e.target.value }))} style={{ flex: 1 }} />
-                  </div>
-                </div>
-                <div className="tools-svc-field" style={{ flex: 2 }}>
-                  <label>Logo (ruta o URL)</label>
-                  <input type="text" className="edit-modal-input" value={svcForm.logo} onChange={e => setSvcForm(f => ({ ...f, logo: e.target.value }))} placeholder="/assets/Servicio.png" />
-                </div>
-              </div>
-
-              {/* Cupos y orden */}
-              <div className="tools-svc-field-row">
-                <div className="tools-svc-field">
-                  <label>Max cupos</label>
-                  <input type="number" className="edit-modal-input" value={svcForm.maxSlots} onChange={e => setSvcForm(f => ({ ...f, maxSlots: e.target.value }))} min={1} max={20} />
-                </div>
-                <div className="tools-svc-field">
-                  <label>Max cuenta real</label>
-                  <input type="number" className="edit-modal-input" value={svcForm.maxSlotsPerRealAccount} onChange={e => setSvcForm(f => ({ ...f, maxSlotsPerRealAccount: e.target.value }))} min={1} max={20} />
-                </div>
-                <div className="tools-svc-field">
-                  <label>Max grupo Lank</label>
-                  <input type="number" className="edit-modal-input" value={svcForm.maxSlotsPerLankGroup} onChange={e => setSvcForm(f => ({ ...f, maxSlotsPerLankGroup: e.target.value }))} min={1} max={20} />
-                </div>
-                <div className="tools-svc-field">
-                  <label>Orden</label>
-                  <input type="number" className="edit-modal-input" value={svcForm.displayOrder} onChange={e => setSvcForm(f => ({ ...f, displayOrder: e.target.value }))} min={1} />
-                </div>
-              </div>
-
-              {/* Tipo de acceso */}
-              <div className="tools-svc-field-row">
-                <div className="tools-svc-field" style={{ flex: 1 }}>
-                  <label>Tipo de acceso *</label>
-                  <select className="edit-modal-input" value={svcForm.accessType} onChange={e => setSvcForm(f => ({ ...f, accessType: e.target.value }))}>
-                    <option value="credentials">Credenciales compartidas</option>
-                    <option value="email_invitation">Invitación por correo</option>
-                    <option value="profile_project">Perfil / proyecto</option>
-                  </select>
-                </div>
-                <div className="tools-svc-field" style={{ flex: 1 }}>
-                  <label>Label personalizado</label>
-                  <input type="text" className="edit-modal-input" value={svcForm.accessTypeLabel} onChange={e => setSvcForm(f => ({ ...f, accessTypeLabel: e.target.value }))} placeholder="Ej: Perfil / proyecto" />
-                </div>
-              </div>
-
-              {/* Toggles */}
-              <div className="tools-svc-field-row">
-                <label className="tools-svc-toggle"><input type="checkbox" checked={svcForm.usesPool} onChange={e => setSvcForm(f => ({ ...f, usesPool: e.target.checked }))} /><span>Usa pool de cuentas reales</span></label>
-                <label className="tools-svc-toggle"><input type="checkbox" checked={svcForm.isRenewalBased} onChange={e => setSvcForm(f => ({ ...f, isRenewalBased: e.target.checked }))} /><span>Basado en renovación</span></label>
-                <label className="tools-svc-toggle"><input type="checkbox" checked={svcForm.active !== false} onChange={e => setSvcForm(f => ({ ...f, active: e.target.checked }))} /><span>Activo</span></label>
-              </div>
-
-              {/* Aliases */}
-              <div className="tools-svc-field">
-                <label>Aliases de nombre (separados por coma)</label>
-                <input type="text" className="edit-modal-input" value={svcAliasInput} onChange={e => setSvcAliasInput(e.target.value)} placeholder="ChatGPT Plus, ChatGPT, GPT" />
-                <span className="tools-svc-hint">Nombres alternativos para detectar en correos de Lank</span>
-              </div>
-
-              {/* Campos de cupo (slotFields) */}
-              <div className="tools-svc-fields-section">
-                <div className="tools-svc-fields-header">
-                  <label>Campos de cupo (cuentas reales)</label>
-                  <button className="tools-btn tools-btn-secondary" onClick={() => addDynField(setSvcSlotFields)} style={{ padding: '4px 10px', fontSize: '12px' }}><PlusIcon size={12} /> Campo</button>
-                </div>
-                {svcSlotFields.map((f, idx) => (
-                  <div key={idx} className="tools-svc-dyn-field">
-                    <input type="text" className="edit-modal-input" placeholder="key" value={f.key} onChange={e => updateDynField(setSvcSlotFields, idx, 'key', e.target.value)} style={{ flex: 1 }} />
-                    <input type="text" className="edit-modal-input" placeholder="Label" value={f.label} onChange={e => updateDynField(setSvcSlotFields, idx, 'label', e.target.value)} style={{ flex: 2 }} />
-                    <input type="text" className="edit-modal-input" placeholder="Placeholder" value={f.placeholder || ''} onChange={e => updateDynField(setSvcSlotFields, idx, 'placeholder', e.target.value)} style={{ flex: 2 }} />
-                    <label className="tools-svc-toggle" style={{ minWidth: 'auto' }}><input type="checkbox" checked={f.required || false} onChange={e => updateDynField(setSvcSlotFields, idx, 'required', e.target.checked)} /><span style={{ fontSize: '11px' }}>Req</span></label>
-                    <button className="crud-icon-btn danger" onClick={() => removeDynField(setSvcSlotFields, idx)} title="Eliminar"><TrashIcon size={12} /></button>
-                  </div>
-                ))}
-              </div>
-
-              {/* Campos de usuario (userFields) */}
-              <div className="tools-svc-fields-section">
-                <div className="tools-svc-fields-header">
-                  <label>Campos de usuario (grupos Lank)</label>
-                  <button className="tools-btn tools-btn-secondary" onClick={() => addDynField(setSvcUserFields)} style={{ padding: '4px 10px', fontSize: '12px' }}><PlusIcon size={12} /> Campo</button>
-                </div>
-                {svcUserFields.map((f, idx) => (
-                  <div key={idx} className="tools-svc-dyn-field">
-                    <input type="text" className="edit-modal-input" placeholder="key" value={f.key} onChange={e => updateDynField(setSvcUserFields, idx, 'key', e.target.value)} style={{ flex: 1 }} />
-                    <input type="text" className="edit-modal-input" placeholder="Label" value={f.label} onChange={e => updateDynField(setSvcUserFields, idx, 'label', e.target.value)} style={{ flex: 2 }} />
-                    <input type="text" className="edit-modal-input" placeholder="Placeholder" value={f.placeholder || ''} onChange={e => updateDynField(setSvcUserFields, idx, 'placeholder', e.target.value)} style={{ flex: 2 }} />
-                    <select className="edit-modal-input" value={f.type || 'text'} onChange={e => updateDynField(setSvcUserFields, idx, 'type', e.target.value === 'text' ? undefined : e.target.value)} style={{ flex: 1 }}>
-                      <option value="text">Texto</option>
-                      <option value="email">Email</option>
-                      <option value="select-day">Día mes</option>
-                    </select>
-                    <label className="tools-svc-toggle" style={{ minWidth: 'auto' }}><input type="checkbox" checked={f.required || false} onChange={e => updateDynField(setSvcUserFields, idx, 'required', e.target.checked)} /><span style={{ fontSize: '11px' }}>Req</span></label>
-                    <button className="crud-icon-btn danger" onClick={() => removeDynField(setSvcUserFields, idx)} title="Eliminar"><TrashIcon size={12} /></button>
-                  </div>
-                ))}
-              </div>
-
-              {/* Vista previa */}
-              {svcForm.name && (
-                <div className="tools-svc-preview">
-                  <span className="tools-svc-preview-label">Vista previa:</span>
-                  <div className="tools-svc-preview-card" style={{ borderLeftColor: svcForm.color }}>
-                    {svcForm.logo && <img src={svcForm.logo} alt="" style={{ width: '24px', height: '24px', borderRadius: '4px' }} onError={e => { e.target.style.display = 'none'; }} />}
-                    <span style={{ fontWeight: 600 }}>{svcForm.name}</span>
-                    <span className={`tools-svc-badge ${svcForm.active !== false ? 'tools-svc-badge-active' : 'tools-svc-badge-inactive'}`}>{svcForm.active !== false ? 'Activo' : 'Inactivo'}</span>
-                    <span className="tools-svc-badge tools-svc-badge-type">{svcForm.usesPool ? 'Pool' : 'Grupo'}</span>
-                  </div>
-                </div>
-              )}
-            </div>
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', padding: '12px 20px', borderTop: '1px solid var(--border-color)' }}>
-              <button className="tools-btn tools-btn-secondary" onClick={() => setSvcModal(null)}>Cancelar</button>
-              <button className="tools-btn tools-btn-primary" onClick={handleSvcSave} disabled={svcSaving}>
-                {svcSaving ? 'Guardando...' : <><SaveIcon size={14} /> {svcModal.mode === 'create' ? 'Crear servicio' : 'Guardar cambios'}</>}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={!!removeSlotConfirm}
+        onClose={() => setRemoveSlotConfirm(null)}
+        onConfirm={handleRemoveSlotConfirm}
+        title="Eliminar cupo"
+        message={removeSlotConfirm ? `¿Eliminar cupo #${(removeSlotConfirm.slot?.slotNumber || removeSlotConfirm.slotIndex + 1)} de ${removeSlotConfirm.accountLabel}? Esta acción no se puede deshacer.` : ''}
+        confirmLabel="Eliminar"
+        danger
+      />
 
       {/* Toast */}
       <Toast {...toast} onClose={() => setToast(prev => ({ ...prev, visible: false }))} />

@@ -618,20 +618,6 @@ def test_generate_alerts_for_accounts_updates_group_and_adds_agent_finding_witho
 
 
 
-def test_purge_legacy_event_state_deletes_analysis_doc_and_pending_events():
-    db = FakeDb(
-        pending_events={
-            "evt_1": {"status": "new"},
-            "evt_2": {"status": "done"},
-        }
-    )
-
-    main.purge_legacy_event_state(db)
-
-    assert "analysis/actionable-events" in db.deleted_docs
-    assert db.collection("pending-events").store == {}
-    assert db.batch_instances
-    assert db.batch_instances[0].commit_calls == 1
     deleted_ids = {ref.id for ref in db.batch_instances[0].deleted_refs}
     assert deleted_ids == {"evt_1", "evt_2"}
 
@@ -671,7 +657,6 @@ def test_analyze_emails_enqueues_adminbot_work_after_saving_latest_report(monkey
         "maxUid": 101,
     })
     monkeypatch.setattr(main, "save_notifications", lambda *args, **kwargs: None)
-    monkeypatch.setattr(main, "purge_legacy_event_state", lambda _db: None)
     monkeypatch.setattr(main, "generate_alerts_for_accounts", lambda *args, **kwargs: (0, {}, [], []))
     monkeypatch.setattr(main, "save_analysis_state", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(main, "update_finance_from_analysis", lambda *_args, **_kwargs: 0)
@@ -759,7 +744,6 @@ def test_scheduled_analysis_enqueues_adminbot_work_for_current_slot(monkeypatch)
         "maxUid": 101,
     })
     monkeypatch.setattr(main, "save_notifications", lambda *args, **kwargs: None)
-    monkeypatch.setattr(main, "purge_legacy_event_state", lambda _db: None)
     monkeypatch.setattr(main, "generate_alerts_for_accounts", lambda *args, **kwargs: (0, {}, [], []))
     monkeypatch.setattr(main, "save_analysis_state", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(main, "update_finance_from_analysis", lambda *_args, **_kwargs: 0)
@@ -811,7 +795,6 @@ def test_analyze_emails_persists_adminbot_latest_state_snapshot(monkeypatch):
     monkeypatch.setattr(main, "load_analysis_state", lambda _db: {"accounts": {}})
     monkeypatch.setattr(main, "load_system_flags", lambda _db: {})
     monkeypatch.setattr(main, "load_alerts_from_firestore", lambda _db: {"alerts": [], "completedAlerts": []})
-    monkeypatch.setattr(main, "purge_legacy_event_state", lambda _db: None)
     monkeypatch.setattr(main, "generate_alerts_for_accounts", lambda *args, **kwargs: (0, {}, [], []))
     monkeypatch.setattr(main, "save_analysis_state", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(main, "update_finance_from_analysis", lambda *_args, **_kwargs: 0)

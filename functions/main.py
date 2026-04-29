@@ -230,11 +230,6 @@ def load_current_state_context(db, name_to_key=None):
     return context
 
 
-def load_pool_data(db, service):
-    """Load service pool data for checking legacy accounts."""
-    fs_key = SERVICE_TO_FS.get(service)
-    if not fs_key:
-        return {}
     try:
         docs = db.collection(f'service-pools/{fs_key}/real-accounts').stream()
         accounts = []
@@ -441,27 +436,6 @@ def classify_event(event, db_context, db=None):
 
     # LEAVE events
     if match['currentFound']:
-        # Check legacy accounts
-        user_in_legacy = False
-        if db:
-            pool_data = load_pool_data(db, service)
-            for pool_acc in pool_data.get('accounts', []):
-                pool_status = pool_acc.get('status', '')
-                if pool_status.startswith('legacy'):
-                    for slot in pool_acc.get('slots', []):
-                        slot_alias = slot.get('memberAlias')
-                        if slot_alias and normalize_alias(slot_alias) == normalize_alias(event.get('userName')):
-                            user_in_legacy = True
-                            break
-                if user_in_legacy:
-                    break
-
-        if user_in_legacy:
-            review['category'] = 'ignore'
-            review['action'] = 'sin acción'
-            review['reason'] = 'usuario en cuenta legacy; no requiere acción'
-            review['matchStatus'] = 'legacy_account_no_action'
-            return review
 
         review['category'] = 'pending'
         review['action'] = 'quitar acceso o confirmar baja'
@@ -876,12 +850,6 @@ def save_notifications(db, account_id, alias, raw_emails, analysis_timestamp=Non
         })
 
 
-def purge_legacy_event_state(db):
-    db.document('analysis/actionable-events').delete()
-    batch = db.batch()
-    count = 0
-    for snap in db.collection('pending-events').stream():
-        batch.delete(snap.reference)
         count += 1
         if count % 200 == 0:
             batch.commit()
@@ -1365,7 +1333,6 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
         # Save report to Firestore
         ok_accounts = [a for a in report['accounts'] if a['access'] == 'ok']
 
-        purge_legacy_event_state(db)
 
         alerts_generated, updated_services, external_notices, agent_findings = generate_alerts_for_accounts(
             db, ok_accounts, alerts_data, services_config=services_config,
@@ -2137,7 +2104,6 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
     # Save report
     ok_accounts = [a for a in report['accounts'] if a['access'] == 'ok']
 
-    purge_legacy_event_state(db)
 
     alerts_generated, _, external_notices, agent_findings = generate_alerts_for_accounts(
         db, ok_accounts, alerts_data, services_config=services_config,

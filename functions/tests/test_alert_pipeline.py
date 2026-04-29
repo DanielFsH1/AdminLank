@@ -41,74 +41,9 @@ def test_build_direct_alerts_attaches_notification_trace_and_business_key():
 
 
 
-def test_build_direct_alerts_deduplicates_against_legacy_pending_alert_without_business_key():
-    event = {
-        "kind": "user_left_self",
-        "subscription": "ChatGPT Plus",
-        "accountId": "12",
-        "accountAlias": "Cuenta 12",
-        "userName": "Mario",
-        "messageId": "<msg-legacy>",
-        "uid": "902",
-    }
-    review = {"category": "pending"}
-    existing = [
-        {
-            "type": "profile_delete",
-            "service": "ChatGPT Plus",
-            "accountId": "12",
-            "userAlias": "Mario",
-            "serviceAccountRef": "Perfil distinto",
-            "status": "pending",
-        }
-    ]
-
-    alerts = build_direct_alerts(
-        event=event,
-        review=review,
-        notification_doc_id="notif_legacy",
-        generated_at=GENERATED_AT,
-        existing_alerts=existing,
-        enrichment={"serviceAccountRef": "Perfil 1"},
-    )
-
-    assert alerts == []
 
 
 
-def test_build_direct_alerts_deduplicates_against_legacy_pending_alert_with_legacy_business_key():
-    event = {
-        "kind": "user_left_self",
-        "subscription": "ChatGPT Plus",
-        "accountId": "12",
-        "accountAlias": "Cuenta 12",
-        "userName": "Mario",
-        "messageId": "<msg-legacy-key>",
-        "uid": "904",
-    }
-    review = {"category": "pending"}
-    existing = [
-        {
-            "type": "profile_delete",
-            "service": "ChatGPT Plus",
-            "accountId": "12",
-            "userAlias": "Mario",
-            "serviceAccountRef": "Perfil distinto",
-            "businessKey": "profile_delete|ChatGPT Plus|12|Mario|Perfil distinto",
-            "status": "pending",
-        }
-    ]
-
-    alerts = build_direct_alerts(
-        event=event,
-        review=review,
-        notification_doc_id="notif_legacy_key",
-        generated_at=GENERATED_AT,
-        existing_alerts=existing,
-        enrichment={"serviceAccountRef": "Perfil 1"},
-    )
-
-    assert alerts == []
 
 
 

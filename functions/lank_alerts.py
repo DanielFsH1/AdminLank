@@ -254,7 +254,6 @@ def generate_renewal_alerts(db, services_config=None):
 
             for user in users:
                 if isinstance(user, str):
-                    continue  # Usuario legacy sin datos estructurados
                 user_alias = user.get('userAlias', '')
                 if not user_alias:
                     continue
@@ -275,11 +274,6 @@ def generate_renewal_alerts(db, services_config=None):
                 alert_type = f'{service_key}_renewal'
                 if find_duplicate(existing_alerts, alert_type, service_name,
                                   str(account_id), user_alias):
-                    continue
-                # Also check legacy type for backward compat
-                if service_key == 'microsoft365' and find_duplicate(
-                        existing_alerts, 'm365_renewal', service_name,
-                        str(account_id), user_alias):
                     continue
 
                 invitation_email = user.get('invitationEmail', '')
@@ -358,7 +352,6 @@ def generate_missing_renewal_alerts(db, services_config=None):
 
             for user in users:
                 if isinstance(user, str):
-                    continue  # Usuario legacy sin datos estructurados
                 user_alias = user.get('userAlias', '')
                 if not user_alias:
                     continue

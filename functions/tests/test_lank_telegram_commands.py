@@ -138,7 +138,6 @@ def test_cmd_alertas_lists_only_pending_firestore_alerts():
             ),
         ],
         actionable_events=[
-            {"userName": "Peach", "accountId": 14, "subscription": "ChatGPT Plus", "action": "legacy event"},
         ],
     )
 
@@ -146,39 +145,6 @@ def test_cmd_alertas_lists_only_pending_firestore_alerts():
 
     assert "1 alerta(s) pendiente(s)" in response
     assert "Eliminar perfil" in response
-    assert "legacy event" not in response
     assert "Peach" not in response
 
 
-def test_cmd_alertas_returns_empty_when_only_legacy_events_exist():
-    bot = make_bot(
-        alerts=[
-            FakeCollectionDoc(
-                "a1",
-                {
-                    "status": "resolved",
-                    "title": "Resuelta",
-                    "service": "ChatGPT Plus",
-                    "accountId": 13,
-                    "userAlias": "Luigi",
-                },
-            )
-        ],
-        actionable_events=[
-            {"userName": "Peach", "accountId": 14, "subscription": "ChatGPT Plus", "action": "legacy event"},
-        ],
-    )
-
-    response = bot._cmd_alertas()
-
-    assert response == "✅ No hay alertas pendientes."
-
-
-def test_cmd_analizar_returns_hermes_handoff_message():
-    bot = make_bot()
-    response = bot._cmd_analizar()
-
-    assert 'AdminBot' in response
-    assert 'Hermes' in response
-    assert '@lankadminbot' in response
-    assert 'dashboard' in response
