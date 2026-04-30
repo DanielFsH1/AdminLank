@@ -392,8 +392,6 @@ export async function removeGroupUser(serviceKey, accountId, userAlias, currentU
     const cancelableTypes = [
       'user_needs_access',
       'missing_phone',
-      `${serviceKey}_renewal`,
-      `${serviceKey}_missing_renewal`,
     ];
     let cancelledCount = 0;
 
@@ -745,42 +743,6 @@ export async function completeUnidentifiedAlert(alertId, serviceKey, accountId, 
       ...(assignedTo ? { assignedTo } : {}),
     });
   }
-}
-
-/**
- * Completa una alerta de renovación o fecha faltante de un servicio renewal-based.
- * Si newRenewDay es proporcionado, actualiza el usuario en el grupo.
- * @param {string} alertId - ID de la alerta
- * @param {string} accountId - ID cuenta Lank
- * @param {string} userAlias - Alias del usuario
- * @param {number|null} newRenewDay - Nuevo día de renovación (null = sin cambio)
- * @param {string} [serviceKey='microsoft365'] - Clave del servicio en Firestore
- */
-export async function completeM365Renewal(alertId, accountId, userAlias, newRenewDay, serviceKey = 'microsoft365') {
-  // Si hay nuevo día de renovación, actualizar el usuario en el grupo
-  if (newRenewDay) {
-    const groupRef = doc(db, `groups/${serviceKey}/lank-accounts/${accountId}`);
-    const { getDoc: getDocument } = await import('firebase/firestore');
-    const snap = await getDocument(groupRef);
-    if (snap.exists()) {
-      const users = snap.data().users || [];
-      const updatedUsers = users.map(u => {
-        if (typeof u === 'object' && normalize(u.userAlias) === normalize(userAlias)) {
-          return { ...u, renewDay: newRenewDay };
-        }
-        return u;
-      });
-      await updateDoc(groupRef, { users: updatedUsers });
-    }
-  }
-
-  // Completar la alerta
-  const alertRef = doc(db, 'alerts', alertId);
-  await updateDoc(alertRef, {
-    status: 'completed',
-    completedAt: nowISO(),
-    ...(newRenewDay ? { newRenewDay } : {}),
-  });
 }
 
 /**

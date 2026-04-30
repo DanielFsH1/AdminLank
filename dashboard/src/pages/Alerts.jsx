@@ -3,7 +3,7 @@ import { useCollection } from '../hooks/useFirestore';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { getServiceMeta, getServiceKeyByName, getPoolServiceKeys, getAllServiceKeys } from '../config/services';
-import { completeAlert, discardAlert, completeUnidentifiedAlert, removeGroupUser, completeM365Renewal, completeMissingPhone } from '../hooks/firestoreActions';
+import { completeAlert, discardAlert, completeUnidentifiedAlert, removeGroupUser, completeMissingPhone } from '../hooks/firestoreActions';
 
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
 import { BellIcon, CalendarIcon, CelebrationIcon, ChatIcon, CheckCircleIcon, ClipboardIcon, CreditCardIcon, DotBlue, DotOrange, DotRed, DotYellow, EditIcon, EmailIcon, EmptyMailIcon, HourglassIcon, KeyIcon, LinkIcon, LockKeyIcon, PhoneIcon, PinIcon, SearchIcon, SparkleIcon, TargetIcon, TrashIcon, WarningIcon, XCircleIcon } from '../components/Icons';
@@ -53,9 +53,6 @@ const TYPE_LABELS = {
  group_deactivated: <><WarningIcon size={16} /> Grupo desactivado</>,
  user_left_expired: <><ClipboardIcon size={16} /> Salida (expirada)</>,
  revoke_invitation: <><EmailIcon size={16} /> Revocar invitación</>,
- m365_renewal: <><CalendarIcon size={16} /> Renovación M365</>,
- microsoft365_renewal: <><CalendarIcon size={16} /> Renovación M365</>,
- microsoft365_missing_renewal: <><WarningIcon size={16} /> Falta fecha de renovación</>,
  missing_phone: <><PhoneIcon size={16} /> Falta teléfono</>,
  credit_cutoff: <><CalendarIcon size={16} /> Corte de crédito</>,
  credit_payment_due: <><CreditCardIcon size={16} /> Pago de crédito</>,
@@ -89,7 +86,6 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  const [confirmComplete, setConfirmComplete] = useState(null); // { alert }
  const [editUserModal, setEditUserModal] = useState(null); // { alert, users }
  const [selectUserModal, setSelectUserModal] = useState(null); // { alert, users }
- const [m365RenewalModal, setM365RenewalModal] = useState(null); // { alert }
  const [missingPhoneModal, setMissingPhoneModal] = useState(null); // { alert }
  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
  const [collapsedGroups, setCollapsedGroups] = useState(new Set()); // IDs de grupos colapsados
@@ -331,37 +327,6 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  setConfirmComplete(null);
  };
 
- // --- M365 Renewal ---
- const handleM365Renewal = (alert) => {
- setM365RenewalModal({ alert });
- };
-
- const handleM365RenewalSave = async (values) => {
- if (!m365RenewalModal) return;
- const { alert } = m365RenewalModal;
- const isMissing = alert.type?.endsWith('_missing_renewal');
- const newDay = values.renewDay ? parseInt(values.renewDay) : null;
- if (isMissing && !newDay) {
-   showToast('Debes seleccionar un día de renovación', 'error');
-   return;
- }
- const serviceKey = alert.serviceKey || 'microsoft365';
- await completeM365Renewal(
-      alert.id || alert.firestoreId,
-      alert.accountId,
-      alert.userAlias,
-      newDay,
-      serviceKey,
- );
- showToast(
-      isMissing
-        ? `Fecha de renovación asignada: día ${newDay} para ${alert.userAlias}`
-        : newDay && newDay !== alert.currentRenewDay
-        ? `Renovación completada. Nueva fecha: día ${newDay}`
-        : `Renovación completada para ${alert.userAlias}`
- );
- };
-
  // --- Missing Phone ---
  const handleMissingPhone = (alert) => {
    setMissingPhoneModal({ alert });
@@ -461,10 +426,6 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
         ) : alert.type === 'missing_phone' ? (
           <button className="alert-action-btn assign" onClick={() => handleMissingPhone(alert)}>
             <PhoneIcon size={16} /> Escribir número
-          </button>
-        ) : alert.type === 'm365_renewal' || alert.type?.endsWith('_renewal') || alert.type?.endsWith('_missing_renewal') ? (
-          <button className="alert-action-btn complete" onClick={() => handleM365Renewal(alert)}>
-            <CalendarIcon size={16} /> {alert.type?.endsWith('_missing_renewal') ? 'Asignar fecha' : 'Renovar'}
           </button>
         ) : alert.type === 'sim_recharge' ? (
           <button className="alert-action-btn complete" onClick={() => onNavigate?.('sim-cards')}>
@@ -778,55 +739,6 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
         confirmLabel={<><CheckCircleIcon size={16} /> Sí, completar</>}
         icon={<CheckCircleIcon size={16} />}
       />
-      {/* Modal: Renovación M365 / Fecha faltante */}
-      <EditModal
-        open={!!m365RenewalModal}
-        onClose={() => setM365RenewalModal(null)}
-        onSave={handleM365RenewalSave}
-        title={m365RenewalModal?.alert?.type?.endsWith('_missing_renewal')
-          ? `Asignar fecha de renovación — ${m365RenewalModal?.alert?.service || 'Servicio'}`
-          : `Renovación de ${m365RenewalModal?.alert?.service || 'Microsoft 365'}`}
-        icon=""
-        fields={[
-          {
-            key: 'renewDay',
-            label: m365RenewalModal?.alert?.type?.endsWith('_missing_renewal')
-              ? 'Día de renovación mensual (obligatorio)'
-              : 'Día de renovación para el próximo mes',
-            type: 'select-day',
-            placeholder: m365RenewalModal?.alert?.type?.endsWith('_missing_renewal')
-              ? 'Seleccionar día del mes'
-              : 'Seleccionar día (dejar vacío = mantener actual)',
-            hint: m365RenewalModal?.alert?.type?.endsWith('_missing_renewal')
-              ? 'Este usuario no tiene día de renovación. Selecciona el día del mes en que se renueva su suscripción.'
-              : m365RenewalModal?.alert?.currentRenewDay
-              ? `Día actual: ${m365RenewalModal.alert.currentRenewDay}. Déjalo vacío para mantenerlo igual.`
-              : 'Selecciona el día del mes para la próxima renovación.',
-          },
-        ]}
-        initialValues={{ renewDay: m365RenewalModal?.alert?.currentRenewDay || '' }}
-        saveLabel={m365RenewalModal?.alert?.type?.endsWith('_missing_renewal') ? 'Guardar fecha' : 'Renovación completada'}
-        confirmMessage={
-          m365RenewalModal
-            ? m365RenewalModal.alert.type?.endsWith('_missing_renewal')
-              ? `¿Asignar fecha de renovación a "${m365RenewalModal.alert.userAlias}" del grupo #${m365RenewalModal.alert.accountId}?`
-              : `¿Confirmar renovación de ${m365RenewalModal.alert.service || 'M365'} para "${m365RenewalModal.alert.userAlias}" del grupo #${m365RenewalModal.alert.accountId}?`
-            : ''
-        }
-      >
-        {m365RenewalModal && (
-          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '4px' }}>
-            <strong style={{ color: 'var(--text-primary)' }}>{m365RenewalModal.alert.userAlias}</strong>
-            {m365RenewalModal.alert.invitationEmail && (
-              <span> — <EmailIcon size={16} /> {m365RenewalModal.alert.invitationEmail}</span>
-            )}
-            <div style={{ marginTop: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
-              Grupo #{m365RenewalModal.alert.accountId} — {m365RenewalModal.alert.accountAlias}
-            </div>
-          </div>
-        )}
-      </EditModal>
-
       {/* Modal: Teléfono faltante */}
       <EditModal
         open={!!missingPhoneModal}

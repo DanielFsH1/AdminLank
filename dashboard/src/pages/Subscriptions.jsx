@@ -1186,8 +1186,6 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
                         {acct.billingDay && <span><CalendarIcon size={16} /> Día {acct.billingDay}</span>}
                         {acct.cardLabel && <span><CreditCardIcon size={16} /> {acct.cardLabel}</span>}
                         {acct.billingDay && <span><CashIcon size={16} /> {acct.monthlyCost > 0 ? `$${acct.monthlyCost}/mes` : 'Monto pendiente'}</span>}
-                        {acct.expiresAt && <span><ClockIcon size={16} /> Expira: {acct.expiresAt}</span>}
-                        {acct.cancelOn && <span><ClockIcon size={16} /> Cancela: {acct.cancelOn}</span>}
                         {acct.autoRenewEnabled === false && <span className="badge badge-warning" style={{ fontSize: '10px' }}>Sin renovación</span>}
                       </div>
                     </div>

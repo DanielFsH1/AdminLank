@@ -79,7 +79,6 @@ export const SERVICES = {
       { key: 'userAlias', label: 'Alias del usuario', required: true, placeholder: 'Nombre visible del usuario' },
       { key: 'phone', label: 'Teléfono', placeholder: '+52...' },
       { key: 'invitationEmail', label: 'Correo de invitación', type: 'email', placeholder: 'correo@ejemplo.com' },
-      { key: 'renewDay', label: 'Día de renovación (1-31)', type: 'select-day', placeholder: 'Seleccionar día del mes' },
     ],
   },
 };

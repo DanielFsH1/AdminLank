@@ -306,9 +306,6 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
       parts.push({ label: 'Cuenta real', value: refLabel, icon: <LinkIcon size={16} /> });
  }
  if (user.serviceStatus) parts.push({ label: 'Estado', value: user.serviceStatus, icon: <ClipboardIcon size={16} /> });
- if (user.cancelOn && user.cancelOn !== 'N/D') parts.push({ label: 'Cancela', value: user.cancelOn, icon: <CalendarIcon size={16} /> });
- if (user.renewDay) parts.push({ label: 'Renueva', value: `Día ${user.renewDay} de cada mes`, icon: <CalendarIcon size={16} /> });
- else if (user.renewDate && user.renewDate !== 'N/D') parts.push({ label: 'Renueva', value: user.renewDate, icon: <CalendarIcon size={16} /> });
  return parts.length > 0 ? parts : null;
  };
 

@@ -92,7 +92,6 @@ def _build_candidates(
             service_account_ref=(enrichment or {}).get("serviceAccountRef"),
             other_users=(enrichment or {}).get("otherUsers"),
             real_account_email=(enrichment or {}).get("realAccountEmail"),
-            real_account_expires=(enrichment or {}).get("realAccountExpires"),
             services_config=services_config,
         )
     if event_kind in JOIN_EVENT_KINDS:

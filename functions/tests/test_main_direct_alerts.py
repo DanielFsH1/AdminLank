@@ -286,7 +286,6 @@ def test_generate_alerts_for_accounts_creates_direct_alerts_and_external_notices
                 {
                     "serviceAccountRef": "Perfil 1",
                     "email": "perfil1@example.com",
-                    "expiresAt": "2026-05-01T00:00:00+00:00",
                     "status": "active",
                 }
             ]
@@ -318,7 +317,6 @@ def test_generate_alerts_for_accounts_creates_direct_alerts_and_external_notices
     assert leave_call["enrichment"]["serviceAccountRef"] == "Perfil 1"
     assert leave_call["enrichment"]["otherUsers"] == ["Luigi"]
     assert leave_call["enrichment"]["realAccountEmail"] == "perfil1@example.com"
-    assert leave_call["enrichment"]["realAccountExpires"] == "2026-05-01T00:00:00+00:00"
     assert leave_call["enrichment"]["realAccountStatus"] == "active"
     assert leave_call["enrichment"]["groupStatus"] == "active"
 
@@ -655,7 +653,6 @@ def test_analyze_emails_enqueues_adminbot_work_after_saving_latest_report(monkey
     monkeypatch.setattr(main, "save_analysis_state", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(main, "update_finance_from_analysis", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(main, "cleanup_old_data", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(main.lank_alerts, "generate_missing_renewal_alerts", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(main.lank_alerts, "generate_missing_phone_alerts", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(main.lank_alerts, "generate_credit_alerts", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(main.lank_alerts, "generate_sim_recharge_alerts", lambda *_args, **_kwargs: 0)
@@ -743,8 +740,6 @@ def test_scheduled_analysis_enqueues_adminbot_work_for_current_slot(monkeypatch)
     monkeypatch.setattr(main, "update_finance_from_analysis", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(main, "cleanup_old_data", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(main, "load_schedule_config", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(main.lank_alerts, "generate_renewal_alerts", lambda *_args, **_kwargs: 0)
-    monkeypatch.setattr(main.lank_alerts, "generate_missing_renewal_alerts", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(main.lank_alerts, "generate_missing_phone_alerts", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(main.lank_alerts, "generate_credit_alerts", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(main.lank_alerts, "generate_sim_recharge_alerts", lambda *_args, **_kwargs: 0)
@@ -793,7 +788,6 @@ def test_analyze_emails_persists_adminbot_latest_state_snapshot(monkeypatch):
     monkeypatch.setattr(main, "save_analysis_state", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(main, "update_finance_from_analysis", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(main, "cleanup_old_data", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(main.lank_alerts, "generate_missing_renewal_alerts", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(main.lank_alerts, "generate_missing_phone_alerts", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(main.lank_alerts, "generate_credit_alerts", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(main.lank_alerts, "generate_sim_recharge_alerts", lambda *_args, **_kwargs: 0)

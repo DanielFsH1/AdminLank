@@ -609,14 +609,12 @@ def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=N
                         pass
 
                 real_email = None
-                real_expires = None
                 real_status = None
                 if svc_ref and fs_key:
                     pool_data = load_pool_data(db, service)
                     for pacc in pool_data.get('accounts', []):
                         if pacc.get('serviceAccountRef') == svc_ref:
                             real_email = pacc.get('email')
-                            real_expires = pacc.get('cancelOn') or pacc.get('expiresAt') or pacc.get('renewalDate')
                             real_status = pacc.get('status', '')
                             break
 
@@ -640,7 +638,6 @@ def generate_alerts_for_accounts(db, ok_accounts, alerts_data, services_config=N
                     'serviceAccountRef': svc_ref,
                     'otherUsers': other_users,
                     'realAccountEmail': real_email,
-                    'realAccountExpires': real_expires,
                     'realAccountStatus': real_status,
                 }
 
@@ -1242,8 +1239,8 @@ def update_group_on_leave(db, service, account_id, user_alias, reason=''):
             for alert_doc in pending_alerts:
                 alert = alert_doc.to_dict()
                 a_type = alert.get('type', '')
-                # Solo cancelar alertas de renovación, teléfono faltante y renewDay faltante
-                if any(k in a_type for k in ('renewal', 'missing_phone', 'missing_renewal')):
+                # Solo cancelar alertas de teléfono faltante
+                if 'missing_phone' in a_type:
                     alert_doc.reference.update({
                         'status': 'cancelled_by_system',
                         'completedAt': datetime.now(timezone.utc).isoformat(),
@@ -1458,11 +1455,6 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
             'generatedAt': report['generatedAt'],
         }
 
-        # Detectar usuarios sin fecha de renovación en servicios renewal-based
-        missing_renewal_count = lank_alerts.generate_missing_renewal_alerts(db, services_config)
-        if missing_renewal_count > 0:
-            print(f'Missing renewal date alerts generated: {missing_renewal_count}')
-            alerts_generated += missing_renewal_count
 
         # Detectar usuarios sin teléfono (preparación para WhatsApp)
         missing_phone_count = lank_alerts.generate_missing_phone_alerts(db, services_config)
@@ -2231,17 +2223,6 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
     except Exception as ac_err:
         print(f'[Auto-cleanup] Error no fatal: {ac_err}')
 
-    # Revisar renovaciones de servicios con isRenewalBased (Microsoft 365, etc.)
-    renewal_count = lank_alerts.generate_renewal_alerts(db, services_config)
-    if renewal_count > 0:
-        print(f'Renewal alerts generated: {renewal_count}')
-
-    # Detectar usuarios sin fecha de renovación en servicios renewal-based
-    missing_renewal_count = lank_alerts.generate_missing_renewal_alerts(db, services_config)
-    if missing_renewal_count > 0:
-        print(f'Missing renewal date alerts generated: {missing_renewal_count}')
-    renewal_count += missing_renewal_count
-
     # Detectar usuarios sin teléfono (preparación para WhatsApp)
     missing_phone_count = lank_alerts.generate_missing_phone_alerts(db, services_config)
     if missing_phone_count > 0:
@@ -2269,7 +2250,7 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
         report=report,
         ok_accounts=ok_accounts,
         failed_accounts=failed_accounts,
-        alerts_generated=alerts_generated + renewal_count,
+        alerts_generated=alerts_generated,
         extra_findings=agent_findings,
         finance_records=finance_records if 'finance_records' in locals() else 0,
         schedule_config=schedule_config,
@@ -2283,7 +2264,7 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
             notified = False
 
             # Calcular total de alertas generadas (primera capa)
-            total_alerts = alerts_generated + renewal_count
+            total_alerts = alerts_generated
 
             # 1. Alertas de Firestore con status pending (incluye primera capa)
             if total_alerts > 0:
@@ -2297,7 +2278,7 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
                     tg.send_alert_notification(alert_dicts)
                     notified = True
                     print(f'[Telegram] Notificación enviada: {len(alert_dicts)} alertas '
-                          f'(scripts: {alerts_generated}, renewal: {renewal_count})')
+                          f'(scripts: {alerts_generated})')
 
             # 2. FALLBACK FINAL: Siempre buscar alertas pending recientes
             #    (cubre correos con formato nuevo que los scripts no detectaron)
