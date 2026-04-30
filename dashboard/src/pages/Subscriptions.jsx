@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { collection, doc, getDoc, getDocs, where, onSnapshot } from 'firebase/firestore';
+import { collection, doc, getDoc, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useCollection, useDocument } from '../hooks/useFirestore';
 import { SERVICES, getServiceMeta, getProfileImage, getPoolServiceKeys, getNonPoolServiceKeys, getAllServiceKeys, getSlotFields, getExpectedSlotFields, getUserFields } from '../config/services';
@@ -7,7 +7,7 @@ import {
   updateSlot, updateGroupUser, removeGroupUser, moveUserBetweenAccounts,
   DEFAULT_MASTER_CONFIG, initSubscriptionMasterConfig,
   addSlotToRealAccount, removeSlotFromRealAccount,
-  updateGroupEnabledSlots, createManualAlert,
+  updateGroupEnabledSlots, createManualAlert, completeAlert,
 } from '../hooks/firestoreActions';
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
 import { BlockIcon, CalendarIcon, CashIcon, ClockIcon, CloseIcon, CreditCardIcon, DotGray, DotGreen, EditIcon, EmailIcon, FolderIcon, KeyIcon, LinkIcon, LockKeyIcon, PlusIcon, PointUpIcon, RefreshIcon, SaveIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, WarningIcon } from '../components/Icons';
@@ -44,7 +44,7 @@ function getMissingFields(svcId, slot) {
 }
 
 export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
- const { data: pools } = useCollection('service-pools', { realtime: true });
+ const { data: pools, refetch: refetchPools } = useCollection('service-pools', { realtime: true });
  const { data: masterConfigDoc, loading: masterConfigLoading } = useDocument('config', 'services', { realtime: true });
  const [poolDetails, setPoolDetails] = useState({});
  const [groupDetails, setGroupDetails] = useState({});
@@ -53,6 +53,7 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  const [highlightRef, setHighlightRef] = useState(null);
  const [highlightUser, setHighlightUser] = useState(null);
  const [pendingUserAliases, setPendingUserAliases] = useState(new Set());
+ const [slotAlerts, setSlotAlerts] = useState([]);
  const [searchQuery, setSearchQuery] = useState('');
  const [searchResults, setSearchResults] = useState(null);
 
@@ -120,28 +121,29 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  }
  }, [navData]);
 
- // Derivar aliases con acción pendiente desde alertas pendientes
- useEffect(() => {
- async function loadPendingUsers() {
-      try {
-        const { query, where, getDocs: fetchDocs } = await import('firebase/firestore');
-        const q = query(collection(db, 'alerts'), where('status', '==', 'pending'));
-        const snap = await fetchDocs(q);
-        const aliases = new Set();
-        snap.docs.forEach(d => {
-          const alias = (d.data().userAlias || '').toLowerCase();
-          if (alias) aliases.add(alias);
-        });
-        setPendingUserAliases(aliases);
-      } catch (err) { console.error('Error cargando alertas pendientes:', err); }
- }
- loadPendingUsers();
- }, []);
-
- // Alertas password_change pendientes — query filtrada en lugar de descargar todas
- const { data: pendingPasswordAlerts } = useCollection('alerts', {
-   constraints: [where('type', '==', 'password_change'), where('status', '==', 'pending')],
+ // Alertas pendientes en tiempo real
+ const { data: pendingAlerts } = useCollection('alerts', {
+   constraints: [where('status', '==', 'pending')],
  });
+
+ useEffect(() => {
+   const aliases = new Set();
+   const alerts = [];
+   (pendingAlerts || []).forEach((data) => {
+     const alias = (data.userAlias || '').toLowerCase();
+     if (alias) aliases.add(alias);
+     if (data.type === 'slot_pending_deletion' || data.type === 'access_verify') {
+       alerts.push(data);
+     }
+   });
+   setPendingUserAliases(aliases);
+   setSlotAlerts(alerts);
+ }, [pendingAlerts]);
+
+ const pendingPasswordAlerts = useMemo(
+   () => (pendingAlerts || []).filter((a) => a.type === 'password_change'),
+   [pendingAlerts],
+ );
 
  // Helper: ¿tiene esta cuenta real una alerta de password_change pendiente?
  const getPasswordAlert = useCallback((serviceAccountRef) => {
@@ -580,6 +582,8 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  }
 
  showToast(`Cupo #${slotIndex + 1} actualizado en ${editSlotModal.accountLabel}`);
+ refetchPools();
+ refreshSubscriptionsData();
  };
 
  const handleSlotClear = (serviceKey, acct, slotIndex) => {
@@ -673,17 +677,7 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
          description: `Cambiar contrasena de ${acctLabel}. El cupo de ${oldSlot.memberAlias} fue liberado manualmente.`,
        });
 
-       if (otherUsers.length > 0) {
-         await createManualAlert({
-           ...baseAlert,
-           type: 'access_verify',
-           priority: 'medium',
-           title: `Verificar acceso - ${serviceName}`,
-           description: `Despues de cambiar la contrasena de ${acctLabel}, verificar que estos usuarios aun tengan acceso: ${otherUsers.join(', ')}`,
-           dependsOn: 'password_change',
-           affectedUsers: otherUsers,
-         });
-       }
+       void otherUsers;
      } catch (err) {
        console.error('Error generando alertas de cambio de contraseña al liberar cupo:', err);
      }
@@ -691,6 +685,8 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  }
 
  showToast(`Cupo #${slotIndex + 1} liberado de ${clearSlotConfirm.accountLabel}`);
+ refetchPools();
+ refreshSubscriptionsData();
  setClearSlotConfirm(null);
  };
 
@@ -748,6 +744,8 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
         lankInfo,
       );
       showToast(`${slot.memberAlias} movido de ${moveSlotModal.accountLabel} a ${destAcct.label || destAcct.id}`);
+      refetchPools();
+      refreshSubscriptionsData();
  } catch (err) {
       showToast(`Error al mover: ${err.message}`, 'error');
  }
@@ -768,6 +766,8 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  await updateGroupUser(serviceKey, accountId, userIndex, updatedUser, allUsers);
  const svcName = getServiceMeta(serviceKey).name;
  showToast(`Usuario ${svcName} actualizado en ${groupEditModal.accountLabel}`);
+ refetchPools();
+ refreshSubscriptionsData();
  };
 
  const handleGroupBajaConfirm = async () => {
@@ -776,6 +776,8 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  await removeGroupUser(serviceKey, accountId, userAlias, allUsers, 'Baja manual desde Suscripciones');
  const svcName = getServiceMeta(serviceKey).name;
  showToast(`${userAlias} dado de baja de ${svcName} en ${groupBajaConfirm.accountLabel}`);
+ refetchPools();
+ refreshSubscriptionsData();
  setGroupBajaConfirm(null);
  };
 
@@ -787,6 +789,7 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
    try {
      await addSlotToRealAccount(serviceKey, acct.id, acct.slots || []);
      showToast(`Cupo #${(acct.slots || []).length + 1} agregado a ${acct.label || acct.id}`);
+     refetchPools();
      await refreshSubscriptionsData();
    } catch (err) {
      showToast(err.message, 'error');
@@ -811,6 +814,7 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
    try {
      await removeSlotFromRealAccount(serviceKey, accountRef, slotIndex, allSlots);
      showToast(`Cupo eliminado de ${removeSlotConfirm.accountLabel}`);
+     refetchPools();
      await refreshSubscriptionsData();
    } catch (err) {
      showToast(err.message, 'error');
@@ -824,8 +828,62 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
      const enabled = !disabledSlots.includes(idx);
      await updateGroupEnabledSlots(serviceKey, group.id, idx, !enabled, group.users || [], disabledSlots);
      showToast(`${enabled ? 'Cupo deshabilitado' : 'Cupo habilitado'} en grupo #${group.accountId}`);
+     refetchPools();
+     refreshSubscriptionsData();
    } catch (err) {
      showToast(err.message, 'error');
+   }
+ };
+
+ // ─── HELPERS Y HANDLERS PARA ALERTAS DE SLOT ───
+
+ const getSlotAlert = useCallback((serviceAccountRef, slotNumber, memberAlias, type) => {
+   return slotAlerts.find(a =>
+     a.serviceAccountRef === serviceAccountRef &&
+     a.type === type &&
+     (a.slotNumber === slotNumber ||
+       (a.userAlias || '').toLowerCase() === (memberAlias || '').toLowerCase())
+   );
+ }, [slotAlerts]);
+
+ const handleConfirmSlotDeletion = async (alert, serviceKey, accountRef, slotIndex, allSlots) => {
+   try {
+     const oldSlot = allSlots[slotIndex];
+     const clearedSlot = {
+       slotNumber: oldSlot.slotNumber || slotIndex + 1,
+       status: 'free',
+       memberAlias: '',
+       memberEmail: '',
+       profileName: '',
+       projectName: '',
+       assignedFrom: null,
+     };
+     await updateSlot(serviceKey, accountRef, slotIndex, clearedSlot, allSlots);
+     await completeAlert(alert.id, { resolvedVia: 'subscriptions' });
+
+     // Fix HIGH #2: Also complete any orphaned access_verify alerts for this user+account
+     const orphanedVerifyAlerts = slotAlerts.filter(a =>
+       a.type === 'access_verify' &&
+       a.serviceAccountRef === accountRef &&
+       (a.userAlias || '').toLowerCase() === (oldSlot.memberAlias || '').toLowerCase() &&
+       a.id !== alert.id
+     );
+     for (const orphan of orphanedVerifyAlerts) {
+       await completeAlert(orphan.id, { resolvedVia: 'subscriptions', cancelReason: 'user_deleted' });
+     }
+
+      showToast(`Eliminación de ${oldSlot.memberAlias} confirmada`);
+   } catch (err) {
+     showToast(`Error confirmando eliminación: ${err.message}`, 'error');
+   }
+ };
+
+ const handleVerifyAccess = async (alert) => {
+   try {
+     await completeAlert(alert.id, { resolvedVia: 'subscriptions' });
+      showToast(`Acceso verificado para ${alert.userAlias}`);
+   } catch (err) {
+     showToast(`Error verificando acceso: ${err.message}`, 'error');
    }
  };
 
@@ -840,15 +898,23 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  const missing = getMissingFields(serviceKey, slot);
  const isUserHighlighted = highlightUser && slot.memberAlias &&
       slot.memberAlias.toLowerCase() === highlightUser.toLowerCase();
+ const slotNum = slot.slotNumber || idx + 1;
+ const deletionAlert = isOccupied ? getSlotAlert(acct.id, slotNum, slot.memberAlias, 'slot_pending_deletion') : null;
+ const verifyAlert = isOccupied ? getSlotAlert(acct.id, slotNum, slot.memberAlias, 'access_verify') : null;
  const hasPendingAction = slot.memberAlias &&
       pendingUserAliases.has(slot.memberAlias.toLowerCase());
  const isSearchMatch = searchResults && searchResults.slots.has(`${serviceKey}:${acct.id}:${idx}`);
  const primaryLabel = isEmpty ? 'Llenar' : 'Editar';
 
+ let slotColorClass = '';
+ if (deletionAlert) slotColorClass = 'slot-pending-deletion';
+ else if (verifyAlert) slotColorClass = 'slot-access-verify';
+ else if (hasPendingAction) slotColorClass = 'pending-action-slot';
+
  return (
       <div
         key={idx}
-        className={`slot-item ${isOccupied ? 'occupied' : ''} ${isEmpty ? 'free' : ''} ${isDisabled ? 'disabled' : ''} ${hasLink ? 'clickable' : ''} ${isUserHighlighted ? 'highlight-user-pulse' : ''} ${hasPendingAction ? 'pending-action-slot' : ''} ${isSearchMatch ? 'search-match-slot' : ''}`}
+        className={`slot-item ${isOccupied ? 'occupied' : ''} ${isEmpty ? 'free' : ''} ${isDisabled ? 'disabled' : ''} ${hasLink ? 'clickable' : ''} ${isUserHighlighted ? 'highlight-user-pulse' : ''} ${slotColorClass} ${isSearchMatch ? 'search-match-slot' : ''}`}
         data-user-alias={slot.memberAlias ? slot.memberAlias.toLowerCase() : ''}
         onClick={() => hasLink && onNavigate && onNavigate('accounts', { accountId: acctId, serviceKey, userAlias: slot.memberAlias || slot.assignedFrom?.canonicalAlias || null })}
         style={hasLink ? { cursor: 'pointer' } : {}}
@@ -863,7 +929,7 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
           />
         )}
         <div className="slot-info">
-          <div className="slot-number">Cupo #{slot.slotNumber || idx + 1}</div>
+          <div className="slot-number">Cupo #{slotNum}</div>
           <div className="slot-user" style={{ color: isDisabled ? 'var(--text-muted)' : isEmpty ? 'var(--text-muted)' : 'var(--text-primary)' }}>
             {isDisabled && isEmpty ? 'Cupo deshabilitado' : slot.memberAlias || (isEmpty ? 'Disponible' : 'Ocupado')}
           </div>
@@ -885,6 +951,36 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
           {isOccupied && missing.length > 0 && (
             <div className="slot-missing-info">
               <WarningIcon size={16} /> Falta: {missing.join(', ')}
+            </div>
+          )}
+          {deletionAlert && (
+            <div className="slot-alert-reason red">
+              <WarningIcon size={14} /> {deletionAlert.reason || 'Eliminacion pendiente'}
+            </div>
+          )}
+          {!deletionAlert && verifyAlert && (
+            <div className="slot-alert-reason blue">
+              <KeyIcon size={14} /> {verifyAlert.reason || 'Verificar acceso tras cambio de contrasena'}
+            </div>
+          )}
+          {deletionAlert && (
+            <div className="slot-alert-actions" onClick={(e) => e.stopPropagation()}>
+              <button
+                className="slot-action-btn red"
+                onClick={() => handleConfirmSlotDeletion(deletionAlert, serviceKey, acct.id, idx, acct.slots)}
+              >
+                <TrashIcon size={14} /> Confirmar eliminacion
+              </button>
+            </div>
+          )}
+          {!deletionAlert && verifyAlert && (
+            <div className="slot-alert-actions" onClick={(e) => e.stopPropagation()}>
+              <button
+                className="slot-action-btn blue"
+                onClick={() => handleVerifyAccess(verifyAlert)}
+              >
+                <KeyIcon size={14} /> Verificar acceso
+              </button>
             </div>
           )}
 

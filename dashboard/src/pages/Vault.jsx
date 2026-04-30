@@ -436,8 +436,11 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
  }, []);
 
  const refreshVaultData = useCallback(async () => {
-   await loadAlerts();
- }, [loadAlerts]);
+   const results = await Promise.allSettled([loadPools(), loadSecrets(), loadCards(), loadAlerts()]);
+   if (results.some(result => result.status === 'rejected')) {
+     showToast('Algunos datos no se pudieron recargar; puede que veas información desactualizada.', 'error');
+   }
+ }, [loadPools, loadSecrets, loadCards, loadAlerts, showToast]);
 
  // Load real accounts
  useEffect(() => {
@@ -770,6 +773,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
      await updateVaultEmailAccount(googleEditModal.id, updatePayload);
      showToast('Cuenta actualizada correctamente');
      setGoogleEditModal(null);
+     await refreshVaultData();
    } catch (err) {
      showToast(err.message || 'Error al actualizar la cuenta', 'error');
    }
@@ -807,6 +811,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
        showToast('Cuenta secundaria creada correctamente');
      }
      setGoogleCreateModal(null);
+    await refreshVaultData();
    } catch (err) {
      showToast(err.message || 'Error al crear la cuenta', 'error');
    }
@@ -829,6 +834,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
  if (existing.exists()) { await updateDoc(ref, encrypted); }
  else { await setDoc(ref, { ...encrypted, createdAt: new Date().toISOString() }); }
  showToast('Tarjeta guardada');
+ await refreshVaultData();
  };
 
  // ─── OPEN EDIT CREDENTIAL ───
@@ -988,6 +994,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
    }
    showToast(`Cuenta real "${accountData.label}" creada en ${getServiceMeta(serviceKey).name}`);
    setCreateModal(null);
+   await refreshVaultData();
  } catch (err) {
    showToast(err.message || 'Error al crear la cuenta', 'error');
  }
@@ -1010,6 +1017,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
         await deleteRealAccount(svc, acct.serviceAccountRef || acct.id);
         showToast(`Cuenta "${acct.label}" eliminada`);
         setConfirmDialog(null);
+        await refreshVaultData();
       },
       onCancel: () => setConfirmDialog(null),
  });
@@ -1038,6 +1046,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
  await createVaultCard(id, data);
  showToast(`Tarjeta "${createValues.bank} ****${derivedLast4}" creada`);
  setCreateModal(null);
+ await refreshVaultData();
  };
 
  // ─── DELETE CARD ───
@@ -1056,6 +1065,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
         await deleteVaultCard(cardId);
         showToast(`Tarjeta "${cardLabel}" eliminada`);
         setConfirmDialog(null);
+        await refreshVaultData();
       },
       onCancel: () => setConfirmDialog(null),
  });
@@ -1157,6 +1167,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
         showToast(`Cobro recurrente "${recurringValues.description}" añadido y cuenta real actualizada`);
       }
       setRecurringModal(null);
+      await refreshVaultData();
  } catch (err) {
       showToast('Error: ' + err.message, 'error');
  }
@@ -1171,6 +1182,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
         await removeRecurringCharge(cardId, charge.id);
         showToast(`Cobro "${charge.description}" eliminado`);
         setConfirmDialog(null);
+        await refreshVaultData();
       },
       onCancel: () => setConfirmDialog(null),
  });
@@ -1180,6 +1192,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
  try {
       await toggleRecurringCharge(cardId, charge.id, !charge.active);
       showToast(`Cobro "${charge.description}" ${charge.active ? 'desactivado' : 'activado'}`);
+      await refreshVaultData();
  } catch (err) {
       showToast('Error: ' + err.message, 'error');
  }
@@ -1856,6 +1869,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
                       try {
                         await deleteVaultEmailAccount(s.id);
                         showToast(`Cuenta "${s.email}" eliminada`);
+                        await refreshVaultData();
                       } catch (err) {
                         showToast(err.message || 'Error al eliminar', 'error');
                       }
