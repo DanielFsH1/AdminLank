@@ -254,6 +254,7 @@ def generate_renewal_alerts(db, services_config=None):
 
             for user in users:
                 if isinstance(user, str):
+                    continue
                 user_alias = user.get('userAlias', '')
                 if not user_alias:
                     continue
@@ -352,6 +353,7 @@ def generate_missing_renewal_alerts(db, services_config=None):
 
             for user in users:
                 if isinstance(user, str):
+                    continue
                 user_alias = user.get('userAlias', '')
                 if not user_alias:
                     continue

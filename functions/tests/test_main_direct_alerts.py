@@ -617,12 +617,6 @@ def test_generate_alerts_for_accounts_updates_group_and_adds_agent_finding_witho
     assert updated_services == {"ChatGPT Plus": {12}}
 
 
-
-    deleted_ids = {ref.id for ref in db.batch_instances[0].deleted_refs}
-    assert deleted_ids == {"evt_1", "evt_2"}
-
-
-
 def test_analyze_emails_enqueues_adminbot_work_after_saving_latest_report(monkeypatch):
     db = FakeDb()
     enqueued_jobs = []

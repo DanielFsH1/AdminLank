@@ -283,6 +283,23 @@ def load_alerts_from_firestore(db):
             'completedAlerts': [a for a in alerts if a.get('status') in ('completed', 'done', 'discarded', 'cancelled_by_ai', 'resolved')]}
 
 
+def load_pool_data(db, service):
+    """Load service pool data for enriching alerts."""
+    fs_key = SERVICE_TO_FS.get(service)
+    if not fs_key:
+        return {}
+    try:
+        docs = db.collection(f'service-pools/{fs_key}/real-accounts').stream()
+        accounts = []
+        for d in docs:
+            acc = d.to_dict()
+            acc['serviceAccountRef'] = acc.get('serviceAccountRef', d.id)
+            accounts.append(acc)
+        return {'accounts': accounts}
+    except Exception:
+        return {}
+
+
 def save_alert_to_firestore(db, alert, created_at=None):
     stored_alert = dict(alert)
     aid = stored_alert.get('id') or stored_alert.get('_docId') or f"alert_{uuid4().hex[:12]}"
