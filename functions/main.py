@@ -970,6 +970,32 @@ def _ensure_month_rollover(db, current_month_key):
             months_list.append(current_month_key)
 
         zero_totals = {k: 0 for k in old_totals}
+
+        # Recalculate manual expenses already confirmed for the new month
+        ledger_doc = db.document('finance/manual-ledger').get()
+        if ledger_doc.exists:
+            entries = ledger_doc.to_dict().get('entries', [])
+            for entry in entries:
+                eff = entry.get('effectiveAt', '')
+                if not eff.startswith(current_month_key):
+                    continue
+                if entry.get('status') != 'confirmed':
+                    continue
+                amount = float(entry.get('amount') or 0)
+                etype = entry.get('type', '')
+                if etype in ('expense', 'investment'):
+                    zero_totals['manualExpensesGross'] = zero_totals.get('manualExpensesGross', 0) + amount
+                elif etype == 'deposit':
+                    zero_totals['manualDepositsGross'] = zero_totals.get('manualDepositsGross', 0) + amount
+
+            me = zero_totals.get('manualExpensesGross', 0)
+            mi = zero_totals.get('manualInvestmentsGross', 0)
+            md = zero_totals.get('manualDepositsGross', 0)
+            wc = zero_totals.get('withdrawalCompletedGross', 0)
+            wk = zero_totals.get('walletCreditsGross', 0)
+            zero_totals['bankNetAfterExpenses'] = round(wc + md - me - mi, 2)
+            zero_totals['estimatedNetWallet'] = round(wk + md - me - mi, 2)
+
         overview_ref.update({
             'latestMonth': current_month_key,
             'months': months_list,
