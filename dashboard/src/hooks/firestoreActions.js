@@ -49,6 +49,24 @@ function parseRecurringExpenseAmount(amount) {
   return parsedAmount;
 }
 
+const SCHEDULED_ALERT_PRIORITIES = new Set(['critical', 'high', 'medium', 'low']);
+
+function isValidScheduledAlertDate(dateString) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+    return false;
+  }
+
+  const [year, month, day] = dateString.split('-').map(Number);
+  const date = new Date(`${dateString}T00:00:00Z`);
+
+  return Number.isInteger(year)
+    && Number.isInteger(month)
+    && Number.isInteger(day)
+    && date.getUTCFullYear() === year
+    && date.getUTCMonth() + 1 === month
+    && date.getUTCDate() === day;
+}
+
 async function applyCreditCardBalanceAdjustment(transaction, cardId, amount, timestamp) {
   if (!cardId) return;
 
@@ -309,6 +327,95 @@ export async function createManualAlert(alertData) {
     after: { ...alertData, status: 'pending' },
   });
   return alertId;
+}
+
+export async function createScheduledManualAlert({ title, note = '', scheduledDate, priority }) {
+  const cleanTitle = (title || '').trim();
+  const cleanNote = (note || '').trim();
+  const cleanDate = (scheduledDate || '').trim();
+  const cleanPriority = (priority || '').trim().toLowerCase();
+
+  if (!cleanTitle) {
+    throw new Error('Debes escribir un título');
+  }
+  if (!cleanPriority) {
+    throw new Error('Debes elegir una prioridad');
+  }
+  if (!SCHEDULED_ALERT_PRIORITIES.has(cleanPriority)) {
+    throw new Error('Debes elegir una prioridad válida');
+  }
+  if (!isValidScheduledAlertDate(cleanDate)) {
+    throw new Error('Debes elegir una fecha futura válida');
+  }
+
+  const now = new Date();
+  const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  if (cleanDate <= todayKey) {
+    throw new Error('Debes elegir una fecha futura válida');
+  }
+
+  const scheduledAlertId = `scheduled_manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const ref = doc(db, 'scheduled-alerts', scheduledAlertId);
+  const payload = {
+    title: cleanTitle,
+    note: cleanNote,
+    scheduledDate: cleanDate,
+    priority: cleanPriority,
+    status: 'scheduled',
+    createdBy: 'manual_user',
+    source: 'scheduled_manual_alert',
+    generatedAlertId: null,
+    createdAt: nowISO(),
+    generatedAt: null,
+    cancelledAt: null,
+  };
+
+  await setDoc(ref, payload);
+  logManualChange('create_scheduled_alert', `Alerta programada creada: ${cleanTitle} (${cleanDate})`, {
+    collection: 'scheduled-alerts',
+    documentId: scheduledAlertId,
+    after: {
+      title: cleanTitle,
+      scheduledDate: cleanDate,
+      priority: cleanPriority,
+      status: 'scheduled',
+    },
+  });
+
+  return scheduledAlertId;
+}
+
+export async function cancelScheduledManualAlert(scheduledAlertId) {
+  const ref = doc(db, 'scheduled-alerts', scheduledAlertId);
+  const snapshot = await firestoreGetDoc(ref);
+  if (!snapshot.exists()) {
+    throw new Error('La alerta programada no existe');
+  }
+
+  const before = snapshot.data() || {};
+  if (before.status !== 'scheduled') {
+    throw new Error('Solo puedes cancelar alertas programadas pendientes');
+  }
+
+  const cancelledAt = nowISO();
+  await updateDoc(ref, {
+    status: 'cancelled',
+    cancelledAt,
+  });
+
+  logManualChange('cancel_scheduled_alert', `Alerta programada cancelada: ${before.title || scheduledAlertId}`, {
+    collection: 'scheduled-alerts',
+    documentId: scheduledAlertId,
+    before: {
+      status: before.status,
+      title: before.title,
+      scheduledDate: before.scheduledDate,
+    },
+    after: {
+      status: 'cancelled',
+      cancelledAt,
+    },
+  });
 }
 
 // --- Edición de usuarios en grupo Lank ---

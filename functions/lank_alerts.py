@@ -204,6 +204,60 @@ def generate_group_deactivated_alert(event, service, account_id, account_alias):
 
 
 
+def generate_scheduled_manual_alerts(db, today_key=None):
+    if today_key is None:
+        today_key = datetime.now(timezone.utc).date().isoformat()
+
+    scheduled_docs = db.collection('scheduled-alerts').where('status', '==', 'scheduled').stream()
+    pending_alerts = list(db.collection('alerts').where('status', '==', 'pending').stream())
+    generated_at = _now()
+    alerts_generated = 0
+
+    for scheduled_doc in scheduled_docs:
+        scheduled_alert = scheduled_doc.to_dict()
+        if scheduled_alert.get('scheduledDate') != today_key:
+            continue
+
+        existing_alert_id = None
+        for pending_alert_doc in pending_alerts:
+            pending_alert = pending_alert_doc.to_dict()
+            if pending_alert.get('type') != 'manual_reminder':
+                continue
+            if pending_alert.get('scheduledAlertId') != scheduled_doc.id:
+                continue
+            existing_alert_id = pending_alert.get('id') or pending_alert_doc.id
+            break
+
+        if existing_alert_id is None:
+            alert_id = f'manual_reminder__{scheduled_doc.id}'
+            note = (scheduled_alert.get('note') or '').strip()
+            title = scheduled_alert.get('title') or 'Recordatorio manual'
+            alert_payload = {
+                'id': alert_id,
+                'type': 'manual_reminder',
+                'status': 'pending',
+                'priority': scheduled_alert.get('priority', 'medium'),
+                'title': title,
+                'description': note or title,
+                'createdAt': generated_at,
+                'completedAt': None,
+                'source': 'scheduled_manual_alert',
+                'scheduledAlertId': scheduled_doc.id,
+                'scheduledDate': scheduled_alert.get('scheduledDate'),
+            }
+            db.collection('alerts').document(alert_id).set(alert_payload)
+            existing_alert_id = alert_id
+            alerts_generated += 1
+
+        db.collection('scheduled-alerts').document(scheduled_doc.id).update({
+            'status': 'generated',
+            'generatedAlertId': existing_alert_id,
+            'generatedAt': generated_at,
+        })
+
+    return alerts_generated
+
+
 
 def generate_missing_phone_alerts(db, services_config=None):
     """

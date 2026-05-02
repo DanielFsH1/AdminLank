@@ -66,6 +66,7 @@ sys.modules.setdefault("google", google_module)
 sys.modules.setdefault("google.cloud", google_cloud)
 sys.modules.setdefault("google.cloud.firestore", google_firestore)
 
+import lank_alerts
 import main
 
 
@@ -615,6 +616,152 @@ def test_generate_alerts_for_accounts_updates_group_and_adds_agent_finding_witho
     assert updated_services == {"ChatGPT Plus": {12}}
 
 
+def test_generate_scheduled_manual_alerts_creates_pending_manual_reminder():
+    class FakeDoc:
+        def __init__(self, doc_id, data):
+            self.id = doc_id
+            self._data = data
+
+        def to_dict(self):
+            return dict(self._data)
+
+    created = {}
+    updated = {}
+
+    class FakeScheduledDocRef:
+        def __init__(self, doc_id):
+            self.doc_id = doc_id
+
+        def update(self, payload):
+            updated[self.doc_id] = payload
+
+    class FakeAlertsDocRef:
+        def __init__(self, doc_id):
+            self.doc_id = doc_id
+
+        def set(self, payload):
+            created[self.doc_id] = payload
+
+    class FakeCollection:
+        def __init__(self, name, docs):
+            self.name = name
+            self.docs = docs
+
+        def where(self, field, _op, value):
+            filtered = [doc for doc in self.docs if doc.to_dict().get(field) == value]
+            return FakeCollection(self.name, filtered)
+
+        def stream(self):
+            return list(self.docs)
+
+        def document(self, doc_id):
+            if self.name == 'alerts':
+                return FakeAlertsDocRef(doc_id)
+            return FakeScheduledDocRef(doc_id)
+
+    class FakeDbForScheduledAlerts:
+        def collection(self, name):
+            if name == 'scheduled-alerts':
+                return FakeCollection(name, [
+                    FakeDoc('sched_1', {
+                        'title': 'Llamar al banco',
+                        'note': 'Confirmar cargo',
+                        'scheduledDate': '2026-05-01',
+                        'priority': 'high',
+                        'status': 'scheduled',
+                    }),
+                ])
+            if name == 'alerts':
+                return FakeCollection(name, [])
+            raise AssertionError(name)
+
+    count = lank_alerts.generate_scheduled_manual_alerts(FakeDbForScheduledAlerts(), today_key='2026-05-01')
+
+    assert count == 1
+    alert_payload = next(iter(created.values()))
+    assert alert_payload['type'] == 'manual_reminder'
+    assert alert_payload['status'] == 'pending'
+    assert alert_payload['source'] == 'scheduled_manual_alert'
+    assert alert_payload['scheduledAlertId'] == 'sched_1'
+    assert updated['sched_1']['status'] == 'generated'
+
+
+
+def test_generate_scheduled_manual_alerts_skips_existing_pending_duplicate():
+    class FakeDoc:
+        def __init__(self, doc_id, data):
+            self.id = doc_id
+            self._data = data
+
+        def to_dict(self):
+            return dict(self._data)
+
+    created = {}
+    updated = {}
+
+    class FakeScheduledDocRef:
+        def __init__(self, doc_id):
+            self.doc_id = doc_id
+
+        def update(self, payload):
+            updated[self.doc_id] = payload
+
+    class FakeAlertsDocRef:
+        def __init__(self, doc_id):
+            self.doc_id = doc_id
+
+        def set(self, payload):
+            created[self.doc_id] = payload
+
+    class FakeCollection:
+        def __init__(self, name, docs):
+            self.name = name
+            self.docs = docs
+
+        def where(self, field, _op, value):
+            filtered = [doc for doc in self.docs if doc.to_dict().get(field) == value]
+            return FakeCollection(self.name, filtered)
+
+        def stream(self):
+            return list(self.docs)
+
+        def document(self, doc_id):
+            if self.name == 'alerts':
+                return FakeAlertsDocRef(doc_id)
+            return FakeScheduledDocRef(doc_id)
+
+    class FakeDbForScheduledAlerts:
+        def collection(self, name):
+            if name == 'scheduled-alerts':
+                return FakeCollection(name, [
+                    FakeDoc('sched_1', {
+                        'title': 'Llamar al banco',
+                        'note': 'Confirmar cargo',
+                        'scheduledDate': '2026-05-01',
+                        'priority': 'high',
+                        'status': 'scheduled',
+                    }),
+                ])
+            if name == 'alerts':
+                return FakeCollection(name, [
+                    FakeDoc('alert_existing', {
+                        'id': 'alert_existing',
+                        'type': 'manual_reminder',
+                        'status': 'pending',
+                        'scheduledAlertId': 'sched_1',
+                    }),
+                ])
+            raise AssertionError(name)
+
+    count = lank_alerts.generate_scheduled_manual_alerts(FakeDbForScheduledAlerts(), today_key='2026-05-01')
+
+    assert count == 0
+    assert created == {}
+    assert updated['sched_1']['status'] == 'generated'
+    assert updated['sched_1']['generatedAlertId'] == 'alert_existing'
+
+
+
 def test_analyze_emails_enqueues_adminbot_work_after_saving_latest_report(monkeypatch):
     db = FakeDb()
     enqueued_jobs = []
@@ -690,6 +837,74 @@ def test_analyze_emails_enqueues_adminbot_work_after_saving_latest_report(monkey
         "totalRawEmails": 1,
         "alertsGeneratedByBackend": 0,
     }
+
+
+def test_analyze_emails_includes_scheduled_manual_alerts_in_backend_count(monkeypatch):
+    db = FakeDb()
+    enqueued_jobs = []
+
+    monkeypatch.setattr(main.firestore, "client", lambda: db)
+    monkeypatch.setattr(main, "load_service_config", lambda _db: ({}, {}, set()))
+    monkeypatch.setattr(main, "load_imap_credentials", lambda _db: [
+        {"accountId": 12, "email": "owner@example.com", "appPassword": "secret", "enabled": True}
+    ])
+    monkeypatch.setattr(main, "load_account_registry", lambda _db: [
+        {"id": 12, "canonicalAlias": "Cuenta 12", "fullName": "Cuenta Principal"}
+    ])
+    monkeypatch.setattr(main, "load_rates", lambda _db: {})
+    monkeypatch.setattr(main, "load_current_state_context", lambda _db, _name_to_key: {})
+    monkeypatch.setattr(main, "load_analysis_state", lambda _db: {"lastRun": None, "accounts": {}})
+    monkeypatch.setattr(main, "load_system_flags", lambda _db: {})
+    monkeypatch.setattr(main, "load_alerts_from_firestore", lambda _db: {"alerts": [], "completedAlerts": []})
+    monkeypatch.setattr(main, "analyze_account", lambda *args, **kwargs: {
+        "accountId": 12,
+        "accountAlias": "Cuenta 12",
+        "access": "ok",
+        "summary": {
+            "pending": 0,
+            "relevant": 1,
+            "totalEvents": 1,
+            "ignored": 0,
+            "review": 0,
+            "rawEmailCount": 1,
+        },
+        "rawEmails": [{"uid": 101, "subject": "Alta"}],
+        "events": [],
+        "maxUid": 101,
+    })
+    monkeypatch.setattr(main, "save_notifications", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main, "generate_alerts_for_accounts", lambda *args, **kwargs: (0, {}, [], []))
+    monkeypatch.setattr(main, "save_analysis_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(main, "update_finance_from_analysis", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main, "cleanup_old_data", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(main.lank_alerts, "generate_scheduled_manual_alerts", lambda *_args, **_kwargs: 2)
+    monkeypatch.setattr(main.lank_alerts, "generate_missing_phone_alerts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main.lank_alerts, "generate_credit_alerts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main.lank_alerts, "generate_sim_recharge_alerts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main, "load_schedule_config", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(main.lank_agent_review, "build_review_document", lambda *args, **kwargs: {"shouldNotify": False})
+    monkeypatch.setattr(main.lank_agent_review, "build_notification_text", lambda *_args, **_kwargs: None)
+
+    class FakeTelegramBot:
+        is_enabled = False
+
+        def __init__(self, _db):
+            pass
+
+    def fake_enqueue_analysis_job(_db, *, idempotency_key, payload):
+        enqueued_jobs.append({"idempotency_key": idempotency_key, "payload": payload})
+        return {"jobId": "job_123", "status": "pending", **payload}
+
+    monkeypatch.setattr(main.lank_telegram, "TelegramBot", FakeTelegramBot)
+    monkeypatch.setattr(main.adminbot_work_queue, "enqueue_analysis_job", fake_enqueue_analysis_job)
+
+    response = main.analyze_emails(types.SimpleNamespace(method="POST"))
+
+    assert response.status == 200
+    assert len(enqueued_jobs) == 1
+    assert enqueued_jobs[0]["payload"]["summary"]["alertsGeneratedByBackend"] == 2
+    assert db.documents["analysis/latest-report"]["alertsGenerated"] == 2
+
 
 
 def test_scheduled_analysis_enqueues_adminbot_work_for_current_slot(monkeypatch):
@@ -770,6 +985,73 @@ def test_scheduled_analysis_enqueues_adminbot_work_for_current_slot(monkeypatch)
         "alertsGeneratedByBackend": 0,
     }
     assert payload["telegramPolicy"] == {"sendStart": True, "sendFinal": True}
+
+
+def test_scheduled_analysis_includes_scheduled_manual_alerts_in_backend_count(monkeypatch):
+    db = FakeDb(documents={"config/schedule": {"enabled": True, "frequencyHours": 6, "startTime": "2026-04-26T00:00:00+00:00"}})
+    enqueued_jobs = []
+    frozen_now = main.datetime(2026, 4, 26, 18, 5, tzinfo=main.timezone.utc)
+
+    class FrozenDateTime(main.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return frozen_now
+            return frozen_now.astimezone(tz)
+
+    monkeypatch.setattr(main, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main.firestore, "client", lambda: db)
+    monkeypatch.setattr(main, "load_analysis_state", lambda _db: {"lastRun": None, "accounts": {}})
+    monkeypatch.setattr(main, "load_system_flags", lambda _db: {})
+    monkeypatch.setattr(main, "load_service_config", lambda _db: ({}, {}, set()))
+    monkeypatch.setattr(main, "load_imap_credentials", lambda _db: [
+        {"accountId": 12, "email": "owner@example.com", "appPassword": "secret", "enabled": True}
+    ])
+    monkeypatch.setattr(main, "load_account_registry", lambda _db: [
+        {"id": 12, "canonicalAlias": "Cuenta 12", "fullName": "Cuenta Principal"}
+    ])
+    monkeypatch.setattr(main, "load_rates", lambda _db: {})
+    monkeypatch.setattr(main, "load_current_state_context", lambda _db, _name_to_key: {})
+    monkeypatch.setattr(main, "load_alerts_from_firestore", lambda _db: {"alerts": [], "completedAlerts": []})
+    monkeypatch.setattr(main, "analyze_account", lambda *args, **kwargs: {
+        "accountId": 12,
+        "accountAlias": "Cuenta 12",
+        "access": "ok",
+        "summary": {
+            "pending": 0,
+            "relevant": 1,
+            "totalEvents": 1,
+            "ignored": 0,
+            "review": 0,
+            "rawEmailCount": 1,
+        },
+        "rawEmails": [{"uid": 101, "subject": "Alta"}],
+        "events": [],
+        "maxUid": 101,
+    })
+    monkeypatch.setattr(main, "save_notifications", lambda *args, **kwargs: None)
+    monkeypatch.setattr(main, "generate_alerts_for_accounts", lambda *args, **kwargs: (0, {}, [], []))
+    monkeypatch.setattr(main, "save_analysis_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(main, "update_finance_from_analysis", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main, "cleanup_old_data", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(main, "load_schedule_config", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(main.lank_alerts, "generate_scheduled_manual_alerts", lambda *_args, **_kwargs: 1)
+    monkeypatch.setattr(main.lank_alerts, "generate_missing_phone_alerts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main.lank_alerts, "generate_credit_alerts", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main.lank_alerts, "generate_sim_recharge_alerts", lambda *_args, **_kwargs: 0)
+
+    def fake_enqueue_analysis_job(_db, *, idempotency_key, payload):
+        enqueued_jobs.append({"idempotency_key": idempotency_key, "payload": payload})
+        return {"jobId": "job_123", "status": "pending", **payload}
+
+    monkeypatch.setattr(main.adminbot_work_queue, "enqueue_analysis_job", fake_enqueue_analysis_job)
+
+    main.scheduled_analysis(types.SimpleNamespace())
+
+    assert len(enqueued_jobs) == 1
+    assert enqueued_jobs[0]["payload"]["summary"]["alertsGeneratedByBackend"] == 1
+    assert db.documents["analysis/latest-report"]["alertsGenerated"] == 1
+
 
 
 def test_analyze_emails_persists_adminbot_latest_state_snapshot(monkeypatch):

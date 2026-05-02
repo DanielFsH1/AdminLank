@@ -3,12 +3,21 @@ import { useCollection } from '../hooks/useFirestore';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { getServiceMeta, getServiceKeyByName, getPoolServiceKeys, getAllServiceKeys } from '../config/services';
-import { completeAlert, discardAlert, completeUnidentifiedAlert, removeGroupUser, completeMissingPhone } from '../hooks/firestoreActions';
+import {
+ completeAlert,
+ discardAlert,
+ completeUnidentifiedAlert,
+ removeGroupUser,
+ completeMissingPhone,
+ createScheduledManualAlert,
+ cancelScheduledManualAlert,
+} from '../hooks/firestoreActions';
 
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
 import { BellIcon, CalendarIcon, CelebrationIcon, ChatIcon, CheckCircleIcon, ClipboardIcon, CreditCardIcon, DotBlue, DotOrange, DotRed, DotYellow, EditIcon, EmailIcon, EmptyMailIcon, HourglassIcon, KeyIcon, LinkIcon, LockKeyIcon, PhoneIcon, PinIcon, SearchIcon, SparkleIcon, TargetIcon, TrashIcon, WarningIcon, XCircleIcon } from '../components/Icons';
 import SearchBar from '../components/SearchBar';
 import { normalizeSearch, nMatch } from '../utils/normalize';
+import { getScheduledAlertGroups, getTomorrowDateKey, toDateValue } from '../utils/scheduledAlerts';
 
 // Mapeo dinámico de serviceAccountRef → servicio interno para navegación
 function parseServiceKey(ref) {
@@ -56,6 +65,7 @@ const TYPE_LABELS = {
  missing_phone: <><PhoneIcon size={16} /> Falta teléfono</>,
  credit_cutoff: <><CalendarIcon size={16} /> Corte de crédito</>,
  credit_payment_due: <><CreditCardIcon size={16} /> Pago de crédito</>,
+ manual_reminder: <><BellIcon size={16} /> Recordatorio manual</>,
 };
 
 function buildRichDescription(alert) {
@@ -72,8 +82,19 @@ function getProfileImg(accountId) {
  return `/assets/profiles/account_${accountId}.png`;
 }
 
+function formatScheduledDate(value) {
+ const normalizedDate = toDateValue(value);
+ if (!normalizedDate) return 'Sin fecha';
+ return normalizedDate.toLocaleDateString('es-MX', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+ });
+}
+
 export default function Alerts({ onNavigate, navData, servicesConfig }) {
  const { data: alerts, loading } = useCollection('alerts');
+ const { data: scheduledAlerts = [], loading: scheduledLoading } = useCollection('scheduled-alerts');
  const [activeTab, setActiveTab] = useState('pending');
  const [filterPriority, setFilterPriority] = useState('all');
  const [searchQuery, setSearchQuery] = useState('');
@@ -87,6 +108,8 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  const [editUserModal, setEditUserModal] = useState(null); // { alert, users }
  const [selectUserModal, setSelectUserModal] = useState(null); // { alert, users }
  const [missingPhoneModal, setMissingPhoneModal] = useState(null); // { alert }
+ const [createScheduledModal, setCreateScheduledModal] = useState(false);
+ const [cancelScheduledModal, setCancelScheduledModal] = useState(null);
  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
  const [collapsedGroups, setCollapsedGroups] = useState(new Set()); // IDs de grupos colapsados
 
@@ -192,6 +215,11 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  return { pending, completed, discarded };
  }, [alerts]);
 
+ const scheduledAlertGroups = useMemo(() => getScheduledAlertGroups(scheduledAlerts, {
+  searchQuery,
+  filterPriority,
+ }), [scheduledAlerts, searchQuery, filterPriority]);
+
  const groupedAlerts = useMemo(() => {
  let list = categorized[activeTab] || [];
  if (filterPriority !== 'all') {
@@ -252,6 +280,14 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  const totalCount = useMemo(() => {
  return groupedAlerts.groups.reduce((s, g) => s + g.alerts.length, 0) + groupedAlerts.ungrouped.length;
  }, [groupedAlerts]);
+
+ const scheduledVisibleCount = useMemo(() => (
+  scheduledAlertGroups.scheduled.length
+  + scheduledAlertGroups.generated.length
+  + scheduledAlertGroups.cancelled.length
+ ), [scheduledAlertGroups]);
+
+ const visibleResultCount = useMemo(() => totalCount + scheduledVisibleCount, [totalCount, scheduledVisibleCount]);
 
  // Contadores por prioridad (sobre la pestaña activa, sin filtros de prioridad ni búsqueda)
  const priorityCounts = useMemo(() => {
@@ -362,6 +398,29 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  });
  };
 
+ const handleCreateScheduled = async (values) => {
+  try {
+   await createScheduledManualAlert(values);
+   showToast(`Alerta programada creada: ${values.title}`);
+   setCreateScheduledModal(false);
+  } catch (err) {
+   showToast(`Error: ${err.message}`, 'error');
+   throw err;
+  }
+ };
+
+ const handleCancelScheduled = async () => {
+  if (!cancelScheduledModal) return;
+  try {
+   await cancelScheduledManualAlert(cancelScheduledModal.id);
+   showToast(`Programación cancelada: ${cancelScheduledModal.title}`);
+   setCancelScheduledModal(null);
+  } catch (err) {
+   showToast(`Error: ${err.message}`, 'error');
+   throw err;
+  }
+ };
+
  const handleDiscardConfirm = async (values) => {
  if (!discardModal) return;
  try {
@@ -405,6 +464,28 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
       showToast(`Error: ${err.message}`, 'error');
  }
  };
+
+ const [minScheduledDate, setMinScheduledDate] = useState(() => getTomorrowDateKey());
+
+ useEffect(() => {
+  let timeoutId;
+
+  const scheduleNextUpdate = () => {
+   const now = new Date();
+   const nextMidnight = new Date(now);
+   nextMidnight.setHours(24, 0, 0, 0);
+   const timeoutMs = Math.max(1000, nextMidnight.getTime() - now.getTime() + 1000);
+   timeoutId = window.setTimeout(() => {
+    setMinScheduledDate(getTomorrowDateKey());
+    scheduleNextUpdate();
+   }, timeoutMs);
+  };
+
+  setMinScheduledDate(getTomorrowDateKey());
+  scheduleNextUpdate();
+
+  return () => window.clearTimeout(timeoutId);
+ }, []);
 
  // Determinar si la alerta tiene un usuario "no informado"
  const isUnidentified = (alert) => {
@@ -525,7 +606,6 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
             </div>
           )}
 
-          {/* Botones de acción para alertas pendientes */}
           {isPending && renderActions(alert)}
 
           <div className="alert-v2-meta">
@@ -551,13 +631,62 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  );
  };
 
- if (loading) return <div className="empty-state"><div className="loading-spinner" /></div>;
+ const renderScheduledAlertItem = (alert, options = {}) => {
+  const pm = PRIORITY_META[alert.priority] || PRIORITY_META.low;
+  const alertId = alert.id || alert.firestoreId;
+  const createdAtDate = toDateValue(alert.createdAt);
+  const createdAt = createdAtDate ? createdAtDate.toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' }) : null;
+
+  return (
+   <div
+    key={alertId}
+    className="alert-card-v2"
+    style={{ '--alert-color': pm.color, '--alert-bg': pm.bg, '--alert-border': pm.border }}
+   >
+    <div className="alert-v2-priority-bar" />
+    <div className="alert-v2-content">
+     <div className="alert-v2-top">
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+       <span className="alert-v2-priority-badge" style={{ background: pm.bg, color: pm.color, borderColor: pm.border }}>
+        {pm.icon} {pm.label}
+       </span>
+       <span className="badge badge-muted">{TYPE_LABELS.manual_reminder}</span>
+       <span className="badge badge-info">{options.statusLabel || alert.status}</span>
+      </div>
+     </div>
+     <div className="alert-v2-title">{alert.title}</div>
+     {alert.note && <div className="alert-v2-desc">{alert.note}</div>}
+     <div className="alert-v2-meta">
+      <span className="meta-dim"><CalendarIcon size={16} /> Programada para {formatScheduledDate(alert.scheduledDate)}</span>
+      {createdAt && <span className="meta-dim"><ClipboardIcon size={16} /> Creada {createdAt}</span>}
+      {alert.generatedAt && <span style={{ color: 'var(--accent-success)' }}><CheckCircleIcon size={16} /> Generada {formatScheduledDate(alert.generatedAt)}</span>}
+      {alert.cancelledAt && <span style={{ color: 'var(--text-muted)' }}><XCircleIcon size={16} /> Cancelada {formatScheduledDate(alert.cancelledAt)}</span>}
+     </div>
+     {options.showCancel && (
+      <div className="alert-actions" onClick={e => e.stopPropagation()}>
+       <button
+        className="alert-action-btn discard"
+        onClick={() => setCancelScheduledModal({ id: alertId, title: alert.title })}
+       >
+        <XCircleIcon size={16} /> Cancelar programación
+       </button>
+      </div>
+     )}
+    </div>
+   </div>
+  );
+ };
+
+ if (loading || scheduledLoading) return <div className="empty-state"><div className="loading-spinner" /></div>;
 
  return (
  <>
       <div className="section-header">
         <div className="section-title"> Centro de Alertas</div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <button className="alert-tab active-tint" onClick={() => setCreateScheduledModal(true)}>
+            <BellIcon size={16} /> Crear alerta
+          </button>
           {['all', 'critical', 'high', 'medium', 'low'].map(p => {
             const meta = PRIORITY_META[p];
             const isActive = filterPriority === p;
@@ -584,8 +713,60 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
         value={searchQuery}
         onChange={setSearchQuery}
         placeholder="Buscar por usuario, servicio, cuenta, descripción..."
-        resultCount={searchQuery.length >= 2 ? totalCount : undefined}
+        resultCount={searchQuery.length >= 2 ? visibleResultCount : undefined}
       />
+
+      <div className="alerts-account-group alerts-ungrouped">
+        <div className="alerts-account-header">
+          <div className="alerts-account-identity">
+            <span style={{ fontSize: '24px' }}><BellIcon size={16} /></span>
+            <div>
+              <div className="alerts-account-name">Alertas programadas</div>
+            </div>
+          </div>
+          <span className="badge badge-info">{scheduledAlertGroups.scheduled.length} programada{scheduledAlertGroups.scheduled.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div className="alerts-account-list">
+          {scheduledAlertGroups.scheduled.length === 0 ? (
+            <div className="empty-state" style={{ margin: 0 }}>
+              <p>{scheduledVisibleCount === 0 && (filterPriority !== 'all' || normalizeSearch(searchQuery).length >= 2)
+                ? 'No hay alertas programadas que coincidan con el filtro actual'
+                : 'No hay alertas manuales programadas'}</p>
+            </div>
+          ) : (
+            scheduledAlertGroups.scheduled.map(alert => renderScheduledAlertItem(alert, {
+              statusLabel: 'Programada',
+              showCancel: true,
+            }))
+          )}
+        </div>
+        {scheduledAlertGroups.generated.length > 0 && (
+          <div style={{ padding: '0 18px 18px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 700 }}>
+              <CheckCircleIcon size={16} /> Generadas
+            </div>
+            <div className="alerts-account-list">
+              {scheduledAlertGroups.generated.map(alert => renderScheduledAlertItem(alert, {
+                statusLabel: 'Generada',
+                showCancel: false,
+              }))}
+            </div>
+          </div>
+        )}
+        {scheduledAlertGroups.cancelled.length > 0 && (
+          <div style={{ padding: '0 18px 18px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 700 }}>
+              <XCircleIcon size={16} /> Canceladas
+            </div>
+            <div className="alerts-account-list">
+              {scheduledAlertGroups.cancelled.map(alert => renderScheduledAlertItem(alert, {
+                statusLabel: 'Cancelada',
+                showCancel: false,
+              }))}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Tabs */}
       <div className="alerts-tabs">
@@ -676,6 +857,55 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
           )}
         </>
       )}
+
+      <EditModal
+        open={createScheduledModal}
+        onClose={() => setCreateScheduledModal(false)}
+        onSave={handleCreateScheduled}
+        title="Crear alerta programada"
+        icon={<BellIcon size={16} />}
+        fields={[
+          { key: 'title', label: 'Título', placeholder: 'Ej: Recordar renovar cuenta crítica', required: true },
+          { key: 'scheduledDate', label: 'Fecha programada', type: 'date', required: true, min: minScheduledDate, hint: `Mínimo: ${formatScheduledDate(minScheduledDate)}` },
+          {
+            key: 'priority',
+            label: 'Prioridad',
+            type: 'select',
+            required: true,
+            options: [
+              { value: 'critical', label: 'Crítica' },
+              { value: 'high', label: 'Alta' },
+              { value: 'medium', label: 'Media' },
+              { value: 'low', label: 'Baja' },
+            ],
+          },
+          { key: 'note', label: 'Nota', type: 'textarea', placeholder: 'Contexto adicional para la alerta...' },
+        ]}
+        initialValues={{
+          title: '',
+          scheduledDate: minScheduledDate,
+          priority: 'medium',
+          note: '',
+        }}
+        validate={(values) => {
+          if (!values.scheduledDate) return 'Debes elegir una fecha';
+          if (values.scheduledDate < minScheduledDate) return 'La fecha mínima es mañana';
+          return null;
+        }}
+        confirmMessage="¿Guardar esta alerta manual programada?"
+        saveLabel="Guardar programación"
+      />
+
+      <ConfirmDialog
+        open={!!cancelScheduledModal}
+        onClose={() => setCancelScheduledModal(null)}
+        onConfirm={handleCancelScheduled}
+        title="Cancelar programación"
+        message={cancelScheduledModal ? `¿Cancelar la programación de "${cancelScheduledModal.title}"?` : ''}
+        confirmLabel={<><XCircleIcon size={16} /> Sí, cancelar</>}
+        danger
+        icon={<XCircleIcon size={16} />}
+      />
 
       {/* Modal: Descartar alerta */}
       <EditModal

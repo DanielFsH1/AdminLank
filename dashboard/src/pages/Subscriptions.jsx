@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { collection, doc, getDoc, where, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useCollection, useDocument } from '../hooks/useFirestore';
-import { SERVICES, getServiceMeta, getProfileImage, getPoolServiceKeys, getNonPoolServiceKeys, getAllServiceKeys, getSlotFields, getExpectedSlotFields, getUserFields } from '../config/services';
+import { SERVICES, getServiceMeta, getProfileImage, getNonPoolServiceKeys, getAllServiceKeys, getSlotFields, getExpectedSlotFields, getUserFields } from '../config/services';
 import {
   updateSlot, updateGroupUser, removeGroupUser, moveUserBetweenAccounts,
   DEFAULT_MASTER_CONFIG, initSubscriptionMasterConfig,
@@ -43,9 +43,9 @@ function getMissingFields(svcId, slot) {
  return missing;
 }
 
-export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
- const { data: pools, refetch: refetchPools } = useCollection('service-pools', { realtime: true });
- const { data: masterConfigDoc, loading: masterConfigLoading } = useDocument('config', 'services', { realtime: true });
+export default function Subscriptions({ onNavigate, navData }) {
+ const { data: pools } = useCollection('service-pools');
+ const { data: masterConfigDoc, loading: masterConfigLoading } = useDocument('config', 'services');
  const [poolDetails, setPoolDetails] = useState({});
  const [groupDetails, setGroupDetails] = useState({});
  const [selectedService, setSelectedService] = useState(null);
@@ -64,6 +64,9 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  const [groupEditModal, setGroupEditModal] = useState(null); // { serviceKey, groupId, userIndex, user, allUsers, accountLabel, accountId }
  const [groupBajaConfirm, setGroupBajaConfirm] = useState(null); // { serviceKey, groupId, userIndex, userAlias, allUsers, accountLabel, accountId }
  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
+ const poolDetailsRequestIdRef = useRef(0);
+ const groupDetailsRequestIdRef = useRef(0);
+ const pendingAlertsRequestIdRef = useRef(0);
 
  // Confirm para eliminar cupo
  const [removeSlotConfirm, setRemoveSlotConfirm] = useState(null); // { serviceKey, accountRef, slotIndex, slot, allSlots, accountLabel }
@@ -72,7 +75,9 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  const masterConfig = useMemo(() => {
    if (masterConfigDoc) {
      const data = masterConfigDoc.services || masterConfigDoc;
-     const { id, updatedAt, ...services } = data;
+     const services = Object.fromEntries(
+       Object.entries(data).filter(([key]) => key !== 'id' && key !== 'updatedAt'),
+     );
      return { ...DEFAULT_MASTER_CONFIG, ...services };
    }
    return DEFAULT_MASTER_CONFIG;
@@ -121,27 +126,29 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  }
  }, [navData]);
 
- // Alertas pendientes en tiempo real
- const { data: pendingAlerts } = useCollection('alerts', {
-   constraints: [where('status', '==', 'pending')],
- });
+ const [pendingAlerts, setPendingAlerts] = useState([]);
 
- useEffect(() => {
+ const loadPendingAlerts = useCallback(async () => {
+   const requestId = ++pendingAlertsRequestIdRef.current;
+   const snap = await getDocs(query(collection(db, 'alerts'), where('status', '==', 'pending')));
+   const alerts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
    const aliases = new Set();
-   const alerts = [];
-   (pendingAlerts || []).forEach((data) => {
+   const slotRelatedAlerts = [];
+   alerts.forEach((data) => {
      const alias = (data.userAlias || '').toLowerCase();
      if (alias) aliases.add(alias);
      if (data.type === 'slot_pending_deletion' || data.type === 'access_verify') {
-       alerts.push(data);
+       slotRelatedAlerts.push(data);
      }
    });
+   if (requestId !== pendingAlertsRequestIdRef.current) return;
+   setPendingAlerts(alerts);
    setPendingUserAliases(aliases);
-   setSlotAlerts(alerts);
- }, [pendingAlerts]);
+   setSlotAlerts(slotRelatedAlerts);
+ }, []);
 
  const pendingPasswordAlerts = useMemo(
-   () => (pendingAlerts || []).filter((a) => a.type === 'password_change'),
+   () => pendingAlerts.filter((a) => a.type === 'password_change'),
    [pendingAlerts],
  );
 
@@ -186,49 +193,56 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  }, [selectedService]);
 
  // ─── Data loading functions ───
- const loadPoolDetailsFn = useCallback(() => {
-   if (pools.length === 0) return () => {};
-   const unsubs = [];
-   
-   pools.forEach(pool => {
-     const unsub = onSnapshot(collection(db, `service-pools/${pool.id}/real-accounts`), (snap) => {
-       const accounts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-       setPoolDetails(prev => ({ ...prev, [pool.id]: accounts }));
-     }, (err) => console.error(`Error realtime real-accounts ${pool.id}:`, err));
-     unsubs.push(unsub);
-   });
-   
-   return () => unsubs.forEach(u => u());
+ const loadPoolDetails = useCallback(async () => {
+   const requestId = ++poolDetailsRequestIdRef.current;
+   if (pools.length === 0) {
+     if (requestId !== poolDetailsRequestIdRef.current) return;
+     setPoolDetails({});
+     return;
+   }
+   const entries = await Promise.all(pools.map(async (pool) => {
+     const snap = await getDocs(collection(db, `service-pools/${pool.id}/real-accounts`));
+     return [pool.id, snap.docs.map(d => ({ id: d.id, ...d.data() }))];
+   }));
+   if (requestId !== poolDetailsRequestIdRef.current) return;
+   setPoolDetails(Object.fromEntries(entries));
  }, [pools]);
 
- const loadGroupDetailsFn = useCallback(() => {
+ const loadGroupDetails = useCallback(async () => {
+   const requestId = ++groupDetailsRequestIdRef.current;
    const svcs = getAllServiceKeys();
-   const unsubs = [];
-   
-   svcs.forEach(svc => {
-     const unsub = onSnapshot(collection(db, `groups/${svc}/lank-accounts`), (snap) => {
-       const accounts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-       setGroupDetails(prev => ({ ...prev, [svc]: accounts }));
-     }, (err) => console.error(`Error realtime lank-accounts ${svc}:`, err));
-     unsubs.push(unsub);
-   });
-   
-   return () => unsubs.forEach(u => u());
+   const entries = await Promise.all(svcs.map(async (svc) => {
+     const snap = await getDocs(collection(db, `groups/${svc}/lank-accounts`));
+     return [svc, snap.docs.map(d => ({ id: d.id, ...d.data() }))];
+   }));
+   if (requestId !== groupDetailsRequestIdRef.current) return;
+   setGroupDetails(Object.fromEntries(entries));
  }, []);
 
- const refreshSubscriptionsData = useCallback(() => { /* No-op, realtime handled by onSnapshot */ }, []);
+ const refreshSubscriptionsData = useCallback(async () => {
+   const results = await Promise.allSettled([loadPoolDetails(), loadGroupDetails(), loadPendingAlerts()]);
+   if (results.some(result => result.status === 'rejected')) {
+     showToast('Algunos datos no se pudieron recargar; puede que veas información desactualizada.', 'error');
+   }
+ }, [loadPoolDetails, loadGroupDetails, loadPendingAlerts, showToast]);
 
- // Cargar cuentas reales (Realtime)
  useEffect(() => {
-   const cleanup = loadPoolDetailsFn();
-   return cleanup;
- }, [loadPoolDetailsFn]);
+   loadPoolDetails().catch((err) => {
+     console.error('Error cargando cuentas reales:', err);
+   });
+ }, [loadPoolDetails]);
 
- // Cargar grupos Lank (Realtime)
  useEffect(() => {
-   const cleanup = loadGroupDetailsFn();
-   return cleanup;
- }, [loadGroupDetailsFn]);
+   loadGroupDetails().catch((err) => {
+     console.error('Error cargando grupos Lank:', err);
+   });
+ }, [loadGroupDetails]);
+
+ useEffect(() => {
+   loadPendingAlerts().catch((err) => {
+     console.error('Error cargando alertas pendientes:', err);
+   });
+ }, [loadPendingAlerts]);
 
  // Estadísticas por servicio
  const getStats = (svcId) => {
@@ -582,8 +596,7 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  }
 
  showToast(`Cupo #${slotIndex + 1} actualizado en ${editSlotModal.accountLabel}`);
- refetchPools();
- refreshSubscriptionsData();
+ await refreshSubscriptionsData();
  };
 
  const handleSlotClear = (serviceKey, acct, slotIndex) => {
@@ -601,7 +614,7 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
 
  const handleSlotClearConfirm = async () => {
  if (!clearSlotConfirm) return;
- const { serviceKey, accountRef, slotIndex, allSlots, slot } = clearSlotConfirm;
+ const { serviceKey, accountRef, slotIndex, allSlots } = clearSlotConfirm;
  const oldSlot = allSlots[slotIndex];
 
  const clearedSlot = {
@@ -685,8 +698,7 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  }
 
  showToast(`Cupo #${slotIndex + 1} liberado de ${clearSlotConfirm.accountLabel}`);
- refetchPools();
- refreshSubscriptionsData();
+ await refreshSubscriptionsData();
  setClearSlotConfirm(null);
  };
 
@@ -744,8 +756,7 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
         lankInfo,
       );
       showToast(`${slot.memberAlias} movido de ${moveSlotModal.accountLabel} a ${destAcct.label || destAcct.id}`);
-      refetchPools();
-      refreshSubscriptionsData();
+      await refreshSubscriptionsData();
  } catch (err) {
       showToast(`Error al mover: ${err.message}`, 'error');
  }
@@ -766,8 +777,7 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  await updateGroupUser(serviceKey, accountId, userIndex, updatedUser, allUsers);
  const svcName = getServiceMeta(serviceKey).name;
  showToast(`Usuario ${svcName} actualizado en ${groupEditModal.accountLabel}`);
- refetchPools();
- refreshSubscriptionsData();
+ await refreshSubscriptionsData();
  };
 
  const handleGroupBajaConfirm = async () => {
@@ -776,8 +786,7 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
  await removeGroupUser(serviceKey, accountId, userAlias, allUsers, 'Baja manual desde Suscripciones');
  const svcName = getServiceMeta(serviceKey).name;
  showToast(`${userAlias} dado de baja de ${svcName} en ${groupBajaConfirm.accountLabel}`);
- refetchPools();
- refreshSubscriptionsData();
+ await refreshSubscriptionsData();
  setGroupBajaConfirm(null);
  };
 
@@ -789,7 +798,6 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
    try {
      await addSlotToRealAccount(serviceKey, acct.id, acct.slots || []);
      showToast(`Cupo #${(acct.slots || []).length + 1} agregado a ${acct.label || acct.id}`);
-     refetchPools();
      await refreshSubscriptionsData();
    } catch (err) {
      showToast(err.message, 'error');
@@ -814,7 +822,6 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
    try {
      await removeSlotFromRealAccount(serviceKey, accountRef, slotIndex, allSlots);
      showToast(`Cupo eliminado de ${removeSlotConfirm.accountLabel}`);
-     refetchPools();
      await refreshSubscriptionsData();
    } catch (err) {
      showToast(err.message, 'error');
@@ -828,8 +835,7 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
      const enabled = !disabledSlots.includes(idx);
      await updateGroupEnabledSlots(serviceKey, group.id, idx, !enabled, group.users || [], disabledSlots);
      showToast(`${enabled ? 'Cupo deshabilitado' : 'Cupo habilitado'} en grupo #${group.accountId}`);
-     refetchPools();
-     refreshSubscriptionsData();
+     await refreshSubscriptionsData();
    } catch (err) {
      showToast(err.message, 'error');
    }
@@ -873,6 +879,7 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
      }
 
       showToast(`Eliminación de ${oldSlot.memberAlias} confirmada`);
+      await refreshSubscriptionsData();
    } catch (err) {
      showToast(`Error confirmando eliminación: ${err.message}`, 'error');
    }
@@ -882,6 +889,7 @@ export default function Subscriptions({ onNavigate, navData, servicesConfig }) {
    try {
      await completeAlert(alert.id, { resolvedVia: 'subscriptions' });
       showToast(`Acceso verificado para ${alert.userAlias}`);
+      await refreshSubscriptionsData();
    } catch (err) {
      showToast(`Error verificando acceso: ${err.message}`, 'error');
    }

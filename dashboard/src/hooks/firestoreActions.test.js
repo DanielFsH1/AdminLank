@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockDoc, mockGetDoc, mockUpdateDoc, mockRunTransaction, mockTransactionGet, mockTransactionUpdate } = vi.hoisted(() => ({
+const { mockDoc, mockGetDoc, mockSetDoc, mockUpdateDoc, mockRunTransaction, mockTransactionGet, mockTransactionUpdate } = vi.hoisted(() => ({
   mockDoc: vi.fn((...segments) => ({
     path: segments.filter((segment) => typeof segment === 'string').join('/'),
   })),
   mockGetDoc: vi.fn(),
+  mockSetDoc: vi.fn(),
   mockUpdateDoc: vi.fn(),
   mockRunTransaction: vi.fn(),
   mockTransactionGet: vi.fn(),
@@ -18,7 +19,7 @@ vi.mock('../firebase', () => ({
 vi.mock('firebase/firestore', () => ({
   doc: mockDoc,
   updateDoc: mockUpdateDoc,
-  setDoc: vi.fn(),
+  setDoc: mockSetDoc,
   deleteDoc: vi.fn(),
   deleteField: vi.fn(),
   arrayUnion: vi.fn(),
@@ -35,7 +36,11 @@ vi.mock('firebase/firestore', () => ({
   runTransaction: mockRunTransaction,
 }));
 
-import { confirmRecurringExpense } from './firestoreActions';
+import {
+  cancelScheduledManualAlert,
+  confirmRecurringExpense,
+  createScheduledManualAlert,
+} from './firestoreActions';
 
 function buildSnapshot(data) {
   return {
@@ -313,5 +318,122 @@ describe('confirmRecurringExpense', () => {
     const ledgerUpdateCall = mockTransactionUpdate.mock.calls.find(([ref]) => ref.path === 'finance/manual-ledger');
     expect(ledgerUpdateCall).toBeTruthy();
     expect(ledgerUpdateCall[1].entries[0].status).toBe('confirmed');
+  });
+});
+
+describe('scheduled manual alerts', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-01T12:00:00Z'));
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('creates a scheduled manual alert with future date and scheduled status', async () => {
+    const scheduledId = await createScheduledManualAlert({
+      title: 'Llamar al banco',
+      note: 'Confirmar cargo pendiente',
+      scheduledDate: '2026-05-10',
+      priority: 'high',
+    });
+
+    expect(scheduledId).toMatch(/^scheduled_manual_/);
+    expect(mockSetDoc).toHaveBeenCalledTimes(1);
+    const [ref, payload] = mockSetDoc.mock.calls[0];
+    expect(ref.path).toBe(`scheduled-alerts/${scheduledId}`);
+    expect(payload.title).toBe('Llamar al banco');
+    expect(payload.note).toBe('Confirmar cargo pendiente');
+    expect(payload.scheduledDate).toBe('2026-05-10');
+    expect(payload.priority).toBe('high');
+    expect(payload.status).toBe('scheduled');
+    expect(payload.source).toBe('scheduled_manual_alert');
+    expect(payload.createdBy).toBe('manual_user');
+    expect(payload.generatedAlertId).toBe(null);
+    expect(payload.generatedAt).toBe(null);
+    expect(payload.cancelledAt).toBe(null);
+    expect(payload.createdAt).toBe('2026-05-01T12:00:00.000Z');
+  });
+
+  it('rejects a scheduled manual alert without future date', async () => {
+    await expect(createScheduledManualAlert({
+      title: 'Llamar al banco',
+      note: '',
+      scheduledDate: '',
+      priority: 'high',
+    })).rejects.toThrow('Debes elegir una fecha futura válida');
+
+    await expect(createScheduledManualAlert({
+      title: 'Llamar al banco',
+      note: '',
+      scheduledDate: '2026-05-01',
+      priority: 'high',
+    })).rejects.toThrow('Debes elegir una fecha futura válida');
+
+    await expect(createScheduledManualAlert({
+      title: 'Llamar al banco',
+      note: '',
+      scheduledDate: '2026-02-31',
+      priority: 'high',
+    })).rejects.toThrow('Debes elegir una fecha futura válida');
+  });
+
+  it('rejects a scheduled manual alert without title or valid priority', async () => {
+    await expect(createScheduledManualAlert({
+      title: '   ',
+      note: '',
+      scheduledDate: '2026-05-10',
+      priority: 'high',
+    })).rejects.toThrow('Debes escribir un título');
+
+    await expect(createScheduledManualAlert({
+      title: 'Llamar al banco',
+      note: '',
+      scheduledDate: '2026-05-10',
+      priority: 'urgent',
+    })).rejects.toThrow('Debes elegir una prioridad válida');
+  });
+
+  it('cancels a scheduled manual alert without deleting the document', async () => {
+    mockGetDoc.mockResolvedValue({
+      exists: () => true,
+      data: () => ({
+        title: 'Pagar factura',
+        status: 'scheduled',
+        scheduledDate: '2026-05-15',
+      }),
+    });
+
+    await cancelScheduledManualAlert('scheduled_manual_1');
+
+    expect(mockGetDoc).toHaveBeenCalledTimes(1);
+    expect(mockUpdateDoc).toHaveBeenCalledTimes(1);
+    const [ref, payload] = mockUpdateDoc.mock.calls[0];
+    expect(ref.path).toBe('scheduled-alerts/scheduled_manual_1');
+    expect(payload.status).toBe('cancelled');
+    expect(payload.cancelledAt).toBe('2026-05-01T12:00:00.000Z');
+  });
+
+  it('rejects cancellation when the scheduled alert does not exist or is not pending', async () => {
+    mockGetDoc.mockResolvedValueOnce({
+      exists: () => false,
+      data: () => null,
+    });
+
+    await expect(cancelScheduledManualAlert('scheduled_manual_missing')).rejects.toThrow('La alerta programada no existe');
+    expect(mockUpdateDoc).not.toHaveBeenCalled();
+
+    mockGetDoc.mockResolvedValueOnce({
+      exists: () => true,
+      data: () => ({
+        title: 'Pagar factura',
+        status: 'generated',
+      }),
+    });
+
+    await expect(cancelScheduledManualAlert('scheduled_manual_generated')).rejects.toThrow('Solo puedes cancelar alertas programadas pendientes');
+    expect(mockUpdateDoc).not.toHaveBeenCalled();
   });
 });

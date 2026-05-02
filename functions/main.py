@@ -1352,6 +1352,8 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
             db, ok_accounts, alerts_data, services_config=services_config,
             generated_at=report['generatedAt'],
         )
+        scheduled_manual_alert_count = lank_alerts.generate_scheduled_manual_alerts(db)
+        alerts_generated += scheduled_manual_alert_count
 
         # Save analysis state AFTER alert generation so a crash during alerts
         # doesn't permanently skip unprocessed emails (UIDs not yet committed).
@@ -2118,6 +2120,8 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
         db, ok_accounts, alerts_data, services_config=services_config,
         generated_at=report['generatedAt'],
     )
+    scheduled_manual_alert_count = lank_alerts.generate_scheduled_manual_alerts(db)
+    alerts_generated += scheduled_manual_alert_count
 
     # Save analysis state AFTER alert generation so a crash during alerts
     # doesn't permanently skip unprocessed emails (UIDs not yet committed).

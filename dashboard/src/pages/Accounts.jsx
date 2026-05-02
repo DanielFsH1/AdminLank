@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { useCollection, useDocument } from '../hooks/useFirestore';
-import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
+import { useDocument } from '../hooks/useFirestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SERVICES, getServiceMeta, getProfileImage, getAllServiceKeys, getPoolServiceKeys, getUserFields } from '../config/services';
 import { updateGroupUser, removeGroupUser, addGroupUser, createLankGroup, deleteLankGroup, DEFAULT_MASTER_CONFIG, updateGroupEnabledSlots, updateLankGroupStatus, updateSlot, createManualAlert, updateLankMasterAccount } from '../hooks/firestoreActions';
@@ -17,14 +17,15 @@ function getUserEditableFields(svcId) {
  return getUserFields(svcId);
 }
 
-export default function Accounts({ navData, onNavigate, servicesConfig }) {
+export default function Accounts({ navData, onNavigate }) {
  // Support both legacy string (accountId) and rich object { accountId, serviceKey, userAlias }
  const highlightAccountId = typeof navData === 'string' ? navData : navData?.accountId || null;
  const highlightServiceKey = typeof navData === 'object' ? navData?.serviceKey : null;
  const highlightUserAlias = typeof navData === 'object' ? navData?.userAlias : null;
 
- const { data: accounts, loading, refetch: refetchAccounts } = useCollection('accounts');
  const { data: masterConfigDoc } = useDocument('config', 'subscription-master', { realtime: false });
+ const [accounts, setAccounts] = useState([]);
+ const [loading, setLoading] = useState(true);
  const [search, setSearch] = useState('');
  const [expandedId, setExpandedId] = useState(highlightAccountId || null);
  const [filterService, setFilterService] = useState(new Set()); // empty = all, else set of service keys
@@ -42,10 +43,16 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
  const [editAccountValues, setEditAccountValues] = useState({ canonicalAlias: '', fullName: '', email: '', whatsapp: '' });
  const [savingAccount, setSavingAccount] = useState(false);
  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
+ const accountsRequestIdRef = useRef(0);
+ const groupsRequestIdRef = useRef(0);
+ const poolDetailsRequestIdRef = useRef(0);
+ const pendingUsersRequestIdRef = useRef(0);
 
  const masterConfig = useMemo(() => {
    if (masterConfigDoc) {
-     const { id, updatedAt, ...services } = masterConfigDoc;
+     const services = Object.fromEntries(
+       Object.entries(masterConfigDoc).filter(([key]) => key !== 'id' && key !== 'updatedAt'),
+     );
      return { ...DEFAULT_MASTER_CONFIG, ...services };
    }
    return DEFAULT_MASTER_CONFIG;
@@ -60,7 +67,16 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
  }, []);
 
  // ─── Data loading functions ───
+ const loadAccounts = useCallback(async () => {
+   const requestId = ++accountsRequestIdRef.current;
+   const snap = await getDocs(collection(db, 'accounts'));
+   if (requestId !== accountsRequestIdRef.current) return;
+   setAccounts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+   setLoading(false);
+ }, []);
+
  const loadGroups = useCallback(async () => {
+   const requestId = ++groupsRequestIdRef.current;
    const services = getAllServiceKeys();
    const results = {};
    await Promise.all(services.map(async svc => {
@@ -69,50 +85,51 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
      snap.docs.forEach(d => { docs[d.id] = d.data(); });
      results[svc] = docs;
    }));
+   if (requestId !== groupsRequestIdRef.current) return;
    setGroups(results);
  }, []);
 
  const loadPoolDetails = useCallback(async () => {
+   const requestId = ++poolDetailsRequestIdRef.current;
    const poolSvcs = getPoolServiceKeys();
    const results = {};
    await Promise.all(poolSvcs.map(async svc => {
      const snap = await getDocs(collection(db, `service-pools/${svc}/real-accounts`));
      results[svc] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
    }));
+   if (requestId !== poolDetailsRequestIdRef.current) return;
    setPoolDetails(results);
  }, []);
 
- const refreshAccountsData = useCallback(async () => {
-   await Promise.all([loadGroups(), loadPoolDetails()]);
- }, [loadGroups, loadPoolDetails]);
-
- // Cargar grupos de todos los servicios
- useEffect(() => {
- loadGroups().catch(() => {});
- }, [loadGroups]);
-
- // Cargar cuentas reales (service-pools) para sincronización bidireccional
- useEffect(() => {
- loadPoolDetails().catch(() => {});
- }, [loadPoolDetails]);
-
- // Derivar aliases con acción pendiente desde alertas pendientes
- useEffect(() => {
- async function loadPendingUsers() {
-      try {
-        const { query, where, getDocs: fetchDocs } = await import('firebase/firestore');
-        const q = query(collection(db, 'alerts'), where('status', '==', 'pending'));
-        const snap = await fetchDocs(q);
-        const aliases = new Set();
-        snap.docs.forEach(d => {
-          const alias = (d.data().userAlias || '').toLowerCase();
-          if (alias) aliases.add(alias);
-        });
-        setPendingUserAliases(aliases);
-      } catch (err) { console.error('Error cargando alertas pendientes:', err); }
- }
- loadPendingUsers();
+ const loadPendingUsers = useCallback(async () => {
+   const requestId = ++pendingUsersRequestIdRef.current;
+   const snap = await getDocs(query(collection(db, 'alerts'), where('status', '==', 'pending')));
+   const aliases = new Set();
+   snap.docs.forEach(d => {
+     const alias = (d.data().userAlias || '').toLowerCase();
+     if (alias) aliases.add(alias);
+   });
+   if (requestId !== pendingUsersRequestIdRef.current) return;
+   setPendingUserAliases(aliases);
  }, []);
+
+ const refreshAccountsData = useCallback(async () => {
+   setLoading(true);
+   try {
+     const results = await Promise.allSettled([loadAccounts(), loadGroups(), loadPoolDetails(), loadPendingUsers()]);
+     if (results.some(result => result.status === 'rejected')) {
+       showToast('Algunos datos no se pudieron recargar; puede que veas información desactualizada.', 'error');
+     }
+   } finally {
+     setLoading(false);
+   }
+ }, [loadAccounts, loadGroups, loadPoolDetails, loadPendingUsers, showToast]);
+
+ useEffect(() => {
+   refreshAccountsData().catch((err) => {
+     console.error('Error cargando cuentas Lank:', err);
+   });
+ }, [refreshAccountsData]);
 
  useEffect(() => {
  if (highlightAccountId) {
@@ -190,7 +207,7 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
  };
 
  const matchesDeepSearch = (acctId, q) => {
- for (const [svc, accts] of Object.entries(groups)) {
+ for (const [, accts] of Object.entries(groups)) {
       const data = accts[String(acctId)];
       if (!data || !data.users) continue;
       for (const u of data.users) {
@@ -349,7 +366,7 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
  }
 
  showToast(`Usuario actualizado en cuenta #${acctId}`);
- refetchAccounts(); refreshAccountsData();
+ await refreshAccountsData();
  };
 
  const handleRemoveUser = (svcId, acctId, userAlias, currentUsers) => {
@@ -409,7 +426,7 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
       }
 
       showToast(`${userAlias} eliminado de la cuenta #${acctId}${serviceAccountRef ? '. Se creó una alerta para limpiar su acceso.' : ''}`);
-      refetchAccounts(); refreshAccountsData();
+      await refreshAccountsData();
  } catch (err) {
       showToast(`Error: ${err.message}`, 'error');
  }
@@ -427,7 +444,7 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
  const { svcId, acctId, currentUsers } = addUserModal;
  await addGroupUser(svcId, acctId, values, currentUsers);
  showToast(`${values.userAlias} agregado al grupo ${getServiceMeta(svcId).name} de cuenta #${acctId}`);
- refetchAccounts(); refreshAccountsData();
+ await refreshAccountsData();
  };
 
  // ─── CRUD: Crear grupo nuevo ───
@@ -447,7 +464,7 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
       cashback: values.cashback === 'true',
  });
  showToast(`Grupo ${getServiceMeta(values.serviceKey).name} creado para cuenta #${acctId}`);
- refetchAccounts(); refreshAccountsData();
+ await refreshAccountsData();
  };
 
  // ─── CRUD: Eliminar grupo ───
@@ -463,7 +480,7 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
  try {
       await deleteLankGroup(svcId, String(acctId));
       showToast(`Grupo ${serviceName} eliminado de cuenta #${acctId}`);
-      refetchAccounts(); refreshAccountsData();
+      await refreshAccountsData();
  } catch (err) {
       showToast(`Error: ${err.message}`, 'error');
  }
@@ -483,32 +500,12 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
    });
  };
 
- const handleSaveAccount = async () => {
-   if (!editAccountModal) return;
-   setSavingAccount(true);
-   try {
-     await updateLankMasterAccount(editAccountModal.acctId, {
-       canonicalAlias: editAccountValues.canonicalAlias,
-       fullName: editAccountValues.fullName,
-       lankGmailAddress: editAccountValues.email,
-       whatsapp: editAccountValues.whatsapp,
-     });
-     showToast(`Cuenta #${editAccountModal.acctId} actualizada`);
-     refetchAccounts(); refreshAccountsData();
-     setEditAccountModal(null);
-   } catch (err) {
-     showToast(`Error: ${err.message}`, 'error');
-   } finally {
-     setSavingAccount(false);
-   }
- };
-
  const handleToggleGroupSlot = async (svcId, acctId, slotIndex, currentUsers, currentDisabledSlots = []) => {
    try {
      const enabled = !currentDisabledSlots.includes(slotIndex);
      await updateGroupEnabledSlots(svcId, String(acctId), slotIndex, !enabled, currentUsers, currentDisabledSlots);
      showToast(`${enabled ? 'Cupo deshabilitado' : 'Cupo habilitado'} en cuenta #${acctId}`);
-     refetchAccounts(); refreshAccountsData();
+     await refreshAccountsData();
    } catch (err) {
      showToast(`Error: ${err.message}`, 'error');
    }
@@ -716,7 +713,7 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
                                   try {
                                     await updateLankGroupStatus(svc.id, String(acctId), { cashback: !cashback });
                                     showToast(`Cashback ${!cashback ? 'activado' : 'desactivado'} para ${meta.name} cuenta #${acctId}`);
-                                    refetchAccounts(); refreshAccountsData();
+                                    await refreshAccountsData();
                                   } catch (err) {
                                     showToast(`Error: ${err.message}`, 'error');
                                   }
@@ -1032,7 +1029,8 @@ export default function Accounts({ navData, onNavigate, servicesConfig }) {
             whatsapp: values.whatsapp,
           });
           showToast(`Cuenta #${editAccountModal.acctId} actualizada`);
-          refetchAccounts(); refreshAccountsData();
+          await refreshAccountsData();
+          setEditAccountModal(null);
         }}
         title={editAccountModal ? `Editar Cuenta Lank #${editAccountModal.acctId}` : 'Editar cuenta'}
         icon={<EditIcon size={16} />}
