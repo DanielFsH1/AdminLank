@@ -938,6 +938,51 @@ def _parse_email_date(date_str):
         return datetime.now(timezone.utc)
 
 
+def _ensure_month_rollover(db, current_month_key):
+    """Archive old month totals and reset overview when the month changes."""
+    try:
+        overview_ref = db.document('finance/overview')
+        overview_doc = overview_ref.get()
+        if not overview_doc.exists:
+            return
+
+        data = overview_doc.to_dict()
+        latest_month = data.get('latestMonth', '')
+
+        if not latest_month or latest_month >= current_month_key:
+            return
+
+        old_totals = data.get('totals', {})
+        months_list = data.get('months', [])
+        access_list = data.get('access', [])
+
+        archive_ref = db.document(f'finance/monthly-{latest_month}')
+        archive_ref.set({
+            'month': latest_month,
+            'totals': old_totals,
+            'accountCount': len(access_list),
+            'generatedAt': data.get('updatedAt', datetime.now(timezone.utc).isoformat()),
+            'archivedAt': datetime.now(timezone.utc).isoformat(),
+            'archivedBy': 'auto_rollover',
+        })
+
+        if current_month_key not in months_list:
+            months_list.append(current_month_key)
+
+        zero_totals = {k: 0 for k in old_totals}
+        overview_ref.update({
+            'latestMonth': current_month_key,
+            'months': months_list,
+            'totals': zero_totals,
+            'updatedAt': datetime.now(timezone.utc).isoformat(),
+            'updatedBy': 'auto_rollover',
+        })
+
+        print(f'Finance month rollover: {latest_month} -> {current_month_key}')
+    except Exception as e:
+        print(f'Warning: month rollover failed: {e}')
+
+
 def update_finance_from_analysis(db, ok_accounts):
     """Extract withdrawal events from analysis and update finance documents.
 
@@ -953,6 +998,8 @@ def update_finance_from_analysis(db, ok_accounts):
     current_month_idx = now.month - 1
     current_month_name = MONTH_NAMES_EN[current_month_idx]
     current_month_key = f'{now.year}-{str(now.month).zfill(2)}'
+
+    _ensure_month_rollover(db, current_month_key)
 
     withdrawal_events = []
 
