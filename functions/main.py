@@ -864,14 +864,6 @@ def save_notifications(db, account_id, alias, raw_emails, analysis_timestamp=Non
         })
 
 
-        count += 1
-        if count % 200 == 0:
-            batch.commit()
-            batch = db.batch()
-    if count % 200:
-        batch.commit()
-
-
 
 def cleanup_old_data(db):
     """Clean notifications >7 days and completed/discarded alerts >30 days."""
