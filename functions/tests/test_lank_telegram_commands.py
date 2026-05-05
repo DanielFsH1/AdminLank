@@ -75,15 +75,12 @@ class FakeDb:
         return FakeCollection(self.collections.get(name, []))
 
 
-def make_bot(*, alerts=None, latest_report=None, account_registry=None, groups=None, actionable_events=None):
+def make_bot(*, alerts=None, latest_report=None, account_registry=None, groups=None):
     documents = {
         "config/telegram-settings": {"botToken": "token", "adminChatId": "123", "enabled": True},
         "analysis/latest-report": latest_report or {"generatedAt": "2026-04-22T12:00:00+00:00", "accountsOk": 2, "totalAccounts": 2},
         "config/account-registry": account_registry or {"accounts": [{"id": 12}, {"id": 13}]},
     }
-    if actionable_events is not None:
-        documents["analysis/actionable-events"] = {"events": actionable_events}
-
     collections = {
         "alerts": alerts or [],
         "groups": groups or [FakeCollectionDoc("chatgpt", {"serviceName": "ChatGPT Plus"})],
@@ -97,10 +94,6 @@ def test_cmd_estado_counts_only_pending_firestore_alerts():
             FakeCollectionDoc("a1", {"status": "pending", "title": "Pendiente 1"}),
             FakeCollectionDoc("a2", {"status": "pending", "title": "Pendiente 2"}),
             FakeCollectionDoc("a3", {"status": "resolved", "title": "Resuelta"}),
-        ],
-        actionable_events=[
-            {"userName": "Mario", "accountId": 12, "subscription": "ChatGPT Plus"},
-            {"userName": "Luigi", "accountId": 13, "subscription": "ChatGPT Plus"},
         ],
     )
 
@@ -137,8 +130,6 @@ def test_cmd_alertas_lists_only_pending_firestore_alerts():
                 },
             ),
         ],
-        actionable_events=[
-        ],
     )
 
     response = bot._cmd_alertas()
@@ -146,5 +137,4 @@ def test_cmd_alertas_lists_only_pending_firestore_alerts():
     assert "1 alerta(s) pendiente(s)" in response
     assert "Eliminar perfil" in response
     assert "Peach" not in response
-
 

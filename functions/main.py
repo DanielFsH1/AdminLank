@@ -1318,6 +1318,119 @@ def update_group_on_leave(db, service, account_id, user_alias, reason=''):
     return False
 
 
+def build_enabled_analysis_accounts(credentials, registry):
+    cred_by_id = {int(a['accountId']): a for a in credentials}
+    accounts = []
+    for acc in registry:
+        aid = int(acc['id'])
+        cred = cred_by_id.get(aid)
+        if not cred or not cred.get('enabled', True):
+            continue
+        accounts.append({
+            'id': aid,
+            'canonicalAlias': acc.get('canonicalAlias', ''),
+            'fullName': acc.get('fullName', ''),
+            'email': cred['email'],
+            'appPassword': cred['appPassword'],
+        })
+    return accounts
+
+
+def run_analysis_accounts(db, accounts, rates, db_context, state, services_config, days=3):
+    report = {
+        'generatedAt': datetime.now(timezone.utc).isoformat(),
+        'days': days,
+        'usedUidTracking': state.get('lastRun') is not None,
+        'accounts': [],
+    }
+    new_state_accounts = dict(state.get('accounts', {}))
+
+    for account in accounts:
+        aid = str(account['id'])
+        last_uid = new_state_accounts.get(aid, {}).get('lastUid')
+        account_result = analyze_account(
+            account, rates, days, db_context, db, last_uid,
+            services_config=services_config,
+        )
+        report['accounts'].append(account_result)
+
+        if account_result.get('rawEmails'):
+            save_notifications(
+                db,
+                account['id'],
+                account.get('canonicalAlias', ''),
+                account_result['rawEmails'],
+                analysis_timestamp=report['generatedAt'],
+            )
+
+        max_uid = account_result.get('maxUid', 0)
+        prev_uid = new_state_accounts.get(aid, {}).get('lastUid', 0)
+        if max_uid > prev_uid:
+            new_state_accounts[aid] = {
+                'lastUid': max_uid,
+                'lastRun': datetime.now(timezone.utc).isoformat(),
+                'accountAlias': account.get('canonicalAlias'),
+            }
+        elif aid not in new_state_accounts:
+            new_state_accounts[aid] = {
+                'lastUid': prev_uid,
+                'lastRun': datetime.now(timezone.utc).isoformat(),
+                'accountAlias': account.get('canonicalAlias'),
+            }
+
+    state['lastRun'] = datetime.now(timezone.utc).isoformat()
+    state['accounts'] = new_state_accounts
+    return report, state
+
+
+def analysis_totals(ok_accounts):
+    return {
+        'totalPending': sum(a['summary']['pending'] for a in ok_accounts),
+        'totalRelevant': sum(a['summary']['relevant'] for a in ok_accounts),
+        'totalRawEmails': sum(len(a.get('rawEmails', [])) for a in ok_accounts),
+        'totalEvents': sum(a['summary']['totalEvents'] for a in ok_accounts),
+        'totalIgnored': sum(a['summary']['ignored'] for a in ok_accounts),
+        'totalReview': sum(a['summary']['review'] for a in ok_accounts),
+    }
+
+
+def build_failed_accounts_payload(report):
+    failed_accounts = [a for a in report['accounts'] if a['access'] != 'ok']
+    return failed_accounts, [{
+        'accountId': a['accountId'],
+        'accountAlias': a.get('accountAlias', ''),
+        'access': a.get('access', 'unknown'),
+        'error': a.get('error', 'Error desconocido'),
+    } for a in failed_accounts]
+
+
+def persist_latest_analysis_report(db, report, ok_accounts, totals, alerts_generated, failed_payload):
+    db.document('analysis/latest-report').set({
+        'generatedAt': report['generatedAt'],
+        'mode': 'UID tracking' if report.get('usedUidTracking') else 'date fallback',
+        'totalAccounts': len(report['accounts']),
+        'accountsOk': len(ok_accounts),
+        'accountCount': len(ok_accounts),
+        'totalPending': totals['totalPending'],
+        'totalRelevant': totals['totalRelevant'],
+        'totalRawEmails': totals['totalRawEmails'],
+        'totalEvents': totals['totalEvents'],
+        'totalIgnored': totals['totalIgnored'],
+        'totalReview': totals['totalReview'],
+        'alertsGenerated': alerts_generated,
+        'accounts': [{
+            'accountId': a['accountId'],
+            'accountAlias': a.get('accountAlias', ''),
+            'access': 'ok',
+            'rawEmailCount': a['summary'].get('rawEmailCount', len(a.get('rawEmails', []))),
+            'pending': a['summary']['pending'],
+            'review': a['summary']['review'],
+            'relevant': a['summary']['relevant'],
+        } for a in ok_accounts],
+        'failedAccounts': failed_payload,
+    })
+
+
 # ────────────────────── MAIN ANALYSIS FUNCTION ──────────────────────
 
 @https_fn.on_request(
@@ -1347,67 +1460,11 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
         rates = load_rates(db)
         db_context = load_current_state_context(db, name_to_key)
         state = load_analysis_state(db)
-        system_flags = load_system_flags(db)
-
-        cred_by_id = {int(a['accountId']): a for a in credentials}
-        days = 3
-
-        # Build account list
-        accounts = []
-        for acc in registry:
-            aid = int(acc['id'])
-            cred = cred_by_id.get(aid)
-            if not cred or not cred.get('enabled', True):
-                continue
-            accounts.append({
-                'id': aid,
-                'canonicalAlias': acc.get('canonicalAlias', ''),
-                'fullName': acc.get('fullName', ''),
-                'email': cred['email'],
-                'appPassword': cred['appPassword'],
-            })
-
-        # Run analysis
-        report = {
-            'generatedAt': datetime.now(timezone.utc).isoformat(),
-            'days': days,
-            'usedUidTracking': state.get('lastRun') is not None,
-            'accounts': [],
-        }
-
-        new_state_accounts = dict(state.get('accounts', {}))
+        accounts = build_enabled_analysis_accounts(credentials, registry)
         alerts_data = load_alerts_from_firestore(db)
-
-        for account in accounts:
-            aid = str(account['id'])
-            last_uid = new_state_accounts.get(aid, {}).get('lastUid')
-            account_result = analyze_account(account, rates, days, db_context, db, last_uid, services_config=services_config)
-            report['accounts'].append(account_result)
-
-            # Save notifications (7-day retention)
-            if account_result['rawEmails']:
-                save_notifications(db, account['id'], account.get('canonicalAlias', ''), account_result['rawEmails'], analysis_timestamp=report['generatedAt'])
-
-            # Update state
-            max_uid = account_result.get('maxUid', 0)
-            prev_uid = new_state_accounts.get(aid, {}).get('lastUid', 0)
-            if max_uid > prev_uid:
-                new_state_accounts[aid] = {
-                    'lastUid': max_uid,
-                    'lastRun': datetime.now(timezone.utc).isoformat(),
-                    'accountAlias': account.get('canonicalAlias'),
-                }
-            elif aid not in new_state_accounts:
-                new_state_accounts[aid] = {
-                    'lastUid': prev_uid,
-                    'lastRun': datetime.now(timezone.utc).isoformat(),
-                    'accountAlias': account.get('canonicalAlias'),
-                }
-
-
-        # Save state
-        state['lastRun'] = datetime.now(timezone.utc).isoformat()
-        state['accounts'] = new_state_accounts
+        report, state = run_analysis_accounts(
+            db, accounts, rates, db_context, state, services_config,
+        )
 
         # Save report to Firestore
         ok_accounts = [a for a in report['accounts'] if a['access'] == 'ok']
@@ -1424,48 +1481,11 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
         # doesn't permanently skip unprocessed emails (UIDs not yet committed).
         save_analysis_state(db, state)
 
-        total_pending = sum(a['summary']['pending'] for a in ok_accounts)
-        total_relevant = sum(a['summary']['relevant'] for a in ok_accounts)
-        total_raw = sum(len(a.get('rawEmails', [])) for a in ok_accounts)
-
-        # Report: totalEvents = todos los eventos parseados, relevant = los que no son ignored
-        total_events = sum(a['summary']['totalEvents'] for a in ok_accounts)
-        total_ignored = sum(a['summary']['ignored'] for a in ok_accounts)
-        total_review = sum(a['summary']['review'] for a in ok_accounts)
-
-        failed_accounts = [a for a in report['accounts'] if a['access'] != 'ok']
-
-        failed_accounts_payload = [{
-            'accountId': a['accountId'],
-            'accountAlias': a.get('accountAlias', ''),
-            'access': a.get('access', 'unknown'),
-            'error': a.get('error', 'Error desconocido'),
-        } for a in failed_accounts]
-
-        db.document('analysis/latest-report').set({
-            'generatedAt': report['generatedAt'],
-            'mode': 'UID tracking' if report.get('usedUidTracking') else 'date fallback',
-            'totalAccounts': len(report['accounts']),
-            'accountsOk': len(ok_accounts),
-            'accountCount': len(ok_accounts),
-            'totalPending': total_pending,
-            'totalRelevant': total_relevant,
-            'totalRawEmails': total_raw,
-            'totalEvents': total_events,
-            'totalIgnored': total_ignored,
-            'totalReview': total_review,
-            'alertsGenerated': alerts_generated,
-            'accounts': [{
-                'accountId': a['accountId'],
-                'accountAlias': a.get('accountAlias', ''),
-                'access': 'ok',
-                'rawEmailCount': a['summary'].get('rawEmailCount', len(a.get('rawEmails', []))),
-                'pending': a['summary']['pending'],
-                'review': a['summary']['review'],
-                'relevant': a['summary']['relevant'],
-            } for a in ok_accounts],
-            'failedAccounts': failed_accounts_payload,
-        })
+        totals = analysis_totals(ok_accounts)
+        failed_accounts, failed_accounts_payload = build_failed_accounts_payload(report)
+        persist_latest_analysis_report(
+            db, report, ok_accounts, totals, alerts_generated, failed_accounts_payload,
+        )
 
         queued_job = adminbot_work_queue.enqueue_analysis_job(
             db,
@@ -1482,7 +1502,7 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
                 'summary': {
                     'accountsOk': len(ok_accounts),
                     'totalAccounts': len(report['accounts']),
-                    'totalRawEmails': total_raw,
+                    'totalRawEmails': totals['totalRawEmails'],
                     'alertsGeneratedByBackend': alerts_generated,
                 },
                 'telegramPolicy': {
@@ -1514,9 +1534,9 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
             'success': True,
             'analyzedAccounts': len(ok_accounts),
             'totalAccounts': len(report['accounts']),
-            'totalRawEmails': total_raw,
-            'totalPending': total_pending,
-            'totalRelevant': total_relevant,
+            'totalRawEmails': totals['totalRawEmails'],
+            'totalPending': totals['totalPending'],
+            'totalRelevant': totals['totalRelevant'],
             'alertsGenerated': alerts_generated,
             'financeRecordsUpdated': finance_records,
             'generatedAt': report['generatedAt'],
@@ -2099,7 +2119,6 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
 
     # Check if we already ran for this slot (prevent double execution)
     state = load_analysis_state(db)
-    system_flags = load_system_flags(db)
     last_run = state.get('lastRun')
     if last_run:
         try:
@@ -2129,53 +2148,11 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
     registry = load_account_registry(db)
     rates = load_rates(db)
     db_context = load_current_state_context(db, name_to_key)
-
-    cred_by_id = {int(a['accountId']): a for a in credentials}
-    days = 3
-    accounts = []
-    for acc in registry:
-        aid = int(acc['id'])
-        cred = cred_by_id.get(aid)
-        if not cred or not cred.get('enabled', True):
-            continue
-        accounts.append({
-            'id': aid, 'canonicalAlias': acc.get('canonicalAlias', ''),
-            'email': cred['email'], 'appPassword': cred['appPassword'],
-        })
-
-    report = {
-        'generatedAt': datetime.now(timezone.utc).isoformat(),
-        'days': days, 'usedUidTracking': state.get('lastRun') is not None,
-        'accounts': [],
-    }
-
-    new_state_accounts = dict(state.get('accounts', {}))
+    accounts = build_enabled_analysis_accounts(credentials, registry)
     alerts_data = load_alerts_from_firestore(db)
-
-    for account in accounts:
-        aid = str(account['id'])
-        last_uid = new_state_accounts.get(aid, {}).get('lastUid')
-        account_result = analyze_account(account, rates, days, db_context, db, last_uid, services_config=services_config)
-        report['accounts'].append(account_result)
-
-        if account_result['rawEmails']:
-            save_notifications(db, account['id'], account.get('canonicalAlias', ''), account_result['rawEmails'], analysis_timestamp=report['generatedAt'])
-
-        max_uid = account_result.get('maxUid', 0)
-        prev_uid = new_state_accounts.get(aid, {}).get('lastUid', 0)
-        if max_uid > prev_uid:
-            new_state_accounts[aid] = {
-                'lastUid': max_uid, 'lastRun': datetime.now(timezone.utc).isoformat(),
-                'accountAlias': account.get('canonicalAlias'),
-            }
-        elif aid not in new_state_accounts:
-            new_state_accounts[aid] = {
-                'lastUid': prev_uid, 'lastRun': datetime.now(timezone.utc).isoformat(),
-                'accountAlias': account.get('canonicalAlias'),
-            }
-
-    state['lastRun'] = datetime.now(timezone.utc).isoformat()
-    state['accounts'] = new_state_accounts
+    report, state = run_analysis_accounts(
+        db, accounts, rates, db_context, state, services_config,
+    )
 
     # Save report
     ok_accounts = [a for a in report['accounts'] if a['access'] == 'ok']
@@ -2192,39 +2169,11 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
     # doesn't permanently skip unprocessed emails (UIDs not yet committed).
     save_analysis_state(db, state)
 
-    total_pending = sum(a['summary']['pending'] for a in ok_accounts)
-    total_relevant = sum(a['summary']['relevant'] for a in ok_accounts)
-    total_raw = sum(len(a.get('rawEmails', [])) for a in ok_accounts)
-    total_events = sum(a['summary']['totalEvents'] for a in ok_accounts)
-    total_ignored = sum(a['summary']['ignored'] for a in ok_accounts)
-    total_review = sum(a['summary']['review'] for a in ok_accounts)
-
-    failed_accounts = [a for a in report['accounts'] if a['access'] != 'ok']
-    failed_accounts_payload = [{
-        'accountId': a['accountId'],
-        'accountAlias': a.get('accountAlias', ''),
-        'access': a.get('access', 'unknown'),
-        'error': a.get('error', 'Error desconocido'),
-    } for a in failed_accounts]
-
-    db.document('analysis/latest-report').set({
-        'generatedAt': report['generatedAt'],
-        'mode': 'UID tracking' if report.get('usedUidTracking') else 'date fallback',
-        'totalAccounts': len(report['accounts']),
-        'accountsOk': len(ok_accounts),
-        'accountCount': len(ok_accounts),
-        'totalPending': total_pending,
-        'totalRelevant': total_relevant,
-        'totalRawEmails': total_raw,
-        'totalEvents': total_events,
-        'totalIgnored': total_ignored,
-        'totalReview': total_review,
-        'alertsGenerated': alerts_generated,
-        'accounts': [{'accountId': a['accountId'], 'accountAlias': a.get('accountAlias', ''),
-                      'access': 'ok', 'pending': a['summary']['pending'],
-                      'relevant': a['summary']['relevant']} for a in ok_accounts],
-        'failedAccounts': failed_accounts_payload,
-    })
+    totals = analysis_totals(ok_accounts)
+    failed_accounts, failed_accounts_payload = build_failed_accounts_payload(report)
+    persist_latest_analysis_report(
+        db, report, ok_accounts, totals, alerts_generated, failed_accounts_payload,
+    )
 
     queued_job = adminbot_work_queue.enqueue_analysis_job(
         db,
@@ -2242,7 +2191,7 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
             'summary': {
                 'accountsOk': len(ok_accounts),
                 'totalAccounts': len(report['accounts']),
-                'totalRawEmails': total_raw,
+                'totalRawEmails': totals['totalRawEmails'],
                 'alertsGeneratedByBackend': alerts_generated,
             },
             'telegramPolicy': {
@@ -3018,4 +2967,3 @@ def manage_storage(req: https_fn.Request) -> https_fn.Response:
         }),
         content_type='application/json',
     )
-

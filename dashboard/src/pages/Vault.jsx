@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, setDoc, updateDoc, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useDocument } from '../hooks/useFirestore';
 import { SERVICES, BANKS, getServiceMeta, getBankMeta, getPoolServiceKeys, getAllServiceKeys } from '../config/services';
@@ -59,7 +59,7 @@ function normalizeVaultEmail(email) {
  return (email || '').trim().toLowerCase();
 }
 
-export default function Vault({ onNavigate, navData, servicesConfig }) {
+export default function Vault({ onNavigate, navData, _servicesConfig }) {
  const { data: masterConfigDoc } = useDocument('config', 'services');
  const [activeTab, setActiveTab] = useState('credentials');
  const [pools, setPools] = useState({});
@@ -93,7 +93,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
  const [googleEditValues, setGoogleEditValues] = useState({ email: '', password: '', notes: '', fullName: '', canonicalAlias: '', whatsapp: '' });
  const [googleCreateModal, setGoogleCreateModal] = useState(null); // { type: 'lank_google' | 'tertiary' }
  const [googleCreateValues, setGoogleCreateValues] = useState({ type: 'tertiary', lankAccountId: '', email: '', password: '', notes: '', canonicalAlias: '', fullName: '', whatsapp: '' });
- const [lankRegistry, setLankRegistry] = useState([]);
+ const [, setLankRegistry] = useState([]);
 
  // ─── SEGURIDAD: PIN de Bóveda ───
  const [vaultUnlocked, setVaultUnlocked] = useState(false);
@@ -105,7 +105,6 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
  const [pinConfirm, setPinConfirm] = useState('');
  const [changingPin, setChangingPin] = useState(false); // modo cambiar PIN
  const lastActivityRef = useRef(Date.now());
- const pinInputRefs = useRef([]);
  const lockTimerRef = useRef(null);
 
  // ─── App Passwords (IMAP) ───
@@ -126,13 +125,13 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
 
  // Servicios con credenciales compartidas (password)
  const PASSWORD_SERVICES = useMemo(() =>
-   getAllServiceKeys().filter(k => getServiceMeta(k).accessType === 'credentials'),
-   [servicesConfig]);
+   getAllServiceKeys().filter(k => ['credentials', 'profile_project'].includes(getServiceMeta(k).accessType)),
+ []);
 
  // Servicios con pool, ordenados por displayOrder
  const SERVICE_ORDER = useMemo(() =>
    getPoolServiceKeys(),
-   [servicesConfig]);
+   []);
 
  const getRealAccountSlots = useCallback((serviceKey) => {
    return masterConfig[serviceKey]?.maxSlotsPerRealAccount || getServiceMeta(serviceKey).maxSlots || 4;
@@ -444,16 +443,12 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
 
  // Load real accounts
  useEffect(() => {
- let cancelled = false;
  loadPools().catch(() => {});
- return () => { cancelled = true; };
  }, [loadPools]);
 
  // Load secrets
  useEffect(() => {
- let cancelled = false;
  loadSecrets().catch(() => {});
- return () => { cancelled = true; };
  }, [loadSecrets]);
 
  // Load Lank account registry for principal email accounts
@@ -516,10 +511,10 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
  if (domain.includes('outlook') || domain.includes('hotmail') || domain.includes('live')) return 'Contraseña Outlook';
  return 'Contraseña del email';
  };
- const getSecret = (ref) => {
+ const getSecret = useCallback((ref) => {
  const s = secrets[ref];
  return s ? decryptFields(s, SERVICE_SENSITIVE) : null;
- };
+ }, [secrets]);
  const getCard = (id) => {
  const c = cards[id];
  return c ? decryptFields(c, CARD_SENSITIVE) : null;
@@ -529,8 +524,8 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
  const getSlotDeletionAlerts = (ref) => alerts.filter(a => a.serviceAccountRef === ref && a.type === 'slot_pending_deletion');
  const getPendingAlert = (ref) => getPasswordChangeAlert(ref);
  const getVaultAlertState = (ref) => {
-   if (getPasswordChangeAlert(ref)) return 'password_change';
-   if (getAccessVerifyAlerts(ref).length > 0 || getSlotDeletionAlerts(ref).length > 0) return 'access_verify';
+   if (getPasswordChangeAlert(ref) || getSlotDeletionAlerts(ref).length > 0) return 'password_change';
+   if (getAccessVerifyAlerts(ref).length > 0) return 'access_verify';
    return null;
  };
  // Normalizar ID de tarjeta: misma lógica que handleCreateCard usa al crear
@@ -546,7 +541,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
       );
  });
  return grouped;
- }, [pools]);
+ }, [pools, SERVICE_ORDER]);
 
  // Search filter - searches EVERYTHING
  const filteredAccounts = useMemo(() => {
@@ -575,7 +570,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
       if (filtered.length > 0) result[svc] = filtered;
  });
  return result;
- }, [accountsByService, searchQuery, secrets]);
+ }, [accountsByService, getSecret, searchQuery]);
 
  // Unique cards from real accounts + standalone vault-cards
  // Key = cardId from Firestore, value = { id, label, cardData, linkedAccounts }
@@ -606,9 +601,6 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
  });
  return cardMap;
  }, [pools, cards]);
-
- // Card labels for dropdown
- const cardLabels = useMemo(() => Object.values(allCards).map(c => c.label).sort(), [allCards]);
 
  // All vault email accounts for the email picker in real account creation
  const vaultEmailOptions = useMemo(() => {
@@ -688,7 +680,9 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
        const isPasswordShared = svcMeta.accessType === 'credentials' || svcMeta.accessType === 'profile_project';
        if (!isPasswordShared) return;
 
-       const activeSlots = (realData.slots || []).filter(s => s.memberAlias && s.status === 'active');
+       const activeSlots = (realData.slots || [])
+         .map((slot, idx) => ({ ...slot, _slotNumber: slot.slotNumber || idx + 1 }))
+         .filter(s => s.memberAlias && s.status === 'active');
        if (activeSlots.length === 0) return;
 
        const serviceName = svcMeta.name || svcKey;
@@ -707,7 +701,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
            description: `La contrasena de ${acctLabel} fue cambiada. Verificar acceso de ${slot.memberAlias}.`,
            reason: `Contrasena cambiada ${dateStr}`,
            userAlias: slot.memberAlias,
-           slotNumber: slot.slotNumber || 0,
+           slotNumber: slot._slotNumber,
            accountId: slot.assignedFrom?.accountId ? String(slot.assignedFrom.accountId) : '',
            affectedUsers: [slot.memberAlias],
          });
@@ -1023,14 +1017,6 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
  });
  };
 
- // ─── CREATE CARD ───
- const openCreateCard = () => {
- setCreateValues({
-      bank: '', number: '', cvv: '', expiry: '', holder: '', notes: '',
- });
- setCreateModal({ mode: 'card' });
- };
-
  const handleCreateCard = async () => {
  const cleanNum = cleanCardNumber(createValues.number || '');
  const derivedLast4 = getLast4(cleanNum);
@@ -1051,7 +1037,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
 
  // ─── DELETE CARD ───
  const handleDeleteCard = (cardId, cardLabel) => {
-   const card = vaultCards[cardId];
+   const card = cards[cardId];
    const activeCharges = (card?.recurringCharges || []).filter(rc => rc.active);
    if (activeCharges.length > 0) {
      showToast(`No se puede eliminar: tiene ${activeCharges.length} cobro${activeCharges.length > 1 ? 's' : ''} recurrente${activeCharges.length > 1 ? 's' : ''} activo${activeCharges.length > 1 ? 's' : ''}. Desactívalos primero.`, 'error');
@@ -1253,8 +1239,6 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
 
  // Pantalla de configurar/ingresar PIN
  if (!vaultUnlocked || changingPin) {
-   const isSetup = settingPin || changingPin;
-   const needsConfirm = isSetup && pinConfirm;
    const title = changingPin
      ? (pinConfirm ? 'Confirma tu nuevo PIN' : 'Ingresa tu nuevo PIN')
      : settingPin
@@ -1447,6 +1431,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
                       const passwordAlert = getPasswordChangeAlert(acct.serviceAccountRef);
                       const accessAlerts = getAccessVerifyAlerts(acct.serviceAccountRef);
                       const slotAlerts = getSlotDeletionAlerts(acct.serviceAccountRef);
+                      const primaryDeletionAlert = slotAlerts[0];
                       const hasPassword = secret?.password;
                       const hasGooglePw = secret?.googlePassword;
                       const pwKey = `pw-${acct.serviceAccountRef}`;
@@ -1459,10 +1444,10 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
                           key={acct.id}
                           id={`vault-${acct.serviceAccountRef}`}
                         >
-                          {alertState === 'password_change' && passwordAlert && (
+                          {alertState === 'password_change' && (
                             <div className="vault-pending-banner">
-                              <DotRed /> Cambio de contraseña pendiente
-                              <span className="vault-pending-reason">{passwordAlert.reason || passwordAlert.title}</span>
+                              <DotRed /> {passwordAlert ? 'Cambio de contraseña pendiente' : 'Eliminación pendiente'}
+                              <span className="vault-pending-reason">{passwordAlert?.reason || primaryDeletionAlert?.reason || passwordAlert?.title || primaryDeletionAlert?.title}</span>
                             </div>
                           )}
                           {alertState === 'access_verify' && (
@@ -1554,10 +1539,10 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
 
                           <div className="vault-card-actions">
                             <button
-                              className={`vault-action-btn ${pendingAlert ? 'urgent' : 'edit'}`}
+                              className={`vault-action-btn ${passwordAlert ? 'urgent' : 'edit'}`}
                               onClick={() => openCredentialEdit(acct, svc)}
                             >
-                              {pendingAlert ? <><LockKeyIcon size={16} /> Cambiar contraseña</> : <><EditIcon size={16} /> Editar</>}
+                              {passwordAlert ? <><LockKeyIcon size={16} /> Cambiar contraseña</> : <><EditIcon size={16} /> Editar</>}
                             </button>
                             <button
                               className="vault-action-btn view"
@@ -1589,7 +1574,7 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
       {activeTab === 'cards' && (
         <div className="vault-cards-section">
           {Object.entries(allCards)
-            .filter(([cardId, info]) => {
+            .filter(([, info]) => {
               if (!searchQuery || searchQuery.length < 2) return true;
               const q = normalizeSearch(searchQuery);
               return nMatch(info.label, q) ||
@@ -2073,7 +2058,6 @@ export default function Vault({ onNavigate, navData, servicesConfig }) {
 
               <div className="vault-accounts-grid" style={{ display: 'grid' }}>
                 {filteredImap.map((account, idx) => {
-                  const isEditing = editingAppPw?.index === idx;
                   const pwKey = `appPw-${idx}`;
                   const isRevealed = revealedFields.has(pwKey);
                   const linkedGoogle = googleSecrets.find(g =>

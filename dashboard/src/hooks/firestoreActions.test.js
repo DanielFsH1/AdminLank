@@ -39,6 +39,7 @@ vi.mock('firebase/firestore', () => ({
 import {
   cancelScheduledManualAlert,
   confirmRecurringExpense,
+  createSlotDeletionAlert,
   createScheduledManualAlert,
 } from './firestoreActions';
 
@@ -435,5 +436,44 @@ describe('scheduled manual alerts', () => {
 
     await expect(cancelScheduledManualAlert('scheduled_manual_generated')).rejects.toThrow('Solo puedes cancelar alertas programadas pendientes');
     expect(mockUpdateDoc).not.toHaveBeenCalled();
+  });
+});
+
+describe('slot deletion alerts', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-05T12:00:00Z'));
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('creates a pending slot deletion alert with slot metadata and visible reason', async () => {
+    const alertId = await createSlotDeletionAlert({
+      service: 'ChatGPT Plus',
+      accountId: '28',
+      accountAlias: 'Daniel',
+      userAlias: 'Alan',
+      serviceAccountRef: 'chatgpt_2',
+      realAccountEmail: 'pool@example.com',
+      slotNumber: 1,
+      reason: 'Dado de baja del grupo 28',
+      source: 'user_removal',
+    });
+
+    expect(alertId).toMatch(/^manual_/);
+    expect(mockSetDoc).toHaveBeenCalledTimes(1);
+    const [ref, payload] = mockSetDoc.mock.calls[0];
+    expect(ref.path).toBe(`alerts/${alertId}`);
+    expect(payload.type).toBe('slot_pending_deletion');
+    expect(payload.status).toBe('pending');
+    expect(payload.priority).toBe('high');
+    expect(payload.serviceAccountRef).toBe('chatgpt_2');
+    expect(payload.slotNumber).toBe(1);
+    expect(payload.reason).toBe('Dado de baja del grupo 28');
+    expect(payload.dependsOn).toBe(null);
+    expect(payload.createdAt).toBe('2026-05-05T12:00:00.000Z');
   });
 });

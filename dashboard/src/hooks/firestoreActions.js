@@ -3,9 +3,9 @@
  * Solo el admin (UID Ls1vtEv0rvY8DIyKKKmQY5SlOOQ2) puede escribir,
  * garantizado por las Firestore Security Rules.
  */
-import { doc, updateDoc, setDoc, deleteDoc, deleteField, arrayUnion, Timestamp, getDoc as firestoreGetDoc, collection, addDoc, query, orderBy, getDocs, limit, writeBatch, where, runTransaction } from 'firebase/firestore';
+import { doc, updateDoc, setDoc, deleteDoc, deleteField, arrayUnion, Timestamp, getDoc as firestoreGetDoc, collection, addDoc, query, orderBy, getDocs, writeBatch, where, runTransaction } from 'firebase/firestore';
 import { db } from '../firebase';
-import { SERVICES, getServiceMeta, getServiceKeyByName } from '../config/services';
+import { SERVICES, getServiceMeta } from '../config/services';
 import { encrypt } from '../utils/crypto';
 
 // --- Helpers ---
@@ -329,6 +329,25 @@ export async function createManualAlert(alertData) {
   return alertId;
 }
 
+export async function createSlotDeletionAlert(alertData) {
+  const userAlias = alertData.userAlias || 'usuario';
+  const service = alertData.service || 'servicio';
+  const serviceAccountRef = alertData.serviceAccountRef || 'cuenta real';
+  const slotNumber = alertData.slotNumber || null;
+  const reason = alertData.reason || `Dado de baja del grupo ${alertData.accountId || ''}`.trim();
+  const slotText = slotNumber ? ` del cupo ${slotNumber}` : '';
+
+  return createManualAlert({
+    ...alertData,
+    type: 'slot_pending_deletion',
+    priority: alertData.priority || 'high',
+    title: `Confirmar eliminacion de ${userAlias}`,
+    description: `Confirmar que ${userAlias} fue eliminado${slotText} de ${serviceAccountRef} (${service}).`,
+    reason,
+    dependsOn: alertData.dependsOn ?? null,
+  });
+}
+
 export async function createScheduledManualAlert({ title, note = '', scheduledDate, priority }) {
   const cleanTitle = (title || '').trim();
   const cleanNote = (note || '').trim();
@@ -452,8 +471,10 @@ export async function updateGroupUser(serviceKey, accountId, userIndex, updatedU
 
 /**
  * Elimina un usuario de un grupo Lank (baja manual).
- * Si el usuario tenía un slot en una cuenta real con contraseña compartida,
- * genera alertas de password_change y access_verify automáticamente.
+ * Si el usuario tenia un slot en una cuenta real, genera una alerta para
+ * confirmar eliminacion del slot. En servicios con contrasena compartida,
+ * tambien genera una alerta de cambio de contrasena; access_verify se crea
+ * despues de guardar la nueva contrasena en Boveda.
  * @param {string} serviceKey - ej: 'f1tv', 'chatgpt'
  * @param {string|number} accountId - ID de cuenta Lank
  * @param {string} userAlias - Alias del usuario a eliminar
@@ -535,11 +556,11 @@ export async function removeGroupUser(serviceKey, accountId, userAlias, currentU
     });
   }
 
-  // --- Generar alertas de cambio de contraseña si aplica ---
+  // --- Generar alertas de revocacion de acceso si aplica ---
   const accessType = serviceMeta.accessType || '';
   const isPasswordShared = accessType === 'credentials' || accessType === 'profile_project';
 
-  if (!isPasswordShared) return; // No se necesitan alertas para servicios por invitación
+  if (serviceMeta.usesPool === false || serviceKey === 'microsoft365') return;
 
   // Buscar si el usuario tenía un slot activo en alguna cuenta real de este servicio
   try {
@@ -549,9 +570,6 @@ export async function removeGroupUser(serviceKey, accountId, userAlias, currentU
     for (const realDoc of realAccountsSnap.docs) {
       const realData = realDoc.data();
       const slots = realData.slots || [];
-      const accountStatus = realData.status || '';
-
-
       // Buscar slots asignados a este usuario desde este grupo Lank
       for (let idx = 0; idx < slots.length; idx++) {
         const slot = slots[idx];
@@ -559,14 +577,11 @@ export async function removeGroupUser(serviceKey, accountId, userAlias, currentU
         const slotMatchesUser = normalize(slot.memberAlias) === normalize(userAlias);
 
         if (slotMatchesGroup && slotMatchesUser && slot.status === 'active') {
-          // Otros usuarios activos en esta misma cuenta real
-          const otherUsers = slots
-            .filter((s, i) => i !== idx && s.memberAlias && s.status === 'active')
-            .map(s => s.memberAlias);
-
           const acctLabel = realData.email
             ? `${realDoc.id} (${realData.email})`
             : realDoc.id;
+          const slotNumber = slot.slotNumber || idx + 1;
+          const alertReason = reason || `Dado de baja del grupo ${acctIdStr}`;
 
           const baseAlert = {
             service: serviceName,
@@ -576,8 +591,14 @@ export async function removeGroupUser(serviceKey, accountId, userAlias, currentU
             serviceAccountRef: realDoc.id,
             realAccountEmail: realData.email || null,
             realAccountExpires: realData.expires || null,
+            slotNumber,
+            reason: alertReason,
             source: 'user_removal',
           };
+
+          await createSlotDeletionAlert(baseAlert);
+
+          if (!isPasswordShared) continue;
 
           // Alerta de cambio de contraseña
           await createManualAlert({
@@ -587,19 +608,6 @@ export async function removeGroupUser(serviceKey, accountId, userAlias, currentU
             title: `Cambiar contrasena - ${serviceName}`,
             description: `Cambiar contrasena de ${acctLabel}. El usuario ${userAlias} fue dado de baja del grupo ${acctIdStr} y tenia acceso.`,
           });
-
-          // Alerta de verificar acceso para usuarios restantes
-          if (otherUsers.length > 0) {
-            await createManualAlert({
-              ...baseAlert,
-              type: 'access_verify',
-              priority: 'medium',
-              title: `Verificar acceso - ${serviceName}`,
-              description: `Despues de cambiar la contrasena de ${acctLabel}, verificar que estos usuarios aun tengan acceso: ${otherUsers.join(', ')}`,
-              dependsOn: 'password_change',
-              affectedUsers: otherUsers,
-            });
-          }
         }
       }
     }
@@ -927,7 +935,6 @@ export async function createRealAccount(serviceKey, accountRef, accountData, sec
  */
 export async function createLinkedRealAccount(serviceKey, accountRef, accountData, secretData, options = {}) {
   const { vaultEmailId, newEmailData } = options;
-  const now = nowISO();
   let linkedEmailId = vaultEmailId || null;
 
   // Si se necesita crear una nueva cuenta de correo primero
@@ -990,7 +997,9 @@ export async function deleteRealAccount(serviceKey, accountRef) {
   try {
     const secretRef = doc(db, 'secrets', accountRef);
     await deleteDoc(secretRef);
-  } catch (e) { /* secret may not exist */ }
+  } catch (_err) {
+    /* secret may not exist */
+  }
 }
 
 // --- CRUD de Tarjetas (Bóveda) ---
@@ -1108,7 +1117,9 @@ export async function deleteVaultEmailAccount(accountId) {
       const acctRef = doc(db, 'accounts', acctId);
       const acctSnap = await firestoreGetDoc(acctRef);
       if (acctSnap.exists()) await deleteDoc(acctRef);
-    } catch (_) {}
+    } catch (_) {
+      /* linked Lank account may already be absent */
+    }
 
     try {
       const numId = parseInt(acctId, 10) || acctId;
@@ -1120,7 +1131,9 @@ export async function deleteVaultEmailAccount(accountId) {
           await saveSimCardConfig({ sims: filtered });
         }
       }
-    } catch (_) {}
+    } catch (_) {
+      /* linked SIM entry cleanup is best effort */
+    }
   }
 
   logManualChange('delete_vault_email_account', `Cuenta de correo eliminada: ${data.email || accountId}`, {
@@ -1473,9 +1486,6 @@ export async function deleteLankGroup(serviceKey, accountId) {
   for (const realDoc of realAccountsSnap.docs) {
     const realData = realDoc.data();
     const slots = realData.slots || [];
-    const accountStatus = realData.status || '';
-
-
     let modified = false;
     const newSlots = slots.map((slot, idx) => {
       if (slot.assignedFrom?.accountId == acctIdStr && slot.status === 'active') {
@@ -1489,6 +1499,7 @@ export async function deleteLankGroup(serviceKey, accountId) {
           email: realData.email || null,
           expires: realData.expires || null,
           slotIndex: idx,
+          slotNumber: slot.slotNumber || idx + 1,
           memberAlias: slot.memberAlias || '?',
           otherUsers,
         });
@@ -1522,7 +1533,6 @@ export async function deleteLankGroup(serviceKey, accountId) {
   const accessType = serviceMeta.accessType || '';
   const isPasswordShared = accessType === 'credentials' || accessType === 'profile_project';
   const isInvitationBased = accessType === 'email_invitation';
-  const nowStr = new Date().toISOString();
 
   for (const freed of freedSlots) {
     const acctLabel = freed.email
@@ -1537,6 +1547,8 @@ export async function deleteLankGroup(serviceKey, accountId) {
       serviceAccountRef: freed.accountRef,
       realAccountEmail: freed.email,
       realAccountExpires: freed.expires,
+      slotNumber: freed.slotNumber,
+      reason: `Grupo ${accountAlias} eliminado`,
       source: 'group_deletion',
     };
 
@@ -1557,17 +1569,6 @@ export async function deleteLankGroup(serviceKey, accountId) {
         description: `Cambiar contrasena de ${acctLabel}. El usuario ${freed.memberAlias} tenia acceso (grupo ${accountAlias} eliminado).`,
         dependsOn: 'profile_delete',
       });
-
-      if (freed.otherUsers.length > 0) {
-        await createManualAlert({
-          ...baseAlert,
-          type: 'access_verify',
-          priority: 'medium',
-          title: `Verificar acceso - ${serviceName}`,
-          description: `Despues de cambiar la contrasena de ${acctLabel}, verificar que estos usuarios aun tengan acceso: ${freed.otherUsers.join(', ')}`,
-          dependsOn: 'password_change',
-        });
-      }
     } else if (isInvitationBased) {
       await createManualAlert({
         ...baseAlert,
@@ -1601,7 +1602,6 @@ export async function getServicesConfig() {
   const snap = await firestoreGetDoc(ref);
   if (!snap.exists()) return null;
   const data = snap.data();
-  const { updatedAt, ...services } = data.services ? { ...data.services, updatedAt: data.updatedAt } : data;
   return data.services || null;
 }
 
@@ -2638,7 +2638,9 @@ export async function deleteLankMasterAccount(accountId) {
     const secretRef = doc(db, 'secrets', secretDocId);
     const secretSnap = await firestoreGetDoc(secretRef);
     if (secretSnap.exists()) await deleteDoc(secretRef);
-  } catch (_) {}
+  } catch (_) {
+    /* linked vault secret cleanup is best effort */
+  }
 
   // Auto-remove linked SIM card entry
   try {

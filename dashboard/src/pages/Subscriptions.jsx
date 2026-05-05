@@ -469,7 +469,7 @@ export default function Subscriptions({ onNavigate, navData }) {
  } else {
       setSearchResults({ matches: {}, slots: new Set(), total: 0 });
  }
- }, [searchQuery, poolDetails, groupDetails]);
+ }, [searchQuery, poolDetails, groupDetails, selectedService]);
 
  const clearSearch = () => {
  setSearchQuery('');
@@ -688,6 +688,8 @@ export default function Subscriptions({ onNavigate, navData }) {
          priority: 'high',
          title: `Cambiar contrasena - ${serviceName}`,
          description: `Cambiar contrasena de ${acctLabel}. El cupo de ${oldSlot.memberAlias} fue liberado manualmente.`,
+         reason: `Cupo #${oldSlot.slotNumber || slotIndex + 1} liberado manualmente`,
+         slotNumber: oldSlot.slotNumber || slotIndex + 1,
        });
 
        void otherUsers;
@@ -1514,8 +1516,8 @@ export default function Subscriptions({ onNavigate, navData }) {
         message={
           clearSlotConfirm
             ? `¿Estás seguro de liberar el cupo de "${clearSlotConfirm.memberAlias}" en ${clearSlotConfirm.accountLabel}? Esta acción es irreversible.`
-              + (getServiceMeta(clearSlotConfirm.serviceKey).accessType === 'credentials'
-                ? '\n\nRECORDATORIO: Este servicio usa contraseña compartida. Recuerda cambiar la contraseña de la cuenta real.'
+              + (['credentials', 'profile_project'].includes(getServiceMeta(clearSlotConfirm.serviceKey).accessType)
+                ? '\n\nSe creará una alerta para cambiar la contraseña desde Bóveda.'
                 : '')
             : ''
         }

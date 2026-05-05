@@ -5,7 +5,7 @@ describe('normalizeFirestoreOptions', () => {
   it('usa defaults seguros cuando no recibe opciones', () => {
     expect(normalizeFirestoreOptions()).toEqual({
       enabled: true,
-      realtime: true,
+      realtime: false,
       constraints: [],
       deps: [],
     });
@@ -17,7 +17,7 @@ describe('normalizeFirestoreOptions', () => {
 
     expect(normalizeFirestoreOptions({ enabled: false, constraints, deps })).toEqual({
       enabled: false,
-      realtime: true,
+      realtime: false,
       constraints,
       deps,
     });

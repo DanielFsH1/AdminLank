@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { orderBy, limit } from 'firebase/firestore';
 import { useCollection } from '../hooks/useFirestore';
 import { RefreshIcon, SearchIcon, ClockIcon, EditIcon, TrashIcon, CheckIcon, PlusIcon } from '../components/Icons';
@@ -28,7 +28,7 @@ const EmptyIcon = p => <S {...p} size={32}><rect x="3" y="3" width="18" height="
 
 const SOURCE_META = {
   ai_analysis: { label: 'IA Análisis', color: '#8b5cf6' },
-  ai_chat:     { label: 'Chat IA',     color: '#06b6d4' },
+  ai_chat:     { label: 'IA histórica', color: '#06b6d4' },
   manual:      { label: 'Manual',      color: '#10b981' },
   system:      { label: 'Sistema',     color: '#64748b' },
   adminbot:    { label: 'AdminBot',    color: '#8b5cf6' },
@@ -86,7 +86,7 @@ const ACTION_LABEL = {
 const SOURCE_FILTER_OPTIONS = [
   { value: '', label: 'Todas las fuentes' },
   { value: 'ai_analysis', label: 'IA Análisis' },
-  { value: 'ai_chat',     label: 'Chat IA' },
+  { value: 'ai_chat',     label: 'IA histórica' },
   { value: 'manual',      label: 'Manual' },
   { value: 'system',      label: 'Sistema' },
   { value: 'adminbot',    label: 'AdminBot' },
