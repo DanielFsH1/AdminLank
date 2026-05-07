@@ -345,6 +345,12 @@ export const BuildIcon = (p) => <S {...p}><path d="M2 20h20"/><path d="M6 20V8l6
 // 📌 / 📍 Pin / Location
 export const PinIcon = (p) => <S {...p}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></S>;
 
+// 📌 Thumbtack / Fijar
+export const ThumbtackIcon = (p) => <S {...p}><path d="M9 4v6l-2 4v2h10v-2l-2-4V4"/><line x1="12" y1="16" x2="12" y2="21"/><line x1="8" y1="4" x2="16" y2="4"/></S>;
+
+// 📝 Notepad / Bloc de notas
+export const NotepadIcon = (p) => <S {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></S>;
+
 // 📛 Name badge
 export const BadgeIcon = (p) => <S {...p}><rect x="3" y="5" width="18" height="14" rx="2"/><line x1="7" y1="10" x2="17" y2="10"/><line x1="7" y1="14" x2="13" y2="14"/></S>;
 

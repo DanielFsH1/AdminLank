@@ -2661,3 +2661,32 @@ export async function deleteLankMasterAccount(accountId) {
     before,
   });
 }
+
+// ─── NOTES ───────────────────────────────────────────────────────────────────
+
+export async function createNote({ title, content, color }) {
+  const now = nowISO();
+  const ref = await addDoc(collection(db, 'notes'), {
+    title: (title || '').trim() || 'Sin título',
+    content: (content || '').trim(),
+    color: color || 'default',
+    pinned: false,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return ref.id;
+}
+
+export async function updateNote(noteId, fields) {
+  const ref = doc(db, 'notes', noteId);
+  await updateDoc(ref, { ...fields, updatedAt: nowISO() });
+}
+
+export async function deleteNote(noteId) {
+  await deleteDoc(doc(db, 'notes', noteId));
+}
+
+export async function toggleNotePin(noteId, currentPinned) {
+  const ref = doc(db, 'notes', noteId);
+  await updateDoc(ref, { pinned: !currentPinned, updatedAt: nowISO() });
+}

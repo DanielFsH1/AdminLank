@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
 import { useCollection } from '../hooks/useFirestore';
-import { BarChartIcon, KeyIcon, UsersIcon, BellIcon, MoneyIcon, AnalyzeIcon, LockIcon, ToolboxIcon, DoorIcon } from './Icons';
+import { BarChartIcon, KeyIcon, UsersIcon, BellIcon, MoneyIcon, AnalyzeIcon, LockIcon, ToolboxIcon, DoorIcon, NotepadIcon } from './Icons';
 
 // SIM Card icon for sidebar
 const SimCardIcon = (props) => (
@@ -41,6 +41,7 @@ const NAV_ITEMS = [
 const SYSTEM_ITEMS = [
   { id: 'history', icon: HistoryIcon, label: 'Historial' },
   { id: 'vault', icon: LockIcon, label: 'Bóveda' },
+  { id: 'notes', icon: NotepadIcon, label: 'Notas' },
   { id: 'status', icon: StatusIcon, label: 'Estado' },
   { id: 'tools', icon: ToolboxIcon, label: 'Herramientas' },
 ];

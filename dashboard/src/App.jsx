@@ -20,8 +20,9 @@ const Tools = lazy(() => import('./pages/Tools'));
 const Vault = lazy(() => import('./pages/Vault'));
 const History = lazy(() => import('./pages/History'));
 const SimCards = lazy(() => import('./pages/SimCards'));
+const Notes = lazy(() => import('./pages/Notes'));
 
-const TAB_ORDER = ['overview','subscriptions','accounts','alerts','finance','sim-cards','analyze','history','vault','status','tools'];
+const TAB_ORDER = ['overview','subscriptions','accounts','alerts','finance','sim-cards','analyze','history','vault','notes','status','tools'];
 
 const TAB_TITLES = {
   overview: 'Resumen General',
@@ -34,6 +35,7 @@ const TAB_TITLES = {
   status: 'Estado del Sistema',
   tools: 'Herramientas',
   vault: 'Bóveda',
+  notes: 'Notas',
   history: 'Historial',
 };
 
@@ -46,6 +48,7 @@ const TAB_SHORT = {
   'sim-cards': 'SIM Cards',
   analyze: 'Analizar',
   vault: 'Bóveda',
+  notes: 'Notas',
   status: 'Estado',
   tools: 'Herramientas',
   history: 'Historial',
@@ -62,6 +65,7 @@ const TAB_SUBTITLES = {
   status: 'Salud y monitoreo de servicios',
   tools: 'Exportación, estadísticas y mantenimiento',
   vault: 'Credenciales, contraseñas y tarjetas',
+  notes: 'Bloc de notas general',
   history: 'Registro de todos los cambios del sistema',
 };
 
@@ -205,6 +209,7 @@ function App() {
       case 'status': return <Status />;
       case 'tools': return <Tools />;
       case 'vault': return <Vault onNavigate={handleNavigate} navData={navData} servicesConfig={servicesConfig} />;
+      case 'notes': return <Notes />;
       case 'history': return <History navData={navData} onNavigate={handleNavigate} />;
       default: return <Overview onNavigate={handleNavigate} servicesConfig={servicesConfig} />;
     }
