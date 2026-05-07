@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '../firebase';
 import { BANKS } from '../config/services';
-import { CheckCircleIcon, WarningIcon, CloseIcon, CheckIcon, BankIcon, PlusIcon, UploadIcon, ImageIcon } from './Icons';
+import { CheckCircleIcon, WarningIcon, CloseIcon, CheckIcon, BankIcon, PlusIcon, UploadIcon } from './Icons';
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2 MB
 const ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/jpg'];
@@ -138,10 +138,6 @@ export default function AddClabeModal({ open, onClose, onSave, customBankAccount
       else onClose();
     }
   }
-
-  const selectedBankMeta = selectedBank
-    ? (BANKS[selectedBank] || customBankAccounts[selectedBank] || {})
-    : null;
 
   return (
     <div className="edit-modal-overlay" onClick={onClose} onKeyDown={handleKeyDown}>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useCallback, useRef } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { onSnapshot, doc as firestoreDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
@@ -7,18 +7,19 @@ import { useOnlineStatus } from './hooks/useOnlineStatus';
 import Login from './components/Login';
 import Sidebar from './components/Sidebar';
 import Overview from './pages/Overview';
-import Subscriptions from './pages/Subscriptions';
-import Accounts from './pages/Accounts';
-import Alerts from './pages/Alerts';
-import Finance from './pages/Finance';
-import Analyze from './pages/Analyze';
-import Status from './pages/Status';
-import Tools from './pages/Tools';
-import Vault from './pages/Vault';
-import History from './pages/History';
-import SimCards from './pages/SimCards';
 import { MenuIcon, SunIcon, MoonIcon, WarningIcon, CheckCircleIcon } from './components/Icons';
 import './index.css';
+
+const Subscriptions = lazy(() => import('./pages/Subscriptions'));
+const Accounts = lazy(() => import('./pages/Accounts'));
+const Alerts = lazy(() => import('./pages/Alerts'));
+const Finance = lazy(() => import('./pages/Finance'));
+const Analyze = lazy(() => import('./pages/Analyze'));
+const Status = lazy(() => import('./pages/Status'));
+const Tools = lazy(() => import('./pages/Tools'));
+const Vault = lazy(() => import('./pages/Vault'));
+const History = lazy(() => import('./pages/History'));
+const SimCards = lazy(() => import('./pages/SimCards'));
 
 const TAB_ORDER = ['overview','subscriptions','accounts','alerts','finance','sim-cards','analyze','history','vault','status','tools'];
 
@@ -63,6 +64,10 @@ const TAB_SUBTITLES = {
   vault: 'Credenciales, contraseñas y tarjetas',
   history: 'Registro de todos los cambios del sistema',
 };
+
+function PageFallback() {
+  return <div className="loading-container"><div className="loading-spinner"></div></div>;
+}
 
 function App() {
   const [user, setUser] = useState(undefined);
@@ -266,7 +271,9 @@ function App() {
           ref={mainBodyRef}
           onAnimationEnd={() => setSlideDir(null)}
         >
-          {renderPage()}
+          <Suspense fallback={<PageFallback />}>
+            {renderPage()}
+          </Suspense>
         </div>
 
         {/* Tab dots indicator — solo visible en móvil via CSS */}

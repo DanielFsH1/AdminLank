@@ -1,23 +1,10 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
-import { getServiceMeta, getServiceKeyByName, getPoolServiceKeys } from '../config/services';
 import { useAdminbotState } from '../hooks/adminbotState';
 import { AnalyzeIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClipboardIcon, ClockIcon, CloudSunIcon, DoorIcon, EmailIcon, EmptyMailIcon, HourglassIcon, InboxIcon, LightningIcon, MoneyIcon, MoonIcon, PinIcon, RefreshIcon, SatelliteIcon, SearchIcon, SleepIcon, StopwatchIcon, TargetIcon, UsersIcon, WarningIcon, WrenchIcon, XCircleIcon } from '../components/Icons';
 
 const CLOUD_FUNCTIONS_URL = '***REMOVED***';
-
-// Color de suscripción: busca en la config dinámica, con fallback
-function getSubscriptionColor(name) {
- const key = getServiceKeyByName(name);
- if (key) return getServiceMeta(key).color || '#666';
- return '#666';
-}
-
-// Mapeo de nombre de suscripción → service key para navegación
-function subscriptionToKey(name) {
- return getServiceKeyByName(name);
-}
 
 const KIND_LABELS = {
  user_left_self: <><DoorIcon size={16} /> Baja voluntaria</>,
@@ -53,15 +40,6 @@ function formatDate(dateStr) {
  } catch { return dateStr; }
 }
 
-function formatTime(dateStr) {
- if (!dateStr) return '';
- try {
- const d = new Date(dateStr);
- if (isNaN(d)) return '';
- return d.toLocaleString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
- } catch { return ''; }
-}
-
 function timeSince(dateStr) {
  if (!dateStr) return '';
  try {
@@ -79,12 +57,10 @@ function getProfileImg(accountId) {
  return `/assets/profiles/account_${accountId}.png`;
 }
 
-export default function Analyze({ onNavigate, navData, servicesConfig }) {
+export default function Analyze({ navData }) {
  const adminbotState = useAdminbotState();
  const [report, setReport] = useState(null);
- const [rawEmails, setRawEmails] = useState(null);
  const [notifications, setNotifications] = useState([]); // Firestore notifications with 7-day retention
- const [realAccounts, setRealAccounts] = useState({}); // { chatgpt: [{ id, slots, ... }] }
  const [loading, setLoading] = useState(true);
  const [error, setError] = useState(null);
  const [view, setView] = useState(navData?.view || 'resumen');
@@ -112,16 +88,14 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
  const fetchData = useCallback(async () => {
  try {
       setLoading(true);
-      const [reportSnap, rawSnap, schedSnap] = await Promise.all([
+      const [reportSnap, schedSnap] = await Promise.all([
         getDoc(doc(db, 'analysis', 'latest-report')),
-        getDoc(doc(db, 'analysis', 'raw-emails')),
         getDoc(doc(db, 'config', 'schedule')),
       ]);
       if (reportSnap.exists()) {
         setReport(reportSnap.data());
         setLastAnalysisTime(reportSnap.data().generatedAt || null);
       }
-      if (rawSnap.exists()) setRawEmails(rawSnap.data());
       if (schedSnap.exists()) {
         const sched = schedSnap.data();
         setScheduleEnabled(sched.enabled || false);
@@ -133,19 +107,6 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
           setActiveHoursEnd(sched.activeHours.endHour ?? 23);
         }
       }
-
-      // Notificaciones se cargan en useEffect separado
-
-      // Cargar cuentas reales de cada servicio para mapear usuarios → cuenta real
-      const serviceKeys = getPoolServiceKeys();
-      const realAcctMap = {};
-      for (const svc of serviceKeys) {
-        try {
-          const snap = await getDocs(collection(db, `service-pools/${svc}/real-accounts`));
-          realAcctMap[svc] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        } catch { realAcctMap[svc] = []; }
-      }
-      setRealAccounts(realAcctMap);
  } catch (err) {
       console.error('Error cargando análisis:', err);
       setError(err.message);
@@ -177,10 +138,6 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
    });
    setNotifications(notifs);
  }, []);
-
- const refreshAnalyzeData = useCallback(async () => {
-   await Promise.all([fetchData(), loadReadUids(), loadNotifications()]);
- }, [fetchData, loadReadUids, loadNotifications]);
 
  // ─── Cargar UIDs leídos ───
  useEffect(() => { loadReadUids(); }, [loadReadUids]);
@@ -215,7 +172,7 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
  }, [readUids, notifications]);
 
  // ─── Next analysis countdown timer ───
- const getNextAnalysisTime = () => {
+ const getNextAnalysisTime = useCallback(() => {
  if (!scheduleEnabled || !scheduleStartTime) return null;
  try {
       const startDt = new Date(scheduleStartTime);
@@ -230,7 +187,7 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
       const nextSlot = new Date(startDt.getTime() + (intervalsPassed + 1) * intervalMs);
       return nextSlot;
  } catch { return null; }
- };
+ }, [scheduleEnabled, scheduleFrequency, scheduleStartTime]);
 
  useEffect(() => {
  if (!scheduleEnabled) { setNextRunCountdown(''); return; }
@@ -250,7 +207,7 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
  update();
  const interval = setInterval(update, 1000);
  return () => clearInterval(interval);
- }, [scheduleEnabled, lastAnalysisTime, scheduleFrequency]);
+ }, [scheduleEnabled, lastAnalysisTime, scheduleFrequency, getNextAnalysisTime]);
 
  // ─── Run analysis via Cloud Function ───
  const handleRunAnalysis = async () => {
@@ -393,32 +350,6 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
  setExpandedAccordions(prev => ({ ...prev, [key]: !prev[key] }));
  };
 
- // Buscar la cuenta real donde está un usuario por alias
- const findRealAccountForUser = (serviceKey, userAlias) => {
- const accounts = realAccounts[serviceKey] || [];
- for (const acct of accounts) {
-      const slots = acct.slots || [];
-      for (const slot of slots) {
-        if (slot.memberAlias && slot.memberAlias.toLowerCase() === (userAlias || '').toLowerCase()) {
-          return acct.id || acct.serviceAccountRef;
-        }
-      }
- }
- return null;
- };
-
- // Navigate to subscription real account + highlight the user
- const handleEventClick = (evt) => {
- if (!onNavigate || !evt.subscription) return;
- // Navegar a Alertas donde está toda la info de qué hacer
- onNavigate('alerts', { focusUser: evt.userName, focusService: evt.subscription });
- };
-
- // Navigate to Lank account tab and highlight
- const handleNavigateToAccount = (accountId) => {
- if (onNavigate) onNavigate('accounts', String(accountId));
- };
-
  // Click en tarjeta de cuenta en 'Todas las Cuentas'
  const handleAccountCardClick = (acc) => {
  if ((acc.rawEmailCount || 0) > 0) {
@@ -488,19 +419,14 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
  const totalAccounts = report.totalAccounts || report.accountCount || 0;
  const accountsOk = report.accountsOk || report.accountCount || 0;
  const failedAccounts = totalAccounts - accountsOk;
- const totalPending = report.totalPending || 0;
  const totalRelevant = report.totalRelevant || 0;
  const totalRaw = report.totalRawEmails || 0;
  const totalEvents = report.totalEvents || report.totalParsedEvents || 0;
  const totalIgnored = report.totalIgnored || 0;
- const totalReview = report.totalReview || 0;
  const alertsGenerated = report.alertsGenerated || 0;
  const mode = report.mode || (report.usedUidTracking ? 'UID tracking' : 'Fecha');
  const generatedAt = report.generatedAt || '';
  const accounts = report.accounts || [];
-
- // Raw emails data
- const rawAccountsWithMail = rawEmails?.accounts || [];
 
  // Accounts with clean status
  const accountsAllClean = accounts.filter(a => a.relevant === 0 && a.access === 'ok');
@@ -1241,94 +1167,4 @@ export default function Analyze({ onNavigate, navData, servicesConfig }) {
       )}
  </>
  );
-}
-
-/**
- * Returns action steps based on event kind + subscription
- */
-function getActionSteps(evt) {
- const sub = evt.subscription || '';
- const kind = evt.kind;
- const userName = evt.userName || 'el usuario';
- 
- if (kind === 'user_left_self' || kind === 'user_left_transferred') {
- if (sub.includes('ChatGPT')) {
-      return [
-        `Ir a la cuenta real de ChatGPT Plus de la cuenta #${evt.accountId}`,
-        `Eliminar el perfil de ${userName}`,
-        'Cambiar la contraseña de la cuenta ChatGPT',
-        'Verificar que los demás usuarios siguen con acceso',
-        'Actualizar credenciales en Lank',
-      ];
- }
- if (sub.includes('YouTube')) {
-      return [
-        'Ir a Configuración familia de YouTube Premium',
-        `Quitar a ${userName} del grupo familiar`,
-        'Verificar que los demás miembros siguen activos',
-      ];
- }
- if (sub.includes('HBO')) {
-      return [
-        `Ir a la cuenta de HBO Max`,
-        `Eliminar perfil de ${userName}`,
-        'Cambiar contraseña de HBO Max',
-        'Notificar nuevas credenciales a usuarios restantes',
-      ];
- }
- if (sub.includes('F1')) {
-      return [
-        'Ir a la cuenta de F1 TV Premium',
-        'Cambiar contraseña',
-        'Notificar nuevas credenciales a los demás usuarios',
-      ];
- }
- if (sub.includes('Microsoft')) {
-      return [
-        'Ir a Microsoft Family',
-        `Quitar a ${userName} del grupo familiar`,
-        'Verificar que los demás miembros siguen activos',
-      ];
- }
- if (sub.includes('Gemini') || sub.includes('Google AI')) {
-      return [
-        'Ir a configuración de Google AI',
-        `Quitar a ${userName} del grupo`,
-        'Verificar acceso de los demás miembros',
-      ];
- }
- }
- 
- if (kind === 'user_join_direct' || kind === 'user_join_transferred') {
- if (sub.includes('ChatGPT')) {
-      return [
-        'Verificar cupo disponible en la cuenta real',
-        `Crear perfil para ${userName}`,
-        'Compartir credenciales al nuevo usuario',
-      ];
- }
- if (sub.includes('YouTube') || sub.includes('Microsoft')) {
-      return [
-        `Enviar invitación familiar al correo de ${userName}`,
-        'Confirmar que aceptó la invitación',
-      ];
- }
- if (sub.includes('HBO')) {
-      return [
-        'Verificar perfil disponible',
-        `Crear perfil con nombre de ${userName}`,
-        'Compartir credenciales',
-      ];
- }
- }
- 
- if (kind === 'group_deactivated') {
- return [
-      'Investigar por qué se desactivó el grupo',
-      'Verificar estado de la suscripción',
-      'Reactivar grupo si corresponde',
- ];
- }
- 
- return [];
 }

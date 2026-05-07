@@ -296,7 +296,7 @@ export default function BankManager({ vaultCards = {} }) {
     try {
       const logos = await getLogoGallery();
       setLogoGallery(logos);
-    } catch (err) {
+    } catch (_err) {
       showToast('Error cargando galería de logos', 'error');
     }
   };

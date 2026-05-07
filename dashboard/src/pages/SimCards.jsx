@@ -338,7 +338,6 @@ export default function SimCards() {
     if (selectedYear || sims.length === 0) return;
     const now = new Date();
     const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth();
     // Find earliest year that has SIMs needing attention
     const years = [...new Set(sims.map(s => {
       if (!s.nextRechargeDate) return currentYear;

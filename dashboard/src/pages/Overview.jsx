@@ -5,8 +5,8 @@ import { db } from '../firebase';
 import { SERVICES, getServiceMeta, formatMXN, getPoolServiceKeys } from '../config/services';
 import { UsersIcon, CheckCircleIcon, KeyIcon, BellIcon, AtmIcon, ClipboardIcon, InboxIcon } from '../components/Icons';
 
-export default function Overview({ onNavigate, servicesConfig }) {
-  const SERVICE_KEYS = useMemo(() => getPoolServiceKeys(), [servicesConfig]);
+export default function Overview({ onNavigate }) {
+  const SERVICE_KEYS = useMemo(() => getPoolServiceKeys(), []);
   const { data: accounts, loading: loadingAccounts } = useCollection('accounts', { realtime: true });
   const { data: groups, loading: loadingGroups } = useCollection('groups', { realtime: true });
   const { data: pools } = useCollection('service-pools', { realtime: true });

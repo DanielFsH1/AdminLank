@@ -41,7 +41,7 @@ export default function Accounts({ navData, onNavigate }) {
  const [deleteGroupConfirm, setDeleteGroupConfirm] = useState(null); // { svcId, acctId, serviceName, userCount }
  const [editAccountModal, setEditAccountModal] = useState(null); // { acctId, canonicalAlias, fullName, email, whatsapp }
  const [editAccountValues, setEditAccountValues] = useState({ canonicalAlias: '', fullName: '', email: '', whatsapp: '' });
- const [savingAccount, setSavingAccount] = useState(false);
+ const [savingAccount] = useState(false);
  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
  const accountsRequestIdRef = useRef(0);
  const groupsRequestIdRef = useRef(0);
@@ -206,7 +206,7 @@ export default function Accounts({ navData, onNavigate }) {
       .map(([id, meta]) => ({ id, name: meta.name, logo: meta.logo }));
  };
 
- const matchesDeepSearch = (acctId, q) => {
+ const matchesDeepSearch = useCallback((acctId, q) => {
  for (const [, accts] of Object.entries(groups)) {
       const data = accts[String(acctId)];
       if (!data || !data.users) continue;
@@ -221,7 +221,7 @@ export default function Accounts({ navData, onNavigate }) {
       }
  }
  return false;
- };
+ }, [groups]);
 
  const isUserMatch = (user, q) => {
  if (!user || !q) return false;
@@ -236,16 +236,20 @@ export default function Accounts({ navData, onNavigate }) {
  );
  };
 
- const isAccountDirectMatch = (acct, q) => {
+ const isAccountDirectMatch = useCallback((acct, q) => {
  if (!q) return false;
+ const acctId = acct.id || acct.accountId;
+ const alias = acct.canonicalAlias || acct.alias || acct.fullName;
+ const email = acct.lankGmailAddress || acct.email || '';
+ const phone = acct.whatsapp || acct.phone || '';
  return (
-      nMatch(getAlias(acct), q) ||
+      nMatch(alias, q) ||
       nMatch(acct.fullName, q) ||
-      String(getAcctId(acct)).includes(q) ||
-      nMatch(getEmail(acct), q) ||
-      nMatch(getPhone(acct), q)
+      String(acctId).includes(q) ||
+      nMatch(email, q) ||
+      nMatch(phone, q)
  );
- };
+ }, []);
 
  const filtered = useMemo(() => {
  let list = accounts;
@@ -264,7 +268,7 @@ export default function Accounts({ navData, onNavigate }) {
       });
  }
  return list.sort((a, b) => (getAcctId(a) || 0) - (getAcctId(b) || 0));
- }, [accounts, search, filterService, groups]);
+ }, [accounts, search, filterService, groups, isAccountDirectMatch, matchesDeepSearch]);
 
  const searchQ = search ? normalizeSearch(search) : '';
  const shouldAutoExpand = (acctId, acct) => {

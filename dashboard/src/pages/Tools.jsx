@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 
-import { collection, getDocs, doc, getDoc, deleteDoc, writeBatch, addDoc, query, orderBy, limit } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, deleteDoc, addDoc } from 'firebase/firestore';
 
 import { db } from '../firebase';
 
@@ -213,7 +213,7 @@ export default function Tools() {
 
  const hasSensitiveSelected = COLLECTIONS.some(c => selected.has(c.key) && c.sensitive);
 
- const handleExportRequest = useCallback((format) => {
+ const handleExportRequest = (format) => {
    if (!selected.size) return;
    if (COLLECTIONS.some(c => selected.has(c.key) && c.sensitive)) {
      setPinModal({ format, purpose: 'export' });
@@ -222,11 +222,11 @@ export default function Tools() {
    } else {
      doExport(format);
    }
- }, [selected]);
+ };
 
  /* ─── PIN verification (recibe el PIN como argumento para evitar closure stale) ─── */
 
- const verifyPin = useCallback(async (pin) => {
+ const verifyPin = async (pin) => {
    if (!pin || pin.length !== 4) { setPinError('Ingresa 4 dígitos'); return; }
    const hashed = hashPin(pin);
    try {
@@ -247,7 +247,7 @@ export default function Tools() {
    } catch (err) {
      setPinError('Error verificando PIN: ' + err.message);
    }
- }, [pinModal]);
+ };
 
  const pinInputRef = useRef(pinInput);
 

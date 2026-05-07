@@ -7,7 +7,6 @@ import {
  completeAlert,
  discardAlert,
  completeUnidentifiedAlert,
- removeGroupUser,
  completeMissingPhone,
  createScheduledManualAlert,
  cancelScheduledManualAlert,
@@ -92,7 +91,7 @@ function formatScheduledDate(value) {
  });
 }
 
-export default function Alerts({ onNavigate, navData, servicesConfig }) {
+export default function Alerts({ onNavigate, navData }) {
  const { data: alerts, loading } = useCollection('alerts');
  const { data: scheduledAlerts = [], loading: scheduledLoading } = useCollection('scheduled-alerts');
  const [activeTab, setActiveTab] = useState('pending');
@@ -106,7 +105,6 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
  const [discardModal, setDiscardModal] = useState(null); // { alertId, title }
  const [confirmComplete, setConfirmComplete] = useState(null); // { alert }
  const [editUserModal, setEditUserModal] = useState(null); // { alert, users }
- const [selectUserModal, setSelectUserModal] = useState(null); // { alert, users }
  const [missingPhoneModal, setMissingPhoneModal] = useState(null); // { alert }
  const [createScheduledModal, setCreateScheduledModal] = useState(false);
  const [cancelScheduledModal, setCancelScheduledModal] = useState(null);
@@ -146,7 +144,7 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
 
       const usersMap = {};
       for (const key of toFetch) {
-        if (groupUsers[key]) { usersMap[key] = groupUsers[key]; continue; }
+        if (groupUsers[key]) continue;
         const [svcKey, accId] = key.split('_');
         try {
           const snap = await getDoc(doc(db, `groups/${svcKey}/lank-accounts/${accId}`));
@@ -158,7 +156,7 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
       }
  }
  if (alerts.length > 0) fetchGroupUsers();
- }, [alerts]);
+ }, [alerts, groupUsers]);
 
  // Resolver nombres actuales de cuentas Lank (evitar alias stale en alertas)
  useEffect(() => {
@@ -170,7 +168,7 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
      if (accountIds.size === 0) return;
      const namesMap = {};
      for (const accId of accountIds) {
-       if (liveAccountNames[accId]) { namesMap[accId] = liveAccountNames[accId]; continue; }
+       if (liveAccountNames[accId]) continue;
        try {
          const snap = await getDoc(doc(db, 'accounts', accId));
          if (snap.exists()) {
@@ -184,7 +182,7 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
      }
    }
    fetchLiveAccountNames();
- }, [alerts]);
+ }, [alerts, liveAccountNames]);
 
  // Obtener cuentas reales disponibles para asignación
  const getAvailableRealAccounts = useCallback((serviceKey) => {
@@ -195,18 +193,6 @@ export default function Alerts({ onNavigate, navData, servicesConfig }) {
       freeSlots: (acct.slots || []).filter(s => !s.memberAlias || !s.memberAlias.trim()).length,
  })).filter(a => a.freeSlots > 0);
  }, [realAccounts]);
-
- const findRealAccountForUser = (serviceKey, userAlias) => {
- const accounts = realAccounts[serviceKey] || [];
- for (const acct of accounts) {
-      for (const slot of (acct.slots || [])) {
-        if (slot.memberAlias && slot.memberAlias.toLowerCase() === (userAlias || '').toLowerCase()) {
-          return acct.id || acct.serviceAccountRef;
-        }
-      }
- }
- return null;
- };
 
  const categorized = useMemo(() => {
  const pending = alerts.filter(a => a.status === 'pending');

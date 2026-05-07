@@ -99,7 +99,7 @@ export default function Finance() {
 
  // CLABEs state
  const [clabes, setClabes] = useState([]);
- const [loadingClabes, setLoadingClabes] = useState(true);
+ const [, setLoadingClabes] = useState(true);
  const [copiedClabe, setCopiedClabe] = useState(null);
 
  const bankAccountOptions = useMemo(() => {
@@ -165,7 +165,7 @@ export default function Finance() {
         [expandedHistMonth]: docs.sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || '')),
       }));
  });
- }, [expandedHistMonth]);
+ }, [expandedHistMonth, historyWithdrawals]);
 
  // Ref: si la colección banks tiene datos, es fuente primaria (post-migración)
  const banksSourceRef = useRef(false);
@@ -292,7 +292,7 @@ export default function Finance() {
  }, [getEntryIdentifier]);
 
  // CLABE handlers
- const handleCopyClabe = (clabe, bank) => {
+ const handleCopyClabe = (clabe) => {
  navigator.clipboard.writeText(clabe).then(() => {
       setCopiedClabe(clabe);
       setTimeout(() => setCopiedClabe(null), 2000);

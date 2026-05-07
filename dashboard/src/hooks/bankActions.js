@@ -2,8 +2,8 @@
  * Bank CRUD operations for the Bóveda → Bancos system.
  * Each bank lives as its own document in the `banks` collection.
  */
-import { doc, updateDoc, setDoc, deleteDoc, getDoc as firestoreGetDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, deleteObject, listAll } from 'firebase/storage';
+import { doc, updateDoc, setDoc, getDoc as firestoreGetDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage } from '../firebase';
 import { BANKS } from '../config/services';
 
@@ -280,7 +280,7 @@ export async function deleteBankLogo(logoId) {
   if (!logo) return;
 
   if (logo.storagePath) {
-    try { await deleteObject(ref(storage, logo.storagePath)); } catch (e) { /* ignore */ }
+    try { await deleteObject(ref(storage, logo.storagePath)); } catch (_err) { /* ignore */ }
   }
   await updateDoc(configRef, { logos: logos.filter(l => l.id !== logoId) });
 }

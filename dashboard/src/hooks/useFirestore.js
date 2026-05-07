@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { collection, doc, getDoc, getDocs, onSnapshot, query } from 'firebase/firestore';
 import { db } from '../firebase';
 import { normalizeFirestoreOptions } from './firestoreQueryHelpers';
@@ -6,6 +6,39 @@ import { normalizeFirestoreOptions } from './firestoreQueryHelpers';
 function buildCollectionRef(collectionPath, constraints) {
   const colRef = collection(db, collectionPath);
   return constraints.length ? query(colRef, ...constraints) : colRef;
+}
+
+function areDependencyListsEqual(a, b) {
+  if (a.length !== b.length) return false;
+  return a.every((item, index) => Object.is(item, b[index]));
+}
+
+function useDependencyVersion(deps) {
+  const depsRef = useRef(deps);
+  const [version, setVersion] = useState(0);
+
+  useEffect(() => {
+    if (!areDependencyListsEqual(depsRef.current, deps)) {
+      depsRef.current = deps;
+      setVersion(currentVersion => currentVersion + 1);
+    }
+  }, [deps]);
+
+  return version;
+}
+
+function useDependencyControlledValue(value, deps) {
+  const depsRef = useRef(deps);
+  const [state, setState] = useState({ value, version: 0 });
+
+  useEffect(() => {
+    if (!areDependencyListsEqual(depsRef.current, deps)) {
+      depsRef.current = deps;
+      setState(({ version }) => ({ value, version: version + 1 }));
+    }
+  }, [deps, value]);
+
+  return [state.value, state.version];
 }
 
 function parseDocumentArgs(collectionOrPath, docIdOrOptions, maybeOptions) {
@@ -28,7 +61,7 @@ export function useCollection(collectionPath, options = {}) {
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const constraintRef = useMemo(() => constraints, deps);
+  const [constraintRef, constraintVersion] = useDependencyControlledValue(constraints, deps);
 
   const refetch = useCallback(() => setRefreshKey(k => k + 1), []);
 
@@ -67,7 +100,7 @@ export function useCollection(collectionPath, options = {}) {
     });
 
     return () => unsub();
-  }, [collectionPath, enabled, realtime, constraintRef, refreshKey]);
+  }, [collectionPath, enabled, realtime, constraintRef, constraintVersion, refreshKey]);
 
   return { data, loading, error, refetch };
 }
@@ -79,7 +112,7 @@ export function useDocument(collectionOrPath, docIdOrOptions, maybeOptions) {
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
-  const effectDeps = deps.length ? [...deps, refreshKey] : [fullPath, enabled, realtime, refreshKey];
+  const dependencyVersion = useDependencyVersion(deps);
 
   const refetch = useCallback(() => setRefreshKey(k => k + 1), []);
 
@@ -133,7 +166,7 @@ export function useDocument(collectionOrPath, docIdOrOptions, maybeOptions) {
       if (currentUnsub) currentUnsub();
       if (retryTimeout) clearTimeout(retryTimeout);
     };
-  }, effectDeps);
+  }, [fullPath, enabled, realtime, dependencyVersion, refreshKey]);
 
   return { data, loading, error, refetch };
 }

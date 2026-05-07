@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { CheckCircleIcon, WarningIcon, CloseIcon, CheckIcon, XCircleIcon } from './Icons';
 
+const EMPTY_INITIAL_VALUES = {};
+
 /**
  * Modal reutilizable para edición de datos.
  * Incluye paso de confirmación "¿Estás seguro?" antes de guardar.
@@ -19,7 +21,7 @@ import { CheckCircleIcon, WarningIcon, CloseIcon, CheckIcon, XCircleIcon } from 
  * - children?: ReactNode (contenido extra antes de los campos)
  */
 export default function EditModal({
-  open, onClose, onSave, title, icon, fields = [], initialValues = {},
+  open, onClose, onSave, title, icon, fields = [], initialValues = EMPTY_INITIAL_VALUES,
   saveLabel = 'Guardar', danger = false, confirmMessage, children,
   resetKey, validate,
 }) {
@@ -29,15 +31,21 @@ export default function EditModal({
   const [success, setSuccess] = useState(false);
   const [confirmStep, setConfirmStep] = useState(false);
   const firstInput = useRef(null);
+  const initialValuesRef = useRef(initialValues);
+
+  useEffect(() => {
+    initialValuesRef.current = initialValues;
+  }, [initialValues]);
 
   useEffect(() => {
     if (open) {
-      setValues({ ...initialValues });
+      setValues({ ...initialValuesRef.current });
       setError('');
       setSuccess(false);
       setSaving(false);
       setConfirmStep(false);
-      setTimeout(() => firstInput.current?.focus(), 200);
+      const focusTimer = setTimeout(() => firstInput.current?.focus(), 200);
+      return () => clearTimeout(focusTimer);
     }
   }, [open, resetKey]);
 
