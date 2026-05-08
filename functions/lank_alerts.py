@@ -24,7 +24,7 @@ def _derive_service_sets(services_config):
             continue
         name = svc.get('name', key)
         access_type = svc.get('accessType', '')
-        if access_type == 'credentials':
+        if access_type in {'credentials', 'profile_project'}:
             password_svcs.add(name)
         elif access_type == 'email_invitation':
             invitation_svcs.add(name)

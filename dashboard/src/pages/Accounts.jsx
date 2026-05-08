@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useDocument } from '../hooks/useFirestore';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
-import { SERVICES, getServiceMeta, getProfileImage, getAllServiceKeys, getPoolServiceKeys, getUserFields } from '../config/services';
+import { getServiceMeta, getProfileImage, getUserFields } from '../config/services';
 import { updateGroupUser, removeGroupUser, addGroupUser, createLankGroup, deleteLankGroup, DEFAULT_MASTER_CONFIG, updateGroupEnabledSlots, updateLankGroupStatus, updateSlot, createManualAlert, updateLankMasterAccount } from '../hooks/firestoreActions';
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
 import { BlockIcon, CalendarIcon, CashIcon, ClipboardIcon, CloseIcon, EditIcon, EmailIcon, FolderIcon, LinkIcon, PhoneIcon, PlusIcon, SaveIcon, SearchIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, UsersIcon, WarningIcon } from '../components/Icons';
@@ -23,7 +23,7 @@ export default function Accounts({ navData, onNavigate }) {
  const highlightServiceKey = typeof navData === 'object' ? navData?.serviceKey : null;
  const highlightUserAlias = typeof navData === 'object' ? navData?.userAlias : null;
 
- const { data: masterConfigDoc } = useDocument('config', 'subscription-master', { realtime: false });
+ const { data: masterConfigDoc } = useDocument('config', 'services');
  const [accounts, setAccounts] = useState([]);
  const [loading, setLoading] = useState(true);
  const [search, setSearch] = useState('');
@@ -50,8 +50,9 @@ export default function Accounts({ navData, onNavigate }) {
 
  const masterConfig = useMemo(() => {
    if (masterConfigDoc) {
+     const data = masterConfigDoc.services || masterConfigDoc;
      const services = Object.fromEntries(
-       Object.entries(masterConfigDoc).filter(([key]) => key !== 'id' && key !== 'updatedAt'),
+       Object.entries(data).filter(([key]) => key !== 'id' && key !== 'updatedAt'),
      );
      return { ...DEFAULT_MASTER_CONFIG, ...services };
    }
@@ -61,6 +62,21 @@ export default function Accounts({ navData, onNavigate }) {
  const getMaxSlots = useCallback((svcId) => {
    return masterConfig[svcId]?.maxSlotsPerLankGroup || getServiceMeta(svcId).maxSlots || 5;
  }, [masterConfig]);
+
+ const activeServiceIds = useMemo(() => {
+   return Object.keys(masterConfig)
+     .filter(key => masterConfig[key]?.active !== false)
+     .sort((a, b) => {
+       const aMeta = masterConfig[a] || getServiceMeta(a);
+       const bMeta = masterConfig[b] || getServiceMeta(b);
+       return (aMeta.displayOrder || 99) - (bMeta.displayOrder || 99);
+     });
+ }, [masterConfig]);
+
+ const poolServiceIds = useMemo(
+   () => activeServiceIds.filter(key => (masterConfig[key] || getServiceMeta(key)).usesPool !== false),
+   [activeServiceIds, masterConfig],
+ );
 
  const showToast = useCallback((msg, type = 'success') => {
  setToast({ visible: true, message: msg, type });
@@ -77,9 +93,8 @@ export default function Accounts({ navData, onNavigate }) {
 
  const loadGroups = useCallback(async () => {
    const requestId = ++groupsRequestIdRef.current;
-   const services = getAllServiceKeys();
    const results = {};
-   await Promise.all(services.map(async svc => {
+   await Promise.all(activeServiceIds.map(async svc => {
      const snap = await getDocs(collection(db, `groups/${svc}/lank-accounts`));
      const docs = {};
      snap.docs.forEach(d => { docs[d.id] = d.data(); });
@@ -87,19 +102,18 @@ export default function Accounts({ navData, onNavigate }) {
    }));
    if (requestId !== groupsRequestIdRef.current) return;
    setGroups(results);
- }, []);
+ }, [activeServiceIds]);
 
  const loadPoolDetails = useCallback(async () => {
    const requestId = ++poolDetailsRequestIdRef.current;
-   const poolSvcs = getPoolServiceKeys();
    const results = {};
-   await Promise.all(poolSvcs.map(async svc => {
+   await Promise.all(poolServiceIds.map(async svc => {
      const snap = await getDocs(collection(db, `service-pools/${svc}/real-accounts`));
      results[svc] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
    }));
    if (requestId !== poolDetailsRequestIdRef.current) return;
    setPoolDetails(results);
- }, []);
+ }, [poolServiceIds]);
 
  const loadPendingUsers = useCallback(async () => {
    const requestId = ++pendingUsersRequestIdRef.current;
@@ -201,9 +215,12 @@ export default function Accounts({ navData, onNavigate }) {
  // Servicios disponibles para crear grupo nuevo (todo lo que no tiene grupo activo)
  const getAvailableServicesForCreate = (acctId) => {
  const activeSet = new Set(getActiveServices(acctId).map(s => s.id));
- return Object.entries(SERVICES)
-      .filter(([id]) => !activeSet.has(id))
-      .map(([id, meta]) => ({ id, name: meta.name, logo: meta.logo }));
+ return activeServiceIds
+      .filter(id => !activeSet.has(id))
+      .map(id => {
+        const meta = getServiceMeta(id);
+        return { id, name: meta.name, logo: meta.logo };
+      });
  };
 
  const matchesDeepSearch = useCallback((acctId, q) => {
@@ -538,7 +555,8 @@ export default function Accounts({ navData, onNavigate }) {
           >
             Todos
           </button>
-          {Object.entries(SERVICES).map(([id, meta]) => {
+          {activeServiceIds.map((id) => {
+            const meta = getServiceMeta(id);
             const isActive = filterService.has(id);
             return (
               <button

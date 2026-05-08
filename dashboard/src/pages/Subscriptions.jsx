@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
-import { useCollection, useDocument } from '../hooks/useFirestore';
-import { SERVICES, getServiceMeta, getProfileImage, getNonPoolServiceKeys, getAllServiceKeys, getSlotFields, getExpectedSlotFields, getUserFields } from '../config/services';
+import { useDocument } from '../hooks/useFirestore';
+import { getServiceMeta, getProfileImage, getSlotFields, getExpectedSlotFields, getUserFields } from '../config/services';
 import {
   updateSlot, updateGroupUser, removeGroupUser, moveUserBetweenAccounts,
   DEFAULT_MASTER_CONFIG, initSubscriptionMasterConfig,
@@ -44,7 +44,6 @@ function getMissingFields(svcId, slot) {
 }
 
 export default function Subscriptions({ onNavigate, navData }) {
- const { data: pools } = useCollection('service-pools');
  const { data: masterConfigDoc, loading: masterConfigLoading } = useDocument('config', 'services');
  const [poolDetails, setPoolDetails] = useState({});
  const [groupDetails, setGroupDetails] = useState({});
@@ -101,6 +100,30 @@ export default function Subscriptions({ onNavigate, navData }) {
      ? (cfg.maxSlotsPerRealAccount || cfg.maxSlots || 5)
      : (cfg.maxSlotsPerLankGroup || cfg.maxSlots || 5);
  }, [masterConfig]);
+
+ const activeServiceIds = useMemo(() => {
+   return Object.keys(masterConfig)
+     .filter(key => masterConfig[key]?.active !== false)
+     .sort((a, b) => {
+       const aMeta = masterConfig[a] || getServiceMeta(a);
+       const bMeta = masterConfig[b] || getServiceMeta(b);
+       const aIsPool = aMeta.usesPool !== false;
+       const bIsPool = bMeta.usesPool !== false;
+       if (aIsPool && !bIsPool) return -1;
+       if (!aIsPool && bIsPool) return 1;
+       return (aMeta.displayOrder || 99) - (bMeta.displayOrder || 99);
+     });
+ }, [masterConfig]);
+
+ const poolServiceIds = useMemo(
+   () => activeServiceIds.filter(key => (masterConfig[key] || getServiceMeta(key)).usesPool !== false),
+   [activeServiceIds, masterConfig],
+ );
+
+ const nonPoolServiceIds = useMemo(
+   () => activeServiceIds.filter(key => (masterConfig[key] || getServiceMeta(key)).usesPool === false),
+   [activeServiceIds, masterConfig],
+ );
 
  // Estados para vincular cupo a cuenta Lank al llenar
  const [fillLankAccountId, setFillLankAccountId] = useState('');
@@ -195,29 +218,28 @@ export default function Subscriptions({ onNavigate, navData }) {
  // ─── Data loading functions ───
  const loadPoolDetails = useCallback(async () => {
    const requestId = ++poolDetailsRequestIdRef.current;
-   if (pools.length === 0) {
+   if (poolServiceIds.length === 0) {
      if (requestId !== poolDetailsRequestIdRef.current) return;
      setPoolDetails({});
      return;
    }
-   const entries = await Promise.all(pools.map(async (pool) => {
-     const snap = await getDocs(collection(db, `service-pools/${pool.id}/real-accounts`));
-     return [pool.id, snap.docs.map(d => ({ id: d.id, ...d.data() }))];
+   const entries = await Promise.all(poolServiceIds.map(async (svcId) => {
+     const snap = await getDocs(collection(db, `service-pools/${svcId}/real-accounts`));
+     return [svcId, snap.docs.map(d => ({ id: d.id, ...d.data() }))];
    }));
    if (requestId !== poolDetailsRequestIdRef.current) return;
    setPoolDetails(Object.fromEntries(entries));
- }, [pools]);
+ }, [poolServiceIds]);
 
  const loadGroupDetails = useCallback(async () => {
    const requestId = ++groupDetailsRequestIdRef.current;
-   const svcs = getAllServiceKeys();
-   const entries = await Promise.all(svcs.map(async (svc) => {
+   const entries = await Promise.all(activeServiceIds.map(async (svc) => {
      const snap = await getDocs(collection(db, `groups/${svc}/lank-accounts`));
      return [svc, snap.docs.map(d => ({ id: d.id, ...d.data() }))];
    }));
    if (requestId !== groupDetailsRequestIdRef.current) return;
    setGroupDetails(Object.fromEntries(entries));
- }, []);
+ }, [activeServiceIds]);
 
  const refreshSubscriptionsData = useCallback(async () => {
    const results = await Promise.allSettled([loadPoolDetails(), loadGroupDetails(), loadPendingAlerts()]);
@@ -277,21 +299,7 @@ export default function Subscriptions({ onNavigate, navData }) {
  };
  };
 
- const allServiceIds = useMemo(() => {
- const fromPools = pools.map(p => p.id);
- const nonPoolKeys = getNonPoolServiceKeys();
- const all = [...new Set([...fromPools, ...nonPoolKeys])];
- // Ordenar: servicios con pool primero, sin pool al final, ambos por displayOrder
- return all.sort((a, b) => {
-      const aMeta = getServiceMeta(a);
-      const bMeta = getServiceMeta(b);
-      const aIsPool = aMeta.usesPool !== false;
-      const bIsPool = bMeta.usesPool !== false;
-      if (aIsPool && !bIsPool) return -1;
-      if (!aIsPool && bIsPool) return 1;
-      return (aMeta.displayOrder || 99) - (bMeta.displayOrder || 99);
- });
- }, [pools]);
+ const allServiceIds = activeServiceIds;
 
  // ─── Cuentas Lank disponibles para vincular al llenar cupo ───
  const fillLankAccounts = useMemo(() => {
@@ -412,7 +420,7 @@ export default function Subscriptions({ onNavigate, navData }) {
  });
 
  // Buscar en grupos de servicios sin pool (como Microsoft 365)
- getNonPoolServiceKeys().forEach(npSvc => {
+ nonPoolServiceIds.forEach(npSvc => {
    (groupDetails[npSvc] || []).forEach(group => {
       let groupMatches = false;
       if (nMatch(group.accountAlias, q)) groupMatches = true;
@@ -469,7 +477,7 @@ export default function Subscriptions({ onNavigate, navData }) {
  } else {
       setSearchResults({ matches: {}, slots: new Set(), total: 0 });
  }
- }, [searchQuery, poolDetails, groupDetails, selectedService]);
+ }, [searchQuery, poolDetails, groupDetails, selectedService, nonPoolServiceIds]);
 
  const clearSearch = () => {
  setSearchQuery('');

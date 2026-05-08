@@ -3,8 +3,11 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { collection, getDocs, doc, getDoc, deleteDoc, addDoc } from 'firebase/firestore';
 
 import { db } from '../firebase';
+import { useDocument } from '../hooks/useFirestore';
+import { ACCESS_TYPES, buildServiceConfig, normalizeServiceKey } from '../config/services';
+import { setServiceCatalogEntryActive, upsertServiceCatalogEntry } from '../hooks/firestoreActions';
 
-import { AnalyzeIcon, BankIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClockIcon, ContainerIcon, CreditCardIcon, DollarIcon, DownloadIcon, EmailIcon, FileStorageIcon, HourglassIcon, KeyIcon, LightbulbIcon, LockIcon, LockKeyIcon, MailboxIcon, MoneyIcon, PackageIcon, ShieldCheckIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, TrendUpIcon, UsersIcon, WarningIcon, XCircleIcon } from '../components/Icons';
+import { AnalyzeIcon, BankIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClockIcon, CloseIcon, ContainerIcon, CreditCardIcon, DollarIcon, DownloadIcon, EditIcon, EmailIcon, FileStorageIcon, HourglassIcon, KeyIcon, LightbulbIcon, LockIcon, LockKeyIcon, MailboxIcon, MoneyIcon, PackageIcon, PlusIcon, SaveIcon, ShieldCheckIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, TrendUpIcon, UsersIcon, WarningIcon, XCircleIcon } from '../components/Icons';
 
 import CryptoJS from 'crypto-js';
 
@@ -21,6 +24,7 @@ const COLLECTIONS = [
  { key: 'config/account-registry', label: 'Registro de Cuentas', icon: <UsersIcon size={16} />, type: 'doc', desc: '37 cuentas Lank' },
  { key: 'config/imap-credentials', label: 'Credenciales IMAP', icon: <LockKeyIcon size={16} />, type: 'doc', desc: 'App Passwords de Gmail', sensitive: true },
  { key: 'config/rates', label: 'Tarifas', icon: <DollarIcon size={16} />, type: 'doc', desc: 'Precios de suscripciones' },
+ { key: 'config/services', label: 'Catálogo de Servicios', icon: <PackageIcon size={16} />, type: 'doc', desc: 'Servicios dinámicos y reglas operativas' },
  { key: 'config/schedule', label: 'Configuración Schedule', icon: <ClockIcon size={16} />, type: 'doc', desc: 'Análisis programado' },
  { key: 'config/subscription-master', label: 'Suscripción Master', icon: <KeyIcon size={16} />, type: 'doc', desc: 'Config de slots por servicio' },
  { key: 'config/vault-security', label: 'Seguridad Bóveda', icon: <LockIcon size={16} />, type: 'doc', desc: 'PIN hasheado de la Bóveda', sensitive: true },
@@ -155,6 +159,7 @@ function formatBytes(bytes) {
 /* ─── Main component ────────────────────────────────────────────────────────── */
 
 export default function Tools() {
+ const { data: servicesDoc } = useDocument('config', 'services');
 
  const [selected, setSelected] = useState(new Set());
 
@@ -195,6 +200,86 @@ export default function Tools() {
  const [policiesDirty, setPoliciesDirty] = useState(false);
 
  const [policySaving, setPolicySaving] = useState(false);
+
+ const [serviceModal, setServiceModal] = useState(null);
+ const [serviceForm, setServiceForm] = useState(null);
+ const [serviceSaving, setServiceSaving] = useState(false);
+ const [serviceError, setServiceError] = useState('');
+
+ const serviceCatalog = servicesDoc?.services || {};
+ const serviceEntries = Object.entries(serviceCatalog)
+   .filter(([key]) => key !== 'id' && key !== 'updatedAt')
+   .sort(([, a], [, b]) => {
+     const aActive = a.active !== false;
+     const bActive = b.active !== false;
+     if (aActive && !bActive) return -1;
+     if (!aActive && bActive) return 1;
+     return (a.displayOrder || 99) - (b.displayOrder || 99);
+   });
+
+ const openServiceModal = (serviceKey = null) => {
+   const existing = serviceKey ? serviceCatalog[serviceKey] : {};
+   const accessType = existing?.accessType || 'email_invitation';
+   setServiceModal({ serviceKey, mode: serviceKey ? 'edit' : 'create' });
+   setServiceForm({
+     serviceKey: serviceKey || '',
+     name: existing?.name || '',
+     active: existing?.active !== false,
+     usesPool: existing?.usesPool !== false,
+     accessType,
+     color: existing?.color || '#64748b',
+     logo: existing?.logo || '',
+     maxSlotsPerRealAccount: existing?.maxSlotsPerRealAccount || existing?.maxSlots || 5,
+     maxSlotsPerLankGroup: existing?.maxSlotsPerLankGroup || existing?.maxSlots || 5,
+     displayOrder: existing?.displayOrder || serviceEntries.length + 1,
+     nameAliases: (existing?.nameAliases || []).join(', '),
+   });
+   setServiceError('');
+ };
+
+ const updateServiceForm = (field, value) => {
+   setServiceForm(prev => {
+     const next = { ...prev, [field]: value };
+     if (field === 'name' && serviceModal?.mode === 'create') {
+       next.serviceKey = normalizeServiceKey(value);
+     }
+     return next;
+   });
+ };
+
+ const handleSaveService = async () => {
+   if (!serviceForm) return;
+   setServiceSaving(true);
+   setServiceError('');
+   try {
+     const payload = {
+       ...serviceForm,
+       nameAliases: serviceForm.nameAliases
+         .split(',')
+         .map(alias => alias.trim())
+         .filter(Boolean),
+     };
+     await upsertServiceCatalogEntry(payload, { previousKey: serviceModal?.serviceKey || undefined });
+     setServiceModal(null);
+     setServiceForm(null);
+   } catch (err) {
+     setServiceError(err.message || 'No se pudo guardar el servicio');
+   } finally {
+     setServiceSaving(false);
+   }
+ };
+
+ const handleToggleService = async (serviceKey, active) => {
+   setServiceSaving(true);
+   setServiceError('');
+   try {
+     await setServiceCatalogEntryActive(serviceKey, active);
+   } catch (err) {
+     setServiceError(err.message || 'No se pudo cambiar el estado del servicio');
+   } finally {
+     setServiceSaving(false);
+   }
+ };
 
  const toggleSelect = (key) => {
 
@@ -498,14 +583,79 @@ export default function Tools() {
 
   /* ─── Render ──────────────────────────────────────────────────────────────── */
 
-  const allSelected = selected.size === COLLECTIONS.length;
-  const FREE_LIMIT_GB = 5;
+ const allSelected = selected.size === COLLECTIONS.length;
+ const FREE_LIMIT_GB = 5;
   const csTotalBytes = storageData?.cloudStorage?.totalSizeBytes || 0;
   const arTotalBytes = storageData?.artifactRegistry?.totalSizeBytes || 0;
   const totalStorageBytes = csTotalBytes + arTotalBytes;
-  const usagePct = (totalStorageBytes / (FREE_LIMIT_GB * 1024 * 1024 * 1024)) * 100;
+ const usagePct = (totalStorageBytes / (FREE_LIMIT_GB * 1024 * 1024 * 1024)) * 100;
+ const servicePreview = serviceForm ? buildServiceConfig(serviceForm).config : null;
  return (
  <>
+      {/* ─── Service Catalog ────────────────────────────────────────────── */}
+
+      <div className="tools-section">
+        <div className="tools-section-header">
+          <div>
+            <h3 className="tools-section-title">
+              <span className="tools-section-icon"><KeyIcon size={16} /></span>
+              Catálogo de servicios
+            </h3>
+            <p className="tools-section-desc">Alta, pausa y reglas operativas para suscripciones dinámicas</p>
+          </div>
+          <button className="tools-btn tools-btn-primary" onClick={() => openServiceModal()}>
+            <PlusIcon size={16} /> Nuevo servicio
+          </button>
+        </div>
+        {serviceError && (
+          <div className="tools-result tools-result-error">
+            <XCircleIcon size={16} /> {serviceError}
+          </div>
+        )}
+        <div className="tools-svc-grid">
+          {serviceEntries.map(([serviceKey, service]) => (
+            <div key={serviceKey} className={`tools-svc-card ${service.active === false ? 'tools-svc-inactive' : ''}`}>
+              <div className="tools-svc-card-header" style={{ borderLeftColor: service.color || '#64748b' }}>
+                {service.logo ? (
+                  <img src={service.logo} alt="" className="tools-svc-logo" />
+                ) : (
+                  <div className="tools-svc-logo" style={{ background: service.color || '#64748b' }} />
+                )}
+                <div className="tools-svc-card-info">
+                  <div className="tools-svc-card-name">{service.name || serviceKey}</div>
+                  <div className="tools-svc-card-meta">
+                    <span className="tools-svc-card-key">{serviceKey}</span>
+                    <span className={`tools-svc-badge ${service.active === false ? 'tools-svc-badge-inactive' : 'tools-svc-badge-active'}`}>
+                      {service.active === false ? 'Pausado' : 'Activo'}
+                    </span>
+                    <span className="tools-svc-badge tools-svc-badge-type">
+                      {ACCESS_TYPES[service.accessType]?.label || service.accessType || 'Invitacion'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="tools-svc-card-details">
+                <span>{service.usesPool === false ? 'Sin pool' : 'Con pool'}</span>
+                <span>{service.maxSlotsPerRealAccount || service.maxSlots || 5} cupos/cuenta</span>
+                <span>{service.maxSlotsPerLankGroup || service.maxSlots || 5} cupos/grupo</span>
+              </div>
+              <div className="tools-svc-card-actions">
+                <button className="tools-btn tools-btn-secondary" onClick={() => openServiceModal(serviceKey)}>
+                  <EditIcon size={14} /> Editar
+                </button>
+                <button
+                  className={`tools-btn ${service.active === false ? 'tools-btn-primary' : 'tools-btn-warning'}`}
+                  onClick={() => handleToggleService(serviceKey, service.active === false)}
+                  disabled={serviceSaving}
+                >
+                  {service.active === false ? <><ToggleOnIcon size={14} /> Activar</> : <><ToggleOffIcon size={14} /> Pausar</>}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
 
       {/* ─── Export Section ─────────────────────────────────────────────── */}
 
@@ -1050,6 +1200,102 @@ export default function Tools() {
           Las operaciones de mantenimiento respetan las políticas de retención del sistema.
         </div>
       </div>
+
+      {serviceModal && serviceForm && (
+        <div className="tools-modal-overlay" onClick={() => setServiceModal(null)}>
+          <div className="tools-modal tools-svc-modal" onClick={e => e.stopPropagation()}>
+            <div className="tools-svc-modal-header">
+              <h4><KeyIcon size={16} /> {serviceModal.mode === 'create' ? 'Nuevo servicio' : `Editar ${serviceForm.name}`}</h4>
+              <button className="crud-icon-btn" onClick={() => setServiceModal(null)} title="Cerrar">
+                <CloseIcon size={16} />
+              </button>
+            </div>
+            <div className="tools-svc-modal-body">
+              <div className="tools-svc-field-row">
+                <div className="tools-svc-field">
+                  <label>Nombre</label>
+                  <input className="edit-modal-input" value={serviceForm.name} onChange={e => updateServiceForm('name', e.target.value)} placeholder="Disney Plus, VPN, Netflix..." />
+                </div>
+                <div className="tools-svc-field">
+                  <label>Clave</label>
+                  <input
+                    className="edit-modal-input"
+                    value={serviceForm.serviceKey}
+                    onChange={e => updateServiceForm('serviceKey', normalizeServiceKey(e.target.value))}
+                    disabled={serviceModal.mode === 'edit'}
+                    placeholder="disney_plus"
+                  />
+                  <span className="tools-svc-hint">Identificador Firestore. En edición no se cambia para no mover datos.</span>
+                </div>
+              </div>
+              <div className="tools-svc-field-row">
+                <div className="tools-svc-field">
+                  <label>Tipo de acceso</label>
+                  <select className="edit-modal-input" value={serviceForm.accessType} onChange={e => updateServiceForm('accessType', e.target.value)}>
+                    {Object.entries(ACCESS_TYPES).map(([key, meta]) => (
+                      <option key={key} value={key}>{meta.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="tools-svc-field">
+                  <label>Color</label>
+                  <input className="edit-modal-input" type="color" value={serviceForm.color} onChange={e => updateServiceForm('color', e.target.value)} />
+                </div>
+                <div className="tools-svc-field">
+                  <label>Orden</label>
+                  <input className="edit-modal-input" type="number" min="1" value={serviceForm.displayOrder} onChange={e => updateServiceForm('displayOrder', e.target.value)} />
+                </div>
+              </div>
+              <div className="tools-svc-field-row">
+                <label className="tools-svc-toggle">
+                  <input type="checkbox" checked={serviceForm.active} onChange={e => updateServiceForm('active', e.target.checked)} />
+                  Servicio activo
+                </label>
+                <label className="tools-svc-toggle">
+                  <input type="checkbox" checked={serviceForm.usesPool} onChange={e => updateServiceForm('usesPool', e.target.checked)} />
+                  Usa cuentas reales / pool
+                </label>
+              </div>
+              <div className="tools-svc-field-row">
+                <div className="tools-svc-field">
+                  <label>Cupos por cuenta real</label>
+                  <input className="edit-modal-input" type="number" min="1" max="20" value={serviceForm.maxSlotsPerRealAccount} onChange={e => updateServiceForm('maxSlotsPerRealAccount', e.target.value)} disabled={!serviceForm.usesPool} />
+                </div>
+                <div className="tools-svc-field">
+                  <label>Cupos por grupo Lank</label>
+                  <input className="edit-modal-input" type="number" min="1" max="20" value={serviceForm.maxSlotsPerLankGroup} onChange={e => updateServiceForm('maxSlotsPerLankGroup', e.target.value)} />
+                </div>
+                <div className="tools-svc-field">
+                  <label>Logo</label>
+                  <input className="edit-modal-input" value={serviceForm.logo} onChange={e => updateServiceForm('logo', e.target.value)} placeholder="/assets/..." />
+                </div>
+              </div>
+              <div className="tools-svc-field">
+                <label>Aliases</label>
+                <input className="edit-modal-input" value={serviceForm.nameAliases} onChange={e => updateServiceForm('nameAliases', e.target.value)} placeholder="Disney+, Disney Plus Premium" />
+                <span className="tools-svc-hint">Separados por coma. El parser de correos y AdminBot usan estos nombres para resolver el servicio.</span>
+              </div>
+              {servicePreview && (
+                <div className="tools-svc-preview">
+                  <span className="tools-svc-preview-label">Vista previa operativa</span>
+                  <div className="tools-svc-preview-card" style={{ borderLeftColor: servicePreview.color }}>
+                    <span className="tools-svc-badge tools-svc-badge-type">{ACCESS_TYPES[servicePreview.accessType]?.label}</span>
+                    <span>{servicePreview.usesPool ? 'Con pool de cuentas reales' : 'Solo grupos Lank'}</span>
+                    <span>{servicePreview.maxSlotsPerRealAccount} / {servicePreview.maxSlotsPerLankGroup} cupos</span>
+                  </div>
+                </div>
+              )}
+              {serviceError && <div className="tools-result tools-result-error"><XCircleIcon size={16} /> {serviceError}</div>}
+            </div>
+            <div className="tools-modal-actions" style={{ padding: '12px 20px', borderTop: '1px solid var(--border-color)' }}>
+              <button className="tools-btn tools-btn-secondary" onClick={() => setServiceModal(null)}>Cancelar</button>
+              <button className="tools-btn tools-btn-primary" onClick={handleSaveService} disabled={serviceSaving}>
+                <SaveIcon size={16} /> {serviceSaving ? 'Guardando...' : 'Guardar servicio'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ─── Purge Confirm Modal ────────────────────────────────────────── */}
 

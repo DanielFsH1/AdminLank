@@ -2,7 +2,7 @@ import { lazy, Suspense, useState, useEffect, useCallback, useRef } from 'react'
 import { onAuthStateChanged } from 'firebase/auth';
 import { onSnapshot, doc as firestoreDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
-import { SERVICES, setDynamicServices } from './config/services';
+import { setDynamicServices } from './config/services';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import Login from './components/Login';
 import Sidebar from './components/Sidebar';

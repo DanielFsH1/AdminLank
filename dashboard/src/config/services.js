@@ -83,6 +83,102 @@ export const SERVICES = {
   },
 };
 
+export const ACCESS_TYPES = {
+  credentials: {
+    label: 'Credenciales compartidas',
+    description: 'Usuarios comparten una cuenta/contrasena; al salir alguien normalmente se cambia la contrasena.',
+  },
+  profile_project: {
+    label: 'Perfil / proyecto',
+    description: 'Usuarios ocupan perfiles, proyectos o espacios dentro de una cuenta compartida.',
+  },
+  email_invitation: {
+    label: 'Invitacion por correo',
+    description: 'Usuarios se agregan o remueven mediante invitacion, familia, workspace o correo.',
+  },
+};
+
+export function normalizeServiceKey(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 48);
+}
+
+export function getAccessTypeLabel(accessType) {
+  return ACCESS_TYPES[accessType]?.label || ACCESS_TYPES.email_invitation.label;
+}
+
+export function getDefaultSlotFields(accessType = 'email_invitation') {
+  const fields = [
+    { key: 'memberAlias', label: 'Alias del usuario', required: true, placeholder: 'Nombre del usuario' },
+  ];
+
+  if (accessType === 'email_invitation') {
+    fields.push({ key: 'memberEmail', label: 'Correo de invitacion', type: 'email', placeholder: 'correo@ejemplo.com' });
+  } else if (accessType === 'profile_project') {
+    fields.push({ key: 'profileName', label: 'Perfil asignado', placeholder: 'Nombre del perfil' });
+  }
+
+  return fields;
+}
+
+export function getDefaultUserFields(accessType = 'email_invitation') {
+  const fields = [
+    { key: 'userAlias', label: 'Alias del usuario', required: true, placeholder: 'Nombre visible del usuario' },
+    { key: 'phone', label: 'Telefono', placeholder: '+52...' },
+  ];
+
+  if (accessType === 'email_invitation') {
+    fields.push({ key: 'userEmail', label: 'Correo de invitacion', type: 'email', placeholder: 'correo@ejemplo.com' });
+  } else if (accessType === 'profile_project') {
+    fields.push({ key: 'profileName', label: 'Perfil asignado', placeholder: 'Nombre del perfil' });
+  }
+
+  return fields;
+}
+
+export function buildServiceConfig(input = {}, existing = {}) {
+  const accessType = ACCESS_TYPES[input.accessType] ? input.accessType : 'email_invitation';
+  const name = String(input.name || existing.name || '').trim();
+  const key = normalizeServiceKey(input.key || input.serviceKey || existing.key || name);
+  const usesPool = input.usesPool ?? existing.usesPool ?? true;
+  const maxSlots = Number(input.maxSlots || existing.maxSlots || existing.maxSlotsPerRealAccount || 5);
+  const maxSlotsPerRealAccount = Math.max(1, Math.min(20, Number(input.maxSlotsPerRealAccount || maxSlots || 5)));
+  const maxSlotsPerLankGroup = Math.max(1, Math.min(20, Number(input.maxSlotsPerLankGroup || existing.maxSlotsPerLankGroup || maxSlotsPerRealAccount)));
+  const aliases = Array.isArray(input.nameAliases)
+    ? input.nameAliases
+    : String(input.nameAliases || existing.nameAliases || '')
+      .split(',')
+      .map(alias => alias.trim())
+      .filter(Boolean);
+  const normalizedAliases = [...new Set([name, ...aliases].filter(Boolean))];
+
+  return {
+    key,
+    config: {
+      name,
+      color: input.color || existing.color || '#64748b',
+      logo: input.logo || existing.logo || '',
+      maxSlots: maxSlotsPerRealAccount,
+      maxSlotsPerRealAccount,
+      maxSlotsPerLankGroup,
+      usesPool: Boolean(usesPool),
+      accessType,
+      accessTypeLabel: getAccessTypeLabel(accessType),
+      displayOrder: Number(input.displayOrder || existing.displayOrder || 99),
+      active: input.active ?? existing.active ?? true,
+      nameAliases: normalizedAliases,
+      slotFields: input.slotFields || existing.slotFields || getDefaultSlotFields(accessType),
+      userFields: input.userFields || existing.userFields || getDefaultUserFields(accessType),
+    },
+  };
+}
+
 export const BANKS = {
   'DiDi':           { color: '#ff6600', logo: '/assets/DiDi.png' },
   'OpenBank':       { color: '#00a877', logo: '/assets/Openbank.webp' },

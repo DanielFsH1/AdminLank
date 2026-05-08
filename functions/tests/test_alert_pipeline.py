@@ -134,3 +134,41 @@ def test_build_direct_alerts_returns_empty_for_info_mail():
     )
 
     assert alerts == []
+
+
+def test_build_direct_alerts_treats_dynamic_profile_project_as_password_shared():
+    event = {
+        "kind": "user_left_self",
+        "subscription": "Netflix Familiar",
+        "accountId": "15",
+        "accountAlias": "Cuenta 15",
+        "userName": "Peach",
+    }
+    review = {"category": "pending"}
+
+    alerts = build_direct_alerts(
+        event=event,
+        review=review,
+        notification_doc_id="notif_netflix",
+        generated_at=GENERATED_AT,
+        existing_alerts=[],
+        enrichment={
+            "serviceAccountRef": "netflix_1",
+            "realAccountEmail": "netflix@example.com",
+            "otherUsers": ["Mario"],
+        },
+        services_config={
+            "netflix": {
+                "name": "Netflix Familiar",
+                "active": True,
+                "usesPool": True,
+                "accessType": "profile_project",
+            }
+        },
+    )
+
+    assert [alert["type"] for alert in alerts] == [
+        "profile_delete",
+        "password_change",
+        "access_verify",
+    ]

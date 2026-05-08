@@ -200,16 +200,23 @@ def load_rates(db):
     return doc.to_dict() if doc.exists else {}
 
 
-def load_current_state_context(db, name_to_key=None):
+def load_current_state_context(db, name_to_key=None, services_config=None):
     """Load current-state data from Firestore groups/ collections."""
     if name_to_key is None:
         name_to_key = dict(SERVICE_TO_FS)
     context = {}
     # Construir el mapeo inverso: key → nombre canónico
-    key_to_name = {}
-    for name, key in name_to_key.items():
-        if key not in key_to_name:
-            key_to_name[key] = name
+    if services_config:
+        key_to_name = {
+            key: svc.get('name', key)
+            for key, svc in services_config.items()
+            if svc.get('active') is not False
+        }
+    else:
+        key_to_name = {}
+        for name, key in name_to_key.items():
+            if key not in key_to_name:
+                key_to_name[key] = name
     for fs_key, service_name in key_to_name.items():
         by_account = {}
         try:
@@ -1458,7 +1465,7 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
         credentials = load_imap_credentials(db)
         registry = load_account_registry(db)
         rates = load_rates(db)
-        db_context = load_current_state_context(db, name_to_key)
+        db_context = load_current_state_context(db, name_to_key, services_config)
         state = load_analysis_state(db)
         accounts = build_enabled_analysis_accounts(credentials, registry)
         alerts_data = load_alerts_from_firestore(db)
@@ -2147,7 +2154,7 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
     credentials = load_imap_credentials(db)
     registry = load_account_registry(db)
     rates = load_rates(db)
-    db_context = load_current_state_context(db, name_to_key)
+    db_context = load_current_state_context(db, name_to_key, services_config)
     accounts = build_enabled_analysis_accounts(credentials, registry)
     alerts_data = load_alerts_from_firestore(db)
     report, state = run_analysis_accounts(

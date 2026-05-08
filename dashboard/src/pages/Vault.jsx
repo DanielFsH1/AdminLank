@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { collection, doc, getDoc, getDocs, setDoc, updateDoc, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useDocument } from '../hooks/useFirestore';
-import { SERVICES, BANKS, getServiceMeta, getBankMeta, getPoolServiceKeys, getAllServiceKeys } from '../config/services';
+import { getServiceMeta, getBankMeta } from '../config/services';
 import { encrypt, decrypt, encryptFields, decryptFields } from '../utils/crypto';
 import { completeAlert, createManualAlert, createRealAccount, createLinkedRealAccount, deleteRealAccount, createVaultCard, deleteVaultCard, DEFAULT_MASTER_CONFIG, addRecurringCharge, removeRecurringCharge, toggleRecurringCharge, updateRecurringCharge, createVaultEmailAccount, updateVaultEmailAccount, deleteVaultEmailAccount, createLankMasterAccount, syncVaultEmailPassword } from '../hooks/firestoreActions';
 import { ConfirmDialog, Toast } from '../components/EditModal';
@@ -123,15 +123,25 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
    return DEFAULT_MASTER_CONFIG;
  }, [masterConfigDoc]);
 
+ const activeServiceIds = useMemo(() => {
+   return Object.keys(masterConfig)
+     .filter(key => masterConfig[key]?.active !== false)
+     .sort((a, b) => {
+       const aMeta = masterConfig[a] || getServiceMeta(a);
+       const bMeta = masterConfig[b] || getServiceMeta(b);
+       return (aMeta.displayOrder || 99) - (bMeta.displayOrder || 99);
+     });
+ }, [masterConfig]);
+
  // Servicios con credenciales compartidas (password)
  const PASSWORD_SERVICES = useMemo(() =>
-   getAllServiceKeys().filter(k => ['credentials', 'profile_project'].includes(getServiceMeta(k).accessType)),
- []);
+   activeServiceIds.filter(k => ['credentials', 'profile_project'].includes((masterConfig[k] || getServiceMeta(k)).accessType)),
+ [activeServiceIds, masterConfig]);
 
  // Servicios con pool, ordenados por displayOrder
  const SERVICE_ORDER = useMemo(() =>
-   getPoolServiceKeys(),
-   []);
+   activeServiceIds.filter(k => (masterConfig[k] || getServiceMeta(k)).usesPool !== false),
+   [activeServiceIds, masterConfig]);
 
  const getRealAccountSlots = useCallback((serviceKey) => {
    return masterConfig[serviceKey]?.maxSlotsPerRealAccount || getServiceMeta(serviceKey).maxSlots || 4;
@@ -401,14 +411,13 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
 
  // ─── Data loading functions ───
  const loadPools = useCallback(async () => {
-   const serviceKeys = getPoolServiceKeys();
    const results = {};
-   await Promise.all(serviceKeys.map(async svc => {
+   await Promise.all(SERVICE_ORDER.map(async svc => {
      const snap = await getDocs(collection(db, `service-pools/${svc}/real-accounts`));
      results[svc] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
    }));
    setPools(results);
- }, []);
+ }, [SERVICE_ORDER]);
 
  const loadSecrets = useCallback(async () => {
    const snap = await getDocs(collection(db, 'secrets'));

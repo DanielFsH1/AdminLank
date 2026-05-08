@@ -775,7 +775,7 @@ def test_analyze_emails_enqueues_adminbot_work_after_saving_latest_report(monkey
         {"id": 12, "canonicalAlias": "Cuenta 12", "fullName": "Cuenta Principal"}
     ])
     monkeypatch.setattr(main, "load_rates", lambda _db: {})
-    monkeypatch.setattr(main, "load_current_state_context", lambda _db, _name_to_key: {})
+    monkeypatch.setattr(main, "load_current_state_context", lambda _db, _name_to_key, _services_config=None: {})
     monkeypatch.setattr(main, "load_analysis_state", lambda _db: {"lastRun": None, "accounts": {}})
     monkeypatch.setattr(main, "load_system_flags", lambda _db: {})
     monkeypatch.setattr(main, "load_alerts_from_firestore", lambda _db: {"alerts": [], "completedAlerts": []})
@@ -852,7 +852,7 @@ def test_analyze_emails_includes_scheduled_manual_alerts_in_backend_count(monkey
         {"id": 12, "canonicalAlias": "Cuenta 12", "fullName": "Cuenta Principal"}
     ])
     monkeypatch.setattr(main, "load_rates", lambda _db: {})
-    monkeypatch.setattr(main, "load_current_state_context", lambda _db, _name_to_key: {})
+    monkeypatch.setattr(main, "load_current_state_context", lambda _db, _name_to_key, _services_config=None: {})
     monkeypatch.setattr(main, "load_analysis_state", lambda _db: {"lastRun": None, "accounts": {}})
     monkeypatch.setattr(main, "load_system_flags", lambda _db: {})
     monkeypatch.setattr(main, "load_alerts_from_firestore", lambda _db: {"alerts": [], "completedAlerts": []})
@@ -931,7 +931,7 @@ def test_scheduled_analysis_enqueues_adminbot_work_for_current_slot(monkeypatch)
         {"id": 12, "canonicalAlias": "Cuenta 12", "fullName": "Cuenta Principal"}
     ])
     monkeypatch.setattr(main, "load_rates", lambda _db: {})
-    monkeypatch.setattr(main, "load_current_state_context", lambda _db, _name_to_key: {})
+    monkeypatch.setattr(main, "load_current_state_context", lambda _db, _name_to_key, _services_config=None: {})
     monkeypatch.setattr(main, "load_alerts_from_firestore", lambda _db: {"alerts": [], "completedAlerts": []})
     monkeypatch.setattr(main, "analyze_account", lambda *args, **kwargs: {
         "accountId": 12,
@@ -1011,7 +1011,7 @@ def test_scheduled_analysis_includes_scheduled_manual_alerts_in_backend_count(mo
         {"id": 12, "canonicalAlias": "Cuenta 12", "fullName": "Cuenta Principal"}
     ])
     monkeypatch.setattr(main, "load_rates", lambda _db: {})
-    monkeypatch.setattr(main, "load_current_state_context", lambda _db, _name_to_key: {})
+    monkeypatch.setattr(main, "load_current_state_context", lambda _db, _name_to_key, _services_config=None: {})
     monkeypatch.setattr(main, "load_alerts_from_firestore", lambda _db: {"alerts": [], "completedAlerts": []})
     monkeypatch.setattr(main, "analyze_account", lambda *args, **kwargs: {
         "accountId": 12,
@@ -1062,7 +1062,7 @@ def test_analyze_emails_persists_adminbot_latest_state_snapshot(monkeypatch):
     monkeypatch.setattr(main, "load_imap_credentials", lambda _db: [])
     monkeypatch.setattr(main, "load_account_registry", lambda _db: [])
     monkeypatch.setattr(main, "load_rates", lambda _db: {})
-    monkeypatch.setattr(main, "load_current_state_context", lambda _db, _name_to_key: {})
+    monkeypatch.setattr(main, "load_current_state_context", lambda _db, _name_to_key, _services_config=None: {})
     monkeypatch.setattr(main, "load_analysis_state", lambda _db: {"accounts": {}})
     monkeypatch.setattr(main, "load_system_flags", lambda _db: {})
     monkeypatch.setattr(main, "load_alerts_from_firestore", lambda _db: {"alerts": [], "completedAlerts": []})

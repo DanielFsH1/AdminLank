@@ -5,7 +5,7 @@
  */
 import { doc, updateDoc, setDoc, deleteDoc, deleteField, arrayUnion, Timestamp, getDoc as firestoreGetDoc, collection, addDoc, query, orderBy, getDocs, writeBatch, where, runTransaction } from 'firebase/firestore';
 import { db } from '../firebase';
-import { SERVICES, getServiceMeta } from '../config/services';
+import { SERVICES, buildServiceConfig, getServiceMeta, normalizeServiceKey } from '../config/services';
 import { encrypt } from '../utils/crypto';
 
 // --- Helpers ---
@@ -1743,6 +1743,113 @@ export async function updateServiceConfig(serviceKey, serviceConfig) {
   const current = snap.exists() ? (snap.data().services || {}) : {};
   current[serviceKey] = { ...(current[serviceKey] || {}), ...serviceConfig };
   await setDoc(ref, { services: current, updatedAt: nowISO() });
+}
+
+/**
+ * Crea o actualiza un servicio arbitrario en el catálogo dinámico.
+ * También deja documentos padre para que el dashboard pueda listar el servicio
+ * antes de que existan cuentas reales o grupos Lank.
+ */
+export async function upsertServiceCatalogEntry(serviceInput, options = {}) {
+  const ref = doc(db, 'config', 'services');
+  const snap = await firestoreGetDoc(ref);
+  const current = snap.exists() ? (snap.data().services || {}) : {};
+  const requestedKey = normalizeServiceKey(serviceInput.serviceKey || serviceInput.key || serviceInput.name);
+  if (!requestedKey) {
+    throw new Error('Define un nombre o serviceKey válido para el servicio');
+  }
+  const existingKey = options.previousKey || requestedKey;
+  const existing = current[existingKey] || current[requestedKey] || {};
+  const { key, config } = buildServiceConfig({ ...serviceInput, key: requestedKey }, existing);
+  if (!config.name) {
+    throw new Error('Define el nombre visible del servicio');
+  }
+
+  if (existingKey !== key && current[key] && !options.allowOverwrite) {
+    throw new Error(`Ya existe un servicio con la clave ${key}`);
+  }
+
+  const next = { ...current };
+  if (existingKey !== key) delete next[existingKey];
+  next[key] = {
+    ...config,
+    serviceKey: key,
+    updatedAt: nowISO(),
+    createdAt: existing.createdAt || nowISO(),
+  };
+
+  await setDoc(ref, { services: next, updatedAt: nowISO() });
+
+  const parentMeta = {
+    serviceKey: key,
+    name: next[key].name,
+    active: next[key].active,
+    usesPool: next[key].usesPool,
+    accessType: next[key].accessType,
+    updatedAt: nowISO(),
+  };
+  await setDoc(doc(db, 'groups', key), parentMeta, { merge: true });
+  if (next[key].usesPool !== false) {
+    await setDoc(doc(db, 'service-pools', key), {
+      ...parentMeta,
+      maxSlotsPerAccount: next[key].maxSlotsPerRealAccount || next[key].maxSlots || 5,
+    }, { merge: true });
+  }
+
+  logManualChange(existingKey === key && current[key] ? 'update_service_catalog' : 'create_service_catalog', `Servicio ${next[key].name} (${key}) guardado`, {
+    collection: 'config',
+    documentId: 'services',
+    before: existingKey !== key ? { previousKey: existingKey, service: existing } : existing,
+    after: next[key],
+  });
+
+  return { serviceKey: key, service: next[key] };
+}
+
+/**
+ * Activa/desactiva un servicio sin borrar sus datos historicos.
+ */
+export async function setServiceCatalogEntryActive(serviceKey, active) {
+  const key = normalizeServiceKey(serviceKey);
+  const ref = doc(db, 'config', 'services');
+  const snap = await firestoreGetDoc(ref);
+  const current = snap.exists() ? (snap.data().services || {}) : {};
+  if (!current[key]) {
+    throw new Error(`No existe el servicio ${key}`);
+  }
+
+  const nextService = { ...current[key], active: Boolean(active), updatedAt: nowISO() };
+  await setDoc(ref, {
+    services: { ...current, [key]: nextService },
+    updatedAt: nowISO(),
+  });
+  await setDoc(doc(db, 'groups', key), {
+    serviceKey: key,
+    name: nextService.name || key,
+    active: nextService.active,
+    usesPool: nextService.usesPool,
+    accessType: nextService.accessType,
+    updatedAt: nowISO(),
+  }, { merge: true });
+  if (nextService.usesPool !== false) {
+    await setDoc(doc(db, 'service-pools', key), {
+      serviceKey: key,
+      name: nextService.name || key,
+      active: nextService.active,
+      usesPool: true,
+      accessType: nextService.accessType,
+      updatedAt: nowISO(),
+    }, { merge: true });
+  }
+
+  logManualChange(active ? 'activate_service_catalog' : 'deactivate_service_catalog', `${active ? 'Activado' : 'Desactivado'} servicio ${nextService.name || key}`, {
+    collection: 'config',
+    documentId: 'services',
+    before: current[key],
+    after: nextService,
+  });
+
+  return { serviceKey: key, service: nextService };
 }
 
 /**

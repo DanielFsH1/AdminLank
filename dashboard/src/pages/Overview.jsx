@@ -2,18 +2,38 @@ import { useCollection, useDocument } from '../hooks/useFirestore';
 import { useState, useEffect, useMemo } from 'react';
 import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { SERVICES, getServiceMeta, formatMXN, getPoolServiceKeys } from '../config/services';
+import { getServiceMeta, formatMXN, getPoolServiceKeys } from '../config/services';
 import { UsersIcon, CheckCircleIcon, KeyIcon, BellIcon, AtmIcon, ClipboardIcon, InboxIcon } from '../components/Icons';
 
 export default function Overview({ onNavigate }) {
-  const SERVICE_KEYS = useMemo(() => getPoolServiceKeys(), []);
   const { data: accounts, loading: loadingAccounts } = useCollection('accounts', { realtime: true });
-  const { data: groups, loading: loadingGroups } = useCollection('groups', { realtime: true });
   const { data: pools } = useCollection('service-pools', { realtime: true });
   const { data: alerts } = useCollection('alerts', { realtime: true });
+  const { data: servicesDoc } = useDocument('config', 'services', { realtime: true });
   const { data: finOverview } = useDocument('finance', 'overview', { realtime: true });
   const [serviceStats, setServiceStats] = useState({});
   const [statsReady, setStatsReady] = useState(false);
+
+  const serviceConfig = useMemo(() => {
+    const data = servicesDoc?.services || servicesDoc || {};
+    return Object.fromEntries(Object.entries(data).filter(([key]) => key !== 'id' && key !== 'updatedAt'));
+  }, [servicesDoc]);
+
+  const poolServiceIds = useMemo(() => {
+    const keys = Object.keys(serviceConfig).length
+      ? Object.keys(serviceConfig)
+      : getPoolServiceKeys();
+    return keys
+      .filter(key => {
+        const meta = serviceConfig[key] || getServiceMeta(key);
+        return meta.active !== false && meta.usesPool !== false;
+      })
+      .sort((a, b) => {
+        const aMeta = serviceConfig[a] || getServiceMeta(a);
+        const bMeta = serviceConfig[b] || getServiceMeta(b);
+        return (aMeta.displayOrder || 99) - (bMeta.displayOrder || 99);
+      });
+  }, [serviceConfig]);
 
   // ─── Notificaciones (solo conteo) ───
   const [notifications, setNotifications] = useState([]);
@@ -37,19 +57,23 @@ export default function Overview({ onNavigate }) {
 
   // Service stats — one-time batch fetch
   useEffect(() => {
-    if (groups.length === 0) return;
+    if (poolServiceIds.length === 0) {
+      setServiceStats({});
+      setStatsReady(true);
+      return;
+    }
     setStatsReady(false);
     let cancelled = false;
 
     async function loadStats() {
       const results = {};
-      await Promise.all(groups.map(async (group) => {
-        const snap = await getDocs(collection(db, `groups/${group.id}/lank-accounts`));
+      await Promise.all(poolServiceIds.map(async (serviceKey) => {
+        const snap = await getDocs(collection(db, `groups/${serviceKey}/lank-accounts`));
         const docs = snap.docs.map(d => d.data());
         const active = docs.filter(d => d.groupStatus === 'active');
         const totalUsers = active.reduce((s, d) => s + (d.users?.length || 0), 0);
-        results[group.id] = {
-          serviceName: getServiceMeta(group.id).name,
+        results[serviceKey] = {
+          serviceName: getServiceMeta(serviceKey).name,
           activeAccounts: active.length,
           totalUsers,
           totalAccounts: docs.length,
@@ -62,9 +86,9 @@ export default function Overview({ onNavigate }) {
     }
     loadStats();
     return () => { cancelled = true; };
-  }, [groups]);
+  }, [poolServiceIds]);
 
-  if (loadingAccounts || loadingGroups) {
+  if (loadingAccounts) {
     return <div className="loading-container"><div className="loading-spinner"></div></div>;
   }
 
@@ -156,7 +180,7 @@ export default function Overview({ onNavigate }) {
       </div>
       ) : (
         <div className="services-grid">
-          {SERVICE_KEYS.map(k => (
+          {poolServiceIds.map(k => (
             <div className="service-card" key={k} style={{ opacity: 0.4, minHeight: '90px' }}>
               <div className="service-card-header">
                 <div className="service-card-title">
