@@ -2,9 +2,10 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useCollection } from '../hooks/useFirestore';
 import { createNote, updateNote, deleteNote, toggleNotePin } from '../hooks/firestoreActions';
 import { Toast } from '../components/EditModal';
+import SearchBar from '../components/SearchBar';
 import {
-  PlusIcon, SearchIcon, CheckCircleIcon, TrashIcon,
-  CloseIcon, NotesIcon, ThumbtackIcon,
+  PlusIcon, CheckCircleIcon, TrashIcon,
+  CloseIcon, NotesIcon, ThumbtackIcon, EditIcon,
 } from '../components/Icons';
 
 const NOTE_COLORS = [
@@ -29,7 +30,7 @@ function formatDate(iso) {
   } catch { return iso; }
 }
 
-function truncate(text, max = 120) {
+function truncate(text, max = 200) {
   if (!text || text.length <= max) return text || '';
   return text.slice(0, max) + '...';
 }
@@ -114,6 +115,7 @@ function NoteEditor({ note, onClose, onSaved }) {
                 rows={10}
               />
               <div className="note-color-picker">
+                <span className="note-color-label">Color</span>
                 {NOTE_COLORS.map(c => (
                   <button
                     key={c.id}
@@ -190,33 +192,44 @@ function NoteCard({ note, onEdit, onDelete, onTogglePin }) {
   return (
     <div
       className={`note-card ${note.pinned ? 'pinned' : ''}`}
-      style={{ borderLeftColor: colorBg(note.color) }}
+      style={{ '--note-accent': colorBg(note.color) }}
       onClick={() => onEdit(note)}
     >
-      <div className="note-card-header">
-        <h4 className="note-card-title">{note.title || 'Sin título'}</h4>
-        <div className="note-card-actions">
-          <button
-            className={`note-action-btn ${note.pinned ? 'active' : ''}`}
-            title={note.pinned ? 'Desfijar' : 'Fijar'}
-            onClick={e => { e.stopPropagation(); onTogglePin(note); }}
-          >
-            <ThumbtackIcon size={14} />
-          </button>
-          <button
-            className="note-action-btn danger"
-            title="Eliminar"
-            onClick={e => { e.stopPropagation(); onDelete(note); }}
-          >
-            <TrashIcon size={14} />
-          </button>
+      <div className="note-card-color-bar" style={{ background: colorBg(note.color) }} />
+      <div className="note-card-body">
+        <div className="note-card-header">
+          <h4 className="note-card-title">{note.title || 'Sin título'}</h4>
+          <div className="note-card-actions">
+            <button
+              className={`note-action-btn ${note.pinned ? 'active' : ''}`}
+              title={note.pinned ? 'Desfijar' : 'Fijar'}
+              onClick={e => { e.stopPropagation(); onTogglePin(note); }}
+            >
+              <ThumbtackIcon size={14} />
+            </button>
+            <button
+              className="note-action-btn"
+              title="Editar"
+              onClick={e => { e.stopPropagation(); onEdit(note); }}
+            >
+              <EditIcon size={14} />
+            </button>
+            <button
+              className="note-action-btn danger"
+              title="Eliminar"
+              onClick={e => { e.stopPropagation(); onDelete(note); }}
+            >
+              <TrashIcon size={14} />
+            </button>
+          </div>
         </div>
-      </div>
-      {note.content && (
-        <p className="note-card-content">{truncate(note.content, 200)}</p>
-      )}
-      <div className="note-card-footer">
-        <span className="note-card-date">{formatDate(note.updatedAt || note.createdAt)}</span>
+        {note.content && (
+          <p className="note-card-content">{truncate(note.content, 200)}</p>
+        )}
+        <div className="note-card-footer">
+          {note.pinned && <span className="badge badge-info" style={{ fontSize: '10px', padding: '1px 6px' }}>Fijada</span>}
+          <span className="note-card-date">{formatDate(note.updatedAt || note.createdAt)}</span>
+        </div>
       </div>
     </div>
   );
@@ -227,81 +240,100 @@ function NoteCard({ note, onEdit, onDelete, onTogglePin }) {
 export default function Notes() {
   const { data: notes, loading } = useCollection('notes');
   const [search, setSearch] = useState('');
+  const [filterColor, setFilterColor] = useState('all');
   const [editorNote, setEditorNote] = useState(undefined); // undefined=closed, null=new, object=edit
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [toast, setToast] = useState(null);
+  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
 
-  const showToast = useCallback((msg) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 3000);
+  const showToast = useCallback((message, type = 'success') => {
+    setToast({ visible: true, message, type });
   }, []);
 
   const sorted = useMemo(() => {
     let filtered = notes;
     if (search.trim()) {
       const q = search.toLowerCase();
-      filtered = notes.filter(n =>
+      filtered = filtered.filter(n =>
         (n.title || '').toLowerCase().includes(q) ||
         (n.content || '').toLowerCase().includes(q)
       );
+    }
+    if (filterColor !== 'all') {
+      filtered = filtered.filter(n => (n.color || 'default') === filterColor);
     }
     return [...filtered].sort((a, b) => {
       if (a.pinned && !b.pinned) return -1;
       if (!a.pinned && b.pinned) return 1;
       return (b.updatedAt || b.createdAt || '').localeCompare(a.updatedAt || a.createdAt || '');
     });
-  }, [notes, search]);
+  }, [notes, search, filterColor]);
 
   const handleTogglePin = async (note) => {
     try {
       await toggleNotePin(note.id, note.pinned);
-    } catch (err) {
-      showToast('Error al fijar nota');
+    } catch {
+      showToast('Error al fijar nota', 'error');
     }
   };
 
   const pinnedCount = useMemo(() => notes.filter(n => n.pinned).length, [notes]);
 
+  if (loading) return <div className="empty-state"><div className="loading-spinner" /></div>;
+
   return (
     <div className="notes-page">
-      {/* Header bar */}
-      <div className="notes-toolbar">
-        <div className="notes-search-wrap">
-          <SearchIcon size={16} />
-          <input
-            className="notes-search"
-            placeholder="Buscar notas..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-          {search && (
-            <button className="notes-search-clear" onClick={() => setSearch('')}>
-              <CloseIcon size={14} />
-            </button>
-          )}
+      {/* Section header */}
+      <div className="section-header">
+        <div className="section-title">
+          <NotesIcon size={20} /> Bloc de Notas
         </div>
-        <button className="btn-primary notes-add-btn" onClick={() => setEditorNote(null)}>
-          <PlusIcon size={16} /> Nueva nota
+        <button className="alert-tab active-tint" onClick={() => setEditorNote(null)}>
+          <PlusIcon size={14} /> Nueva nota
         </button>
       </div>
 
-      {/* Stats */}
-      <div className="notes-stats">
-        <span>{notes.length} nota{notes.length !== 1 ? 's' : ''}</span>
-        {pinnedCount > 0 && <span> &middot; {pinnedCount} fijada{pinnedCount !== 1 ? 's' : ''}</span>}
-        {search && <span> &middot; {sorted.length} resultado{sorted.length !== 1 ? 's' : ''}</span>}
+      {/* Search */}
+      <SearchBar
+        value={search}
+        onChange={setSearch}
+        placeholder="Buscar notas..."
+        resultCount={search.length >= 2 ? sorted.length : undefined}
+      >
+        {/* Color filter chips */}
+        <button
+          className={`alert-tab ${filterColor === 'all' ? 'active' : ''}`}
+          onClick={() => setFilterColor('all')}
+          style={{ fontSize: '12px', padding: '4px 10px' }}
+        >
+          Todas
+        </button>
+        {NOTE_COLORS.map(c => (
+          <button
+            key={c.id}
+            className={`alert-tab ${filterColor === c.id ? 'active' : ''}`}
+            onClick={() => setFilterColor(filterColor === c.id ? 'all' : c.id)}
+            style={{ fontSize: '12px', padding: '4px 10px' }}
+          >
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: c.bg, display: 'inline-block' }} />
+            {c.label}
+          </button>
+        ))}
+      </SearchBar>
+
+      {/* Stats badges */}
+      <div className="notes-stats-bar">
+        <span className="badge badge-muted">{notes.length} nota{notes.length !== 1 ? 's' : ''}</span>
+        {pinnedCount > 0 && <span className="badge badge-info">{pinnedCount} fijada{pinnedCount !== 1 ? 's' : ''}</span>}
       </div>
 
       {/* Notes grid */}
-      {loading ? (
-        <div className="loading-container"><div className="loading-spinner" /></div>
-      ) : sorted.length === 0 ? (
-        <div className="notes-empty">
-          <NotesIcon size={48} />
-          <p>{search ? 'No se encontraron notas' : 'No hay notas todavía'}</p>
-          {!search && (
-            <button className="btn-primary" onClick={() => setEditorNote(null)}>
-              <PlusIcon size={16} /> Crear primera nota
+      {sorted.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-state-icon"><NotesIcon size={40} /></div>
+          <p>{search || filterColor !== 'all' ? 'No se encontraron notas con esos filtros' : 'No hay notas todavía'}</p>
+          {!search && filterColor === 'all' && (
+            <button className="alert-tab active-tint" onClick={() => setEditorNote(null)} style={{ marginTop: '8px' }}>
+              <PlusIcon size={14} /> Crear primera nota
             </button>
           )}
         </div>
@@ -337,7 +369,12 @@ export default function Notes() {
         />
       )}
 
-      <Toast message={toast} onClose={() => setToast(null)} />
+      <Toast
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        onClose={() => setToast(t => ({ ...t, visible: false }))}
+      />
     </div>
   );
 }
