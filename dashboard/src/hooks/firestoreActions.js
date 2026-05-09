@@ -1115,6 +1115,11 @@ export async function deleteVaultEmailAccount(accountId) {
     throw new Error('La cuenta de correo no existe');
   }
   const data = snap.data();
+
+  if (data.type === 'lank_google' && data.lankAccountId) {
+    await assertNoLinkedPaypalAccounts(data.lankAccountId);
+  }
+
   await deleteDoc(ref);
 
   // Cascade: delete linked Lank account + SIM for lank_google
@@ -1268,6 +1273,33 @@ async function getLinkedPrincipalForPaypal(lankAccountId) {
   return { id: normalizedId, data: principalSnap.data() };
 }
 
+async function getLinkedPaypalAccounts(lankAccountId) {
+  const normalizedId = String(lankAccountId || '').trim();
+  if (!normalizedId) return [];
+
+  const snap = await getDocs(query(
+    collection(db, 'secrets'),
+    where('type', '==', 'paypal'),
+    where('lankAccountId', '==', normalizedId),
+  ));
+
+  return snap.docs
+    .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
+    .filter(account => account.type === 'paypal' && String(account.lankAccountId || '').trim() === normalizedId);
+}
+
+async function assertNoLinkedPaypalAccounts(lankAccountId) {
+  const linkedPaypal = await getLinkedPaypalAccounts(lankAccountId);
+  if (linkedPaypal.length === 0) return;
+
+  const emails = linkedPaypal
+    .map(account => account.email || account.id)
+    .filter(Boolean)
+    .join(', ');
+
+  throw new Error(`No puedes eliminar esta cuenta principal porque tiene PayPal vinculado: ${emails}`);
+}
+
 export async function createVaultPaypalAccount(accountData) {
   const now = nowISO();
   const email = normalize(accountData.email);
@@ -1366,6 +1398,7 @@ export async function deleteVaultPaypalAccount(accountId) {
   }
 
   const data = snap.data();
+
   await deleteDoc(ref);
 
   logManualChange('delete_vault_paypal_account', `Cuenta PayPal eliminada: ${data.email || accountId}`, {
@@ -2871,6 +2904,8 @@ export async function deleteLankMasterAccount(accountId) {
     throw new Error(`La cuenta Lank #${numId} no existe`);
   }
   const before = snap.data();
+
+  await assertNoLinkedPaypalAccounts(String(numId));
 
   await deleteDoc(ref);
 

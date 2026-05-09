@@ -34,13 +34,13 @@ const NAV_ITEMS = [
   { id: 'accounts', icon: UsersIcon, label: 'Cuentas Lank' },
   { id: 'alerts', icon: BellIcon, label: 'Alertas', showBadge: true },
   { id: 'finance', icon: MoneyIcon, label: 'Finanzas' },
+  { id: 'vault', icon: LockIcon, label: 'Bóveda' },
   { id: 'sim-cards', icon: SimCardIcon, label: 'SIM Cards' },
   { id: 'analyze', icon: AnalyzeIcon, label: 'Analizar' },
 ];
 
 const SYSTEM_ITEMS = [
   { id: 'history', icon: HistoryIcon, label: 'Historial' },
-  { id: 'vault', icon: LockIcon, label: 'Bóveda' },
   { id: 'notes', icon: NotepadIcon, label: 'Notas' },
   { id: 'status', icon: StatusIcon, label: 'Estado' },
   { id: 'tools', icon: ToolboxIcon, label: 'Herramientas' },

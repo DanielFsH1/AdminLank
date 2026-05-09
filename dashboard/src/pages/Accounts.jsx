@@ -350,9 +350,9 @@ export default function Accounts({ navData, onNavigate }) {
  const handleUserClick = (svcId, user) => {
  if (!onNavigate || !user.serviceAccountRef) return;
  onNavigate('subscriptions', {
-      service: svcId,
-      accountRef: user.serviceAccountRef,
-      highlightUser: user.userAlias || null,
+      serviceKey: svcId,
+      serviceAccountRef: user.serviceAccountRef,
+      userAlias: user.userAlias || null,
  });
  };
 

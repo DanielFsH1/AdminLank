@@ -389,15 +389,17 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
  // Handle navData
  useEffect(() => {
  if (!navData) return;
+ const serviceKey = navData.serviceKey || navData.service;
+ const serviceAccountRef = navData.serviceAccountRef || navData.accountRef;
  if (navData.tab) setActiveTab(navData.tab);
- if (navData.serviceKey) {
-      setExpandedServices(new Set([navData.serviceKey]));
+ if (serviceKey) {
+      setExpandedServices(new Set([serviceKey]));
       setActiveTab('credentials');
  }
- if (navData.serviceAccountRef) {
-      setHighlightRef(navData.serviceAccountRef);
+ if (serviceAccountRef) {
+      setHighlightRef(serviceAccountRef);
       setTimeout(() => {
-        const el = document.getElementById(`vault-${navData.serviceAccountRef}`);
+        const el = document.getElementById(`vault-${serviceAccountRef}`);
         if (el) {
           el.scrollIntoView({ behavior: 'smooth', block: 'center' });
           el.classList.add('vault-highlight-pulse');
@@ -1646,7 +1648,7 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
                           <div className="vault-card-header">
                             <div
                               className="vault-card-label cross-nav-link"
-                              onClick={() => onNavigate && onNavigate('subscriptions', { service: svc, accountRef: acct.serviceAccountRef || acct.id })}
+                              onClick={() => onNavigate && onNavigate('subscriptions', { serviceKey: svc, serviceAccountRef: acct.serviceAccountRef || acct.id })}
                               title="Ir a Suscripciones"
                               style={{ cursor: 'pointer' }}
                             >
@@ -1732,7 +1734,7 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
                             </button>
                             <button
                               className="vault-action-btn view"
-                              onClick={() => onNavigate && onNavigate('subscriptions', { service: svc, accountRef: acct.serviceAccountRef || acct.id })}
+                              onClick={() => onNavigate && onNavigate('subscriptions', { serviceKey: svc, serviceAccountRef: acct.serviceAccountRef || acct.id })}
                             >
                               <LinkIcon size={16} /> Suscripciones
                             </button>

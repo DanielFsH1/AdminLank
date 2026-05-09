@@ -22,7 +22,7 @@ const History = lazy(() => import('./pages/History'));
 const SimCards = lazy(() => import('./pages/SimCards'));
 const Notes = lazy(() => import('./pages/Notes'));
 
-const TAB_ORDER = ['overview','subscriptions','accounts','alerts','finance','sim-cards','analyze','history','vault','notes','status','tools'];
+const TAB_ORDER = ['overview','subscriptions','accounts','alerts','finance','vault','sim-cards','analyze','history','notes','status','tools'];
 
 const TAB_TITLES = {
   overview: 'Resumen General',

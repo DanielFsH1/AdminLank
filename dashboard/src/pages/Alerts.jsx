@@ -308,7 +308,7 @@ export default function Alerts({ onNavigate, navData }) {
       if (alert.serviceAccountRef || alert.service) {
         const svcKey = serviceNameToKey(alert.service) || parseServiceKey(alert.serviceAccountRef);
         if (svcKey) {
-          onNavigate('subscriptions', { service: svcKey, accountRef: alert.serviceAccountRef || null, highlightUser: alert.userAlias || null });
+          onNavigate('subscriptions', { serviceKey: svcKey, serviceAccountRef: alert.serviceAccountRef || null, userAlias: alert.userAlias || null });
         } else {
           onNavigate('subscriptions');
         }
@@ -317,7 +317,7 @@ export default function Alerts({ onNavigate, navData }) {
       }
  } else if (alert.service) {
       const svcKey = serviceNameToKey(alert.service);
-      onNavigate(svcKey ? 'subscriptions' : 'subscriptions', svcKey ? { service: svcKey } : undefined);
+      onNavigate(svcKey ? 'subscriptions' : 'subscriptions', svcKey ? { serviceKey: svcKey } : undefined);
  }
  };
 

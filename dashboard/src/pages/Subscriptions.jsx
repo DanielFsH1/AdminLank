@@ -142,10 +142,12 @@ export default function Subscriptions({ onNavigate, navData }) {
  if (typeof navData === 'string') {
       setSelectedService(navData);
       setHighlightUser(null);
- } else if (navData.service) {
-      setSelectedService(navData.service);
-      if (navData.accountRef) setHighlightRef(navData.accountRef);
-      setHighlightUser(navData.highlightUser || null);
+ } else {
+      const serviceKey = navData.serviceKey || navData.service;
+      const serviceAccountRef = navData.serviceAccountRef || navData.accountRef;
+      if (serviceKey) setSelectedService(serviceKey);
+      if (serviceAccountRef) setHighlightRef(serviceAccountRef);
+      setHighlightUser(navData.userAlias || navData.highlightUser || null);
  }
  }, [navData]);
 
@@ -1191,7 +1193,7 @@ export default function Subscriptions({ onNavigate, navData }) {
                       {pwAlert && (
                         <div
                           className="password-change-banner"
-                          onClick={() => onNavigate && onNavigate('vault', { service: selectedService, accountRef: acct.serviceAccountRef || acct.id })}
+                          onClick={() => onNavigate && onNavigate('vault', { serviceKey: selectedService, serviceAccountRef: acct.serviceAccountRef || acct.id, tab: 'credentials' })}
                           style={{ cursor: 'pointer' }}
                         >
                           <LockKeyIcon size={14} />

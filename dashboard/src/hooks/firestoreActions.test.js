@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockDoc, mockGetDoc, mockSetDoc, mockUpdateDoc, mockRunTransaction, mockTransactionGet, mockTransactionUpdate } = vi.hoisted(() => ({
+const { mockDoc, mockGetDoc, mockGetDocs, mockSetDoc, mockUpdateDoc, mockDeleteDoc, mockRunTransaction, mockTransactionGet, mockTransactionUpdate } = vi.hoisted(() => ({
   mockDoc: vi.fn((...segments) => ({
     path: segments.filter((segment) => typeof segment === 'string').join('/'),
   })),
   mockGetDoc: vi.fn(),
+  mockGetDocs: vi.fn(),
   mockSetDoc: vi.fn(),
   mockUpdateDoc: vi.fn(),
+  mockDeleteDoc: vi.fn(),
   mockRunTransaction: vi.fn(),
   mockTransactionGet: vi.fn(),
   mockTransactionUpdate: vi.fn(),
@@ -20,7 +22,7 @@ vi.mock('firebase/firestore', () => ({
   doc: mockDoc,
   updateDoc: mockUpdateDoc,
   setDoc: mockSetDoc,
-  deleteDoc: vi.fn(),
+  deleteDoc: mockDeleteDoc,
   deleteField: vi.fn(),
   arrayUnion: vi.fn(),
   Timestamp: {},
@@ -29,7 +31,7 @@ vi.mock('firebase/firestore', () => ({
   addDoc: vi.fn(),
   query: vi.fn(),
   orderBy: vi.fn(),
-  getDocs: vi.fn(),
+  getDocs: mockGetDocs,
   limit: vi.fn(),
   writeBatch: vi.fn(),
   where: vi.fn(),
@@ -40,6 +42,7 @@ import {
   cancelScheduledManualAlert,
   confirmRecurringExpense,
   createVaultPaypalAccount,
+  deleteVaultEmailAccount,
   createSlotDeletionAlert,
   createScheduledManualAlert,
 } from './firestoreActions';
@@ -514,6 +517,48 @@ describe('vault PayPal accounts', () => {
     const payload = mockSetDoc.mock.calls[0][1];
     expect(payload.password).toBeTruthy();
     expect(payload.password).not.toBe('paypal-secret');
+  });
+
+  it('blocks deletion of a principal account while PayPal accounts are linked', async () => {
+    mockGetDoc.mockResolvedValue(buildSnapshot({
+      type: 'lank_google',
+      lankAccountId: '12',
+      email: 'principal@gmail.com',
+    }));
+    mockGetDocs.mockResolvedValue({
+      docs: [
+        {
+          id: 'paypal_12_paypal_example_com',
+          data: () => ({
+            type: 'paypal',
+            lankAccountId: '12',
+            email: 'paypal@example.com',
+          }),
+        },
+      ],
+    });
+
+    await expect(deleteVaultEmailAccount('lank_google_12')).rejects.toThrow('No puedes eliminar esta cuenta principal porque tiene PayPal vinculado: paypal@example.com');
+
+    expect(mockDeleteDoc).not.toHaveBeenCalled();
+  });
+
+  it('allows deletion of a principal account when no PayPal accounts are linked', async () => {
+    mockGetDoc
+      .mockResolvedValueOnce(buildSnapshot({
+        type: 'lank_google',
+        lankAccountId: '12',
+        email: 'principal@gmail.com',
+      }))
+      .mockResolvedValueOnce({
+        exists: () => false,
+        data: () => null,
+      });
+    mockGetDocs.mockResolvedValue({ docs: [] });
+
+    await deleteVaultEmailAccount('lank_google_12');
+
+    expect(mockDeleteDoc).toHaveBeenCalledWith(expect.objectContaining({ path: 'secrets/lank_google_12' }));
   });
 });
 
