@@ -382,8 +382,6 @@ export async function migrateExistingBanks() {
     bankMap[id].creditAccount = {
       creditLimit: ca.creditLimit || 0,
       currentBalance: ca.currentBalance || 0,
-      annualRate: ca.annualRate || 0,
-      minimumPayment: ca.minimumPayment || 0,
       cutoffDay: ca.cutoffDay || 1,
       paymentDueDay: ca.paymentDueDay || 15,
       alertDaysBefore: ca.alertDaysBefore || 1,

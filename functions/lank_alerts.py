@@ -564,7 +564,6 @@ def generate_credit_alerts(db):
                 )
                 if not is_dup:
                     is_today = today_day == effective_due
-                    min_payment = acct.get('minimumPayment', 0)
                     balance = acct.get('currentBalance', 0)
                     alert = {
                         'id': _alert_id(),
@@ -578,7 +577,6 @@ def generate_credit_alerts(db):
                         'description': (
                             f'El límite de pago de {bank} es el día {due_day}. '
                             f'Saldo: ${balance:,.2f}.'
-                            + (f' Pago mínimo: ${min_payment:,.2f}.' if min_payment > 0 else '')
                         ),
                         'createdAt': now,
                         'completedAt': None,

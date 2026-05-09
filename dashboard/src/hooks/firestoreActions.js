@@ -2725,7 +2725,7 @@ export async function removeCreditInstallment(accountId, installmentId, currentA
 /**
  * Adds or updates a monthly statement for a credit account.
  * @param {string} accountId
- * @param {object} statement - { monthKey, balanceAtCutoff, minimumPayment, paymentMade, interestCharged, paidAt }
+ * @param {object} statement - { monthKey, balanceAtCutoff, paymentMade, interestCharged, paidAt }
  * @param {Array} currentAccounts
  */
 export async function saveCreditStatement(accountId, statement, currentAccounts) {

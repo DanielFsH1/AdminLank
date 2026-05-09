@@ -2075,11 +2075,14 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
         end_hour = active_hours.get('endHour', 24)
 
         if start_hour < end_hour:
-            # Normal range (e.g., 7:00 to 23:00)
-            in_window = start_hour <= current_hour < end_hour
+            # Normal range (e.g., 6:00 to 22:00). The configured end hour is
+            # inclusive for exact boundary slots, so a 22:00 scheduled run is
+            # allowed while 22:30 is still outside the window.
+            in_window = start_hour <= current_hour <= end_hour
         else:
-            # Overnight range (e.g., 22:00 to 06:00)
-            in_window = current_hour >= start_hour or current_hour < end_hour
+            # Overnight range (e.g., 22:00 to 06:00), also inclusive at the
+            # exact end boundary.
+            in_window = current_hour >= start_hour or current_hour <= end_hour
 
         if not in_window:
             local_time_str = local_now.strftime('%H:%M')

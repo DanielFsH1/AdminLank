@@ -1098,6 +1098,41 @@ def test_analyze_emails_persists_adminbot_latest_state_snapshot(monkeypatch):
     assert latest["runSource"] == "dashboard"
 
 
+def test_scheduled_analysis_active_hours_include_exact_end_boundary(monkeypatch, capsys):
+    db = FakeDb(
+        documents={
+            "config/schedule": {
+                "enabled": True,
+                "frequencyHours": 2,
+                "activeHours": {
+                    "enabled": True,
+                    "startHour": 6,
+                    "endHour": 22,
+                    "tzOffset": 360,
+                },
+            }
+        }
+    )
+    frozen_now = main.datetime(2026, 5, 7, 4, 0, tzinfo=main.timezone.utc)  # 22:00 CST
+
+    class FrozenDateTime(main.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return frozen_now
+            return frozen_now.astimezone(tz)
+
+    monkeypatch.setattr(main, "datetime", FrozenDateTime)
+    monkeypatch.setattr(main.firestore, "client", lambda: db)
+
+    main.scheduled_analysis(types.SimpleNamespace())
+
+    output = capsys.readouterr().out
+    assert "No startTime configured" in output
+    assert "Outside active hours" not in output
+
+
+
 def test_scheduled_analysis_skips_duplicate_slot_when_last_run_is_same_slot(monkeypatch):
     db = FakeDb(
         documents={
@@ -1129,5 +1164,4 @@ def test_scheduled_analysis_skips_duplicate_slot_when_last_run_is_same_slot(monk
 
     assert result is None
     assert db.collection("adminbot-work").store == {}
-
 
