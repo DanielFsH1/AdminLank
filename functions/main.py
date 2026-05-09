@@ -19,7 +19,7 @@ from email import message_from_bytes
 from uuid import uuid4
 
 from firebase_functions import https_fn, scheduler_fn, options
-from firebase_admin import initialize_app, firestore
+from firebase_admin import initialize_app, firestore, auth
 import google.cloud.firestore
 
 import lank_mail_core as core
@@ -42,6 +42,52 @@ ROUTINE_INFO_EVENT_KINDS = {'group_validated', 'cashback_validated', 'monthly_su
 # (no hay cuentas reales que gestionar, solo se monitorean renovaciones)
 # Se deriva dinámicamente desde config/services (usesPool == false)
 UNMANAGED_JOIN_LEAVE_SERVICES = {'Microsoft 365'}  # Fallback, se sobreescribe con config dinámica
+ADMIN_UID = '***REMOVED***'
+
+
+def _json_response(payload, status=200):
+    return https_fn.Response(
+        json.dumps(payload),
+        status=status,
+        content_type='application/json',
+    )
+
+
+def require_dashboard_admin(req):
+    """Return an HTTP error response unless req has Daniel's Firebase ID token."""
+    headers = getattr(req, 'headers', {}) or {}
+    authorization = ''
+    if hasattr(headers, 'get'):
+        authorization = headers.get('Authorization') or headers.get('authorization') or ''
+
+    if not authorization.startswith('Bearer '):
+        return _json_response(
+            {'success': False, 'error': 'Authorization Bearer token requerido'},
+            status=401,
+        )
+
+    token = authorization.split(' ', 1)[1].strip()
+    if not token:
+        return _json_response(
+            {'success': False, 'error': 'Authorization Bearer token requerido'},
+            status=401,
+        )
+
+    try:
+        decoded = auth.verify_id_token(token)
+    except Exception:
+        return _json_response(
+            {'success': False, 'error': 'Firebase ID token inválido'},
+            status=401,
+        )
+
+    if decoded.get('uid') != ADMIN_UID:
+        return _json_response(
+            {'success': False, 'error': 'Acceso restringido al administrador de AdminLank'},
+            status=403,
+        )
+
+    return None
 
 # Mapeo de nombres de servicio a claves de Firestore
 # Fallback hardcodeado -  se sobreescribe con config dinámica al inicio del análisis
@@ -1450,6 +1496,9 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
     """HTTP endpoint to trigger email analysis from the webapp."""
     if req.method == 'OPTIONS':
         return https_fn.Response('', status=204)
+    auth_error = require_dashboard_admin(req)
+    if auth_error is not None:
+        return auth_error
 
     try:
         db = firestore.client()
@@ -1682,6 +1731,9 @@ def update_schedule(req: https_fn.Request) -> https_fn.Response:
     """Update the scheduled analysis configuration."""
     if req.method == 'OPTIONS':
         return https_fn.Response('', status=204)
+    auth_error = require_dashboard_admin(req)
+    if auth_error is not None:
+        return auth_error
 
     try:
         body = req.get_json(silent=True) or {}
@@ -1721,6 +1773,9 @@ def get_schedule(req: https_fn.Request) -> https_fn.Response:
     """Get the current schedule configuration."""
     if req.method == 'OPTIONS':
         return https_fn.Response('', status=204)
+    auth_error = require_dashboard_admin(req)
+    if auth_error is not None:
+        return auth_error
     try:
         db = firestore.client()
         doc = db.document('config/schedule').get()
@@ -1750,6 +1805,9 @@ def health_check(req: https_fn.Request) -> https_fn.Response:
     """
     if req.method == 'OPTIONS':
         return https_fn.Response('', status=204)
+    auth_error = require_dashboard_admin(req)
+    if auth_error is not None:
+        return auth_error
 
     import time as _time
     start_ts = _time.time()
@@ -1985,6 +2043,9 @@ def get_audit_log(req: https_fn.Request) -> https_fn.Response:
     """
     if req.method == 'OPTIONS':
         return https_fn.Response('', status=204)
+    auth_error = require_dashboard_admin(req)
+    if auth_error is not None:
+        return auth_error
 
     try:
         db = firestore.client()
@@ -2396,10 +2457,16 @@ def telegram_webhook(req: https_fn.Request) -> https_fn.Response:
 
 # ── Auto-registro: si no hay admin configurado, el primero se registra ──
         if not tg.admin_chat_id:
+            settings_doc = db.document('config/telegram-settings').get()
+            settings = settings_doc.to_dict() if settings_doc.exists else {}
+            if settings.get('allowAdminAutoRegistration') is not True:
+                return https_fn.Response('OK', status=200)
+
             db.document('config/telegram-settings').set({
                 'botToken': tg.token,
                 'adminChatId': str(chat_id),
                 'enabled': True,
+                'allowAdminAutoRegistration': False,
                 'registeredAt': datetime.now(timezone.utc).isoformat(),
             }, merge=True)
             tg._settings = None  # Limpiar cache
@@ -2438,7 +2505,7 @@ def telegram_webhook(req: https_fn.Request) -> https_fn.Response:
 
 
 @https_fn.on_request(
-    cors=options.CorsOptions(cors_origins='*', cors_methods=['POST', 'GET']),
+    cors=options.CorsOptions(cors_origins='*', cors_methods=['POST', 'GET', 'OPTIONS']),
 )
 def telegram_setup(req: https_fn.Request) -> https_fn.Response:
     """Configura el webhook de Telegram y almacena el token.
@@ -2446,6 +2513,12 @@ def telegram_setup(req: https_fn.Request) -> https_fn.Response:
     GET: Muestra info del webhook actual
     POST: { action: 'set_webhook' | 'delete_webhook' | 'save_token', botToken?: str }
     """
+    if req.method == 'OPTIONS':
+        return https_fn.Response('', status=204)
+    auth_error = require_dashboard_admin(req)
+    if auth_error is not None:
+        return auth_error
+
     db = firestore.client()
 
     if req.method == 'GET':
@@ -2762,7 +2835,7 @@ def _cleanup_artifact_registry(project_id):
 
 
 @https_fn.on_request(
-    cors=options.CorsOptions(cors_origins='*', cors_methods=['POST', 'GET']),
+    cors=options.CorsOptions(cors_origins='*', cors_methods=['POST', 'GET', 'OPTIONS']),
 )
 def manage_storage(req: https_fn.Request) -> https_fn.Response:
     """Gestiona artefactos de deploy en Cloud Storage y Artifact Registry.
@@ -2777,6 +2850,12 @@ def manage_storage(req: https_fn.Request) -> https_fn.Response:
     POST: { action: 'set_policies', policies: { cs: {...}, ar: {...} } , pinHash: str }
     """
     from google.cloud import storage as gcs
+
+    if req.method == 'OPTIONS':
+        return https_fn.Response('', status=204)
+    auth_error = require_dashboard_admin(req)
+    if auth_error is not None:
+        return auth_error
 
     db = firestore.client()
     project_id = 'adminlank'

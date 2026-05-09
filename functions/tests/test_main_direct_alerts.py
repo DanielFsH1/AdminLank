@@ -55,6 +55,7 @@ sys.modules.setdefault("firebase_functions", firebase_functions)
 firebase_admin = types.ModuleType("firebase_admin")
 firebase_admin.initialize_app = lambda: object()
 firebase_admin.firestore = types.SimpleNamespace(client=lambda: None)
+firebase_admin.auth = types.SimpleNamespace(verify_id_token=lambda _token: {"uid": "test-admin"})
 sys.modules.setdefault("firebase_admin", firebase_admin)
 
 google_module = types.ModuleType("google")
@@ -68,6 +69,70 @@ sys.modules.setdefault("google.cloud.firestore", google_firestore)
 
 import lank_alerts
 import main
+
+
+ADMIN_UID = "Ls1vtEv0rvY8DIyKKKmQY5SlOOQ2"
+ADMIN_HEADERS = {"Authorization": "Bearer admin-token"}
+
+
+def make_http_request(method="GET", *, headers=None, body=None, args=None):
+    return types.SimpleNamespace(
+        method=method,
+        headers=headers or {},
+        args=args or {},
+        get_json=lambda silent=True: body or {},
+    )
+
+
+def test_update_schedule_rejects_missing_firebase_token(monkeypatch):
+    db = FakeDb()
+    monkeypatch.setattr(main.firestore, "client", lambda: db)
+
+    response = main.update_schedule(make_http_request("POST", body={"enabled": True}))
+
+    assert response.status == 401
+    assert "Authorization" in response.body
+    assert "config/schedule" not in db.documents
+
+
+def test_update_schedule_rejects_non_admin_firebase_user(monkeypatch):
+    db = FakeDb()
+    monkeypatch.setattr(main.firestore, "client", lambda: db)
+    monkeypatch.setattr(main.auth, "verify_id_token", lambda _token: {"uid": "not-admin"})
+
+    response = main.update_schedule(
+        make_http_request("POST", headers=ADMIN_HEADERS, body={"enabled": True})
+    )
+
+    assert response.status == 403
+    assert "admin" in response.body.lower()
+    assert "config/schedule" not in db.documents
+
+
+def test_update_schedule_accepts_admin_firebase_user(monkeypatch):
+    db = FakeDb()
+    monkeypatch.setattr(main.firestore, "client", lambda: db)
+    monkeypatch.setattr(main.auth, "verify_id_token", lambda _token: {"uid": ADMIN_UID})
+
+    response = main.update_schedule(
+        make_http_request("POST", headers=ADMIN_HEADERS, body={"enabled": True, "frequencyHours": 4})
+    )
+
+    assert response.status == 200
+    assert db.documents["config/schedule"]["enabled"] is True
+    assert db.documents["config/schedule"]["frequencyHours"] == 4
+
+
+def test_protected_dashboard_endpoint_keeps_options_public(monkeypatch):
+    monkeypatch.setattr(
+        main.auth,
+        "verify_id_token",
+        lambda _token: pytest.fail("OPTIONS must not verify Firebase tokens"),
+    )
+
+    response = main.update_schedule(make_http_request("OPTIONS"))
+
+    assert response.status == 204
 
 
 class FakeDocSnapshot:
@@ -194,6 +259,33 @@ class FakeDb:
         batch = FakeBatch()
         self.batch_instances.append(batch)
         return batch
+
+
+def test_telegram_webhook_does_not_auto_register_without_explicit_flag(monkeypatch):
+    db = FakeDb(documents={"config/telegram-settings": {"botToken": "telegram-token", "enabled": True}})
+    sent_messages = []
+
+    class FakeTelegramBot:
+        token = "telegram-token"
+        admin_chat_id = None
+
+        def __init__(self, _db):
+            self._settings = None
+
+        def send_message(self, text, chat_id=None, parse_mode=None):
+            sent_messages.append({"text": text, "chat_id": chat_id, "parse_mode": parse_mode})
+
+    monkeypatch.setattr(main.firestore, "client", lambda: db)
+    monkeypatch.setattr(main.lank_telegram, "TelegramBot", FakeTelegramBot)
+
+    response = main.telegram_webhook(make_http_request(
+        "POST",
+        body={"message": {"chat": {"id": 123456}, "text": "/estado"}},
+    ))
+
+    assert response.status == 200
+    assert "adminChatId" not in db.documents["config/telegram-settings"]
+    assert sent_messages == []
 
 
 def test_generate_alerts_for_accounts_creates_direct_alerts_and_external_notices(monkeypatch):
@@ -821,7 +913,8 @@ def test_analyze_emails_enqueues_adminbot_work_after_saving_latest_report(monkey
     monkeypatch.setattr(main.lank_telegram, "TelegramBot", FakeTelegramBot)
     monkeypatch.setattr(main.adminbot_work_queue, "enqueue_analysis_job", fake_enqueue_analysis_job)
 
-    response = main.analyze_emails(types.SimpleNamespace(method="POST"))
+    monkeypatch.setattr(main.auth, "verify_id_token", lambda _token: {"uid": ADMIN_UID})
+    response = main.analyze_emails(make_http_request("POST", headers=ADMIN_HEADERS))
 
     assert response.status == 200
     assert len(enqueued_jobs) == 1
@@ -898,7 +991,8 @@ def test_analyze_emails_includes_scheduled_manual_alerts_in_backend_count(monkey
     monkeypatch.setattr(main.lank_telegram, "TelegramBot", FakeTelegramBot)
     monkeypatch.setattr(main.adminbot_work_queue, "enqueue_analysis_job", fake_enqueue_analysis_job)
 
-    response = main.analyze_emails(types.SimpleNamespace(method="POST"))
+    monkeypatch.setattr(main.auth, "verify_id_token", lambda _token: {"uid": ADMIN_UID})
+    response = main.analyze_emails(make_http_request("POST", headers=ADMIN_HEADERS))
 
     assert response.status == 200
     assert len(enqueued_jobs) == 1
@@ -1090,7 +1184,8 @@ def test_analyze_emails_persists_adminbot_latest_state_snapshot(monkeypatch):
         lambda _db, *, idempotency_key, payload: {"jobId": "job_abc", "status": "pending", **payload},
     )
 
-    main.analyze_emails(types.SimpleNamespace(method="POST"))
+    monkeypatch.setattr(main.auth, "verify_id_token", lambda _token: {"uid": ADMIN_UID})
+    main.analyze_emails(make_http_request("POST", headers=ADMIN_HEADERS))
 
     latest = db.document("analysis/adminbot-latest").get().to_dict()
     assert latest["jobId"] == "job_abc"
@@ -1164,4 +1259,3 @@ def test_scheduled_analysis_skips_duplicate_slot_when_last_run_is_same_slot(monk
 
     assert result is None
     assert db.collection("adminbot-work").store == {}
-
