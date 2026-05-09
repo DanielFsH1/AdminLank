@@ -40,8 +40,6 @@ function buildCreditAccount(overrides = {}) {
   return {
     creditLimit: 5000,
     currentBalance: 2000,
-    annualRate: 35,
-    minimumPayment: 450,
     cutoffDay: 12,
     paymentDueDay: 25,
     alertDaysBefore: 3,
@@ -65,8 +63,6 @@ describe('updateCreditAccount', () => {
     await updateCreditAccount('nu', {
       creditLimit: '0',
       currentBalance: '0',
-      annualRate: '0',
-      minimumPayment: '0',
     });
 
     expect(mockUpdateDoc).toHaveBeenCalledTimes(1);
@@ -75,8 +71,6 @@ describe('updateCreditAccount', () => {
     expect(payload.creditAccount).toEqual(expect.objectContaining({
       creditLimit: 0,
       currentBalance: 0,
-      annualRate: 0,
-      minimumPayment: 0,
     }));
   });
 
@@ -89,8 +83,6 @@ describe('updateCreditAccount', () => {
     await updateCreditAccount('nu', {
       creditLimit: '',
       currentBalance: undefined,
-      annualRate: null,
-      minimumPayment: '',
     });
 
     const payload = mockUpdateDoc.mock.calls[0][1];
@@ -98,8 +90,6 @@ describe('updateCreditAccount', () => {
     expect(payload.creditAccount).toEqual(expect.objectContaining({
       creditLimit: 5000,
       currentBalance: 2000,
-      annualRate: 35,
-      minimumPayment: 450,
     }));
   });
 });

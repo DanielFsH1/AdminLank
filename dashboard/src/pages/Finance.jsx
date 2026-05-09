@@ -787,7 +787,6 @@ export default function Finance() {
                         <div className="credit-account-name">{acct.bank}</div>
                         <div className="credit-account-sub">
                           Límite: {formatMXN(acct.creditLimit)}
-                          {acct.annualRate > 0 && ` · TAE ${acct.annualRate}%`}
                         </div>
                       </div>
                     </div>
@@ -824,14 +823,6 @@ export default function Finance() {
                         <div className="credit-date-value">Día {acct.paymentDueDay}</div>
                       </div>
                     </div>
-                    {acct.minimumPayment > 0 && (
-                      <div className="credit-date-item">
-                        <div>
-                          <div className="credit-date-label">Pago mínimo</div>
-                          <div className="credit-date-value">{formatMXN(acct.minimumPayment)}</div>
-                        </div>
-                      </div>
-                    )}
                   </div>
 
                   {/* Linked resources */}
@@ -893,7 +884,7 @@ export default function Finance() {
                           {statements.map(stmt => {
                             const [y, m] = (stmt.monthKey || '').split('-').map(Number);
                             const monthLabel = MONTH_NAMES_ES[m - 1] ? `${MONTH_NAMES_ES[m - 1]} ${y}` : stmt.monthKey;
-                            const paid = (stmt.paymentMade || 0) >= (stmt.minimumPayment || 0) && stmt.paymentMade > 0;
+                            const paid = (stmt.paymentMade || 0) > 0;
                             return (
                               <div className="credit-statement-row" key={stmt.monthKey}>
                                 <span className="credit-statement-month">{monthLabel}</span>

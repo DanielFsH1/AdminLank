@@ -103,8 +103,6 @@ export async function createCreditAccount(bankId, creditData) {
   const credit = {
     creditLimit: parseFloat(creditData.creditLimit) || 0,
     currentBalance: parseFloat(creditData.currentBalance) || 0,
-    annualRate: parseFloat(creditData.annualRate) || 0,
-    minimumPayment: parseFloat(creditData.minimumPayment) || 0,
     cutoffDay: parseInt(creditData.cutoffDay, 10) || 1,
     paymentDueDay: parseInt(creditData.paymentDueDay, 10) || 15,
     alertDaysBefore: parseInt(creditData.alertDaysBefore, 10) || 1,
@@ -131,8 +129,6 @@ export async function updateCreditAccount(bankId, creditData) {
     ...current,
     creditLimit: parseOptionalFloat(creditData.creditLimit, current.creditLimit) ?? 0,
     currentBalance: parseOptionalFloat(creditData.currentBalance, current.currentBalance) ?? 0,
-    annualRate: parseOptionalFloat(creditData.annualRate, current.annualRate) ?? 0,
-    minimumPayment: parseOptionalFloat(creditData.minimumPayment, current.minimumPayment) ?? 0,
     cutoffDay: parseOptionalInt(creditData.cutoffDay, current.cutoffDay) ?? 1,
     paymentDueDay: parseOptionalInt(creditData.paymentDueDay, current.paymentDueDay) ?? 15,
     alertDaysBefore: parseOptionalInt(creditData.alertDaysBefore, current.alertDaysBefore) ?? 1,

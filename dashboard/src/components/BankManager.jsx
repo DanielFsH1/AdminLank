@@ -39,7 +39,7 @@ export default function BankManager({ vaultCards = {} }) {
   const [msiModal, setMsiModal] = useState(null);
   const [msiValues, setMsiValues] = useState({ description: '', totalAmount: '', months: '', monthlyPayment: '', remainingMonths: '', startDate: '', withInterest: false });
   const [statementModal, setStatementModal] = useState(null);
-  const [statementValues, setStatementValues] = useState({ monthKey: '', balanceAtCutoff: '', minimumPayment: '', paymentMade: '', interestCharged: '' });
+  const [statementValues, setStatementValues] = useState({ monthKey: '', balanceAtCutoff: '', paymentMade: '', interestCharged: '' });
   const [logoModal, setLogoModal] = useState(null);
   const [logoGallery, setLogoGallery] = useState([]);
   const [logoUploading, setLogoUploading] = useState(false);
@@ -169,7 +169,7 @@ export default function BankManager({ vaultCards = {} }) {
 
   // ─── Credit account ───
   const openCreateCredit = (bankId) => {
-    setCreditValues({ creditLimit: '', currentBalance: '0', annualRate: '', minimumPayment: '', cutoffDay: '', paymentDueDay: '', alertDaysBefore: '1', paymentClabe: '', paymentClabeNote: '' });
+    setCreditValues({ creditLimit: '', currentBalance: '0', cutoffDay: '', paymentDueDay: '', alertDaysBefore: '1', paymentClabe: '', paymentClabeNote: '' });
     setCreditModal({ bankId, mode: 'create' });
   };
 
@@ -177,7 +177,6 @@ export default function BankManager({ vaultCards = {} }) {
     const c = bank.creditAccount;
     setCreditValues({
       creditLimit: c.creditLimit || '', currentBalance: c.currentBalance || '0',
-      annualRate: c.annualRate || '', minimumPayment: c.minimumPayment || '',
       cutoffDay: c.cutoffDay || '', paymentDueDay: c.paymentDueDay || '', alertDaysBefore: c.alertDaysBefore || '1',
       paymentClabe: c.paymentClabe || '', paymentClabeNote: c.paymentClabeNote || '',
     });
@@ -254,7 +253,7 @@ export default function BankManager({ vaultCards = {} }) {
 
   const openStatementModal = (bankId) => {
     const now = new Date();
-    setStatementValues({ monthKey: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`, balanceAtCutoff: '', minimumPayment: '', paymentMade: '', interestCharged: '' });
+    setStatementValues({ monthKey: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`, balanceAtCutoff: '', paymentMade: '', interestCharged: '' });
     setStatementModal(bankId);
   };
 
@@ -264,7 +263,6 @@ export default function BankManager({ vaultCards = {} }) {
       const stmt = {
         monthKey: statementValues.monthKey,
         balanceAtCutoff: parseFloat(statementValues.balanceAtCutoff) || 0,
-        minimumPayment: parseFloat(statementValues.minimumPayment) || 0,
         paymentMade: parseFloat(statementValues.paymentMade) || 0,
         interestCharged: parseFloat(statementValues.interestCharged) || 0,
       };
@@ -616,16 +614,6 @@ export default function BankManager({ vaultCards = {} }) {
                 <label>Saldo actual</label>
                 <input type="number" value={creditValues.currentBalance} onChange={e => setCreditValues(p => ({ ...p, currentBalance: e.target.value }))} placeholder="0" />
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div className="vault-form-group">
-                  <label>Tasa anual (%)</label>
-                  <input type="number" value={creditValues.annualRate} onChange={e => setCreditValues(p => ({ ...p, annualRate: e.target.value }))} placeholder="36" step="0.1" />
-                </div>
-                <div className="vault-form-group">
-                  <label>Pago mínimo</label>
-                  <input type="number" value={creditValues.minimumPayment} onChange={e => setCreditValues(p => ({ ...p, minimumPayment: e.target.value }))} placeholder="500" />
-                </div>
-              </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
                 <div className="vault-form-group">
                   <label>Día de corte</label>
@@ -741,10 +729,6 @@ export default function BankManager({ vaultCards = {} }) {
                 <input type="number" value={statementValues.balanceAtCutoff} onChange={e => setStatementValues(p => ({ ...p, balanceAtCutoff: e.target.value }))} placeholder="0" />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div className="vault-form-group">
-                  <label>Pago mínimo</label>
-                  <input type="number" value={statementValues.minimumPayment} onChange={e => setStatementValues(p => ({ ...p, minimumPayment: e.target.value }))} placeholder="0" />
-                </div>
                 <div className="vault-form-group">
                   <label>Pago realizado</label>
                   <input type="number" value={statementValues.paymentMade} onChange={e => setStatementValues(p => ({ ...p, paymentMade: e.target.value }))} placeholder="0" />
@@ -935,22 +919,6 @@ export default function BankManager({ vaultCards = {} }) {
               <div className="credit-date-value">Día {credit.paymentDueDay}</div>
             </div>
           </div>
-          {credit.minimumPayment > 0 && (
-            <div className="credit-date-item">
-              <div>
-                <div className="credit-date-label">Pago mínimo</div>
-                <div className="credit-date-value">{formatMXN(credit.minimumPayment)}</div>
-              </div>
-            </div>
-          )}
-          {credit.annualRate > 0 && (
-            <div className="credit-date-item">
-              <div>
-                <div className="credit-date-label">TAE</div>
-                <div className="credit-date-value">{credit.annualRate}%</div>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Linked credit cards */}
@@ -1018,7 +986,7 @@ export default function BankManager({ vaultCards = {} }) {
                 {statements.map(stmt => {
                   const [y, m] = (stmt.monthKey || '').split('-').map(Number);
                   const monthLabel = MONTH_NAMES_ES[m - 1] ? `${MONTH_NAMES_ES[m - 1]} ${y}` : stmt.monthKey;
-                  const paid = (stmt.paymentMade || 0) >= (stmt.minimumPayment || 0) && stmt.paymentMade > 0;
+                  const paid = (stmt.paymentMade || 0) > 0;
                   return (
                     <div className="credit-statement-row" key={stmt.monthKey}>
                       <span className="credit-statement-month">{monthLabel}</span>
