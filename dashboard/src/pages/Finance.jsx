@@ -108,6 +108,10 @@ export default function Finance() {
    return bankNames.map(b => ({ value: b, label: b }));
  }, [clabes]);
 
+ const creditCardOptions = useMemo(() => {
+   return creditAccounts.map(ca => ({ value: ca.id, label: `${ca.bank} (Crédito)` }));
+ }, [creditAccounts]);
+
  // Historial de meses
  const [monthlyHistory, setMonthlyHistory] = useState([]);
  const [expandedHistMonth, setExpandedHistMonth] = useState(null);
@@ -413,6 +417,11 @@ export default function Finance() {
  };
  if (values.subscription?.trim()) newEntry.subscription = values.subscription.trim();
  if (values.note?.trim()) newEntry.notes = [values.note.trim()];
+ if (values.creditCard) {
+   newEntry.creditCardBankId = values.creditCard;
+   const cc = creditAccounts.find(c => c.id === values.creditCard);
+   if (cc) newEntry.creditCardBankName = cc.bank;
+ }
 
  // Guardar en manual-ledger
  const ledgerRef = doc(db, 'finance', 'manual-ledger');
@@ -451,6 +460,14 @@ export default function Finance() {
  else delete updatedEntry.subscription;
  if (values.note?.trim()) updatedEntry.notes = [values.note.trim()];
  else delete updatedEntry.notes;
+ if (values.creditCard) {
+   updatedEntry.creditCardBankId = values.creditCard;
+   const cc = creditAccounts.find(c => c.id === values.creditCard);
+   if (cc) updatedEntry.creditCardBankName = cc.bank;
+ } else {
+   delete updatedEntry.creditCardBankId;
+   delete updatedEntry.creditCardBankName;
+ }
 
  const ledgerRef = doc(db, 'finance', 'manual-ledger');
  const currentEntries = ledger?.entries || [];
@@ -1111,6 +1128,7 @@ export default function Finance() {
                             {entry.subscription && <span>· {entry.subscription}</span>}
                             {entry.isRecurring && <span>· <RefreshIcon size={12} /> Recurrente</span>}
                             {cardLabel && <span>· <CreditCardIcon size={12} /> {cardLabel}</span>}
+                            {!cardLabel && entry.creditCardBankName && <span>· <CreditCardIcon size={12} /> {entry.creditCardBankName}</span>}
                             {entryBankMeta && (
                               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
                                 · {entryBankMeta.logo && <img src={entryBankMeta.logo} style={{ width: '14px', height: '14px', borderRadius: '3px', objectFit: 'cover' }} alt="" onError={e => { e.target.style.display = 'none'; }} />}
@@ -1214,6 +1232,7 @@ export default function Finance() {
                             {entry.subscription && <span>· {entry.subscription}</span>}
                             {entry.isRecurring && <span>· <RefreshIcon size={12} /> Recurrente</span>}
                             {cardLabel && <span>· <CreditCardIcon size={12} /> {cardLabel}</span>}
+                            {!cardLabel && entry.creditCardBankName && <span>· <CreditCardIcon size={12} /> {entry.creditCardBankName}</span>}
                             {entryBankMeta && (
                               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
                                 · {entryBankMeta.logo && <img src={entryBankMeta.logo} style={{ width: '14px', height: '14px', borderRadius: '3px', objectFit: 'cover' }} alt="" onError={e => { e.target.style.display = 'none'; }} />}
@@ -1684,11 +1703,12 @@ export default function Finance() {
             { value: 'expense', label: 'Gasto' },
             { value: 'investment', label: 'Gasto (inversión)' },
           ]},
+          { key: 'creditCard', label: 'Tarjeta de crédito', type: 'select', placeholder: 'Sin tarjeta', options: creditCardOptions },
           { key: 'effectiveAt', label: `Fecha efectiva (${minDate} a ${maxDate})`, type: 'date', hint: 'Dejar vacío = fecha de hoy. Si la fecha cae en otro mes, el gasto se aplica a ese mes.' },
           { key: 'subscription', label: 'Suscripción (opcional)', placeholder: 'Ej: YouTube Premium, ChatGPT Plus...' },
           { key: 'note', label: 'Nota (opcional)', placeholder: 'Contexto adicional del gasto' },
         ]}
-        initialValues={{ description: '', amount: '', type: 'expense', effectiveAt: '', subscription: '', note: '' }}
+        initialValues={{ description: '', amount: '', type: 'expense', creditCard: '', effectiveAt: '', subscription: '', note: '' }}
         saveLabel={<><ExpenseIcon size={16} /> Registrar</>}
         confirmMessage="Se registrará este gasto y se actualizarán los totales del mes correspondiente."
       />
@@ -1710,6 +1730,7 @@ export default function Finance() {
               { value: 'expense', label: 'Gasto' },
               { value: 'investment', label: 'Gasto (inversión)' },
             ]},
+            { key: 'creditCard', label: 'Tarjeta de crédito', type: 'select', placeholder: 'Sin tarjeta', options: creditCardOptions },
             { key: 'effectiveAt', label: `Fecha efectiva (${minDate} a ${maxDate})`, type: 'date', hint: 'Si cambias a otro mes, el gasto se mueve a ese mes.' },
             { key: 'subscription', label: 'Suscripción (opcional)', placeholder: 'Ej: YouTube Premium, ChatGPT Plus...' },
             { key: 'note', label: 'Nota (opcional)', placeholder: 'Contexto adicional del gasto' },
@@ -1718,6 +1739,7 @@ export default function Finance() {
             description: editExpenseModal.entry.description || '',
             amount: editExpenseModal.entry.amount || '',
             type: editExpenseModal.entry.type || 'expense',
+            creditCard: editExpenseModal.entry.creditCardBankId || '',
             effectiveAt: editExpenseModal.entry.effectiveAt || '',
             subscription: editExpenseModal.entry.subscription || '',
             note: (editExpenseModal.entry.notes || [])[0] || '',
