@@ -39,6 +39,7 @@ vi.mock('firebase/firestore', () => ({
 import {
   cancelScheduledManualAlert,
   confirmRecurringExpense,
+  createVaultPaypalAccount,
   createSlotDeletionAlert,
   createScheduledManualAlert,
 } from './firestoreActions';
@@ -436,6 +437,83 @@ describe('scheduled manual alerts', () => {
 
     await expect(cancelScheduledManualAlert('scheduled_manual_generated')).rejects.toThrow('Solo puedes cancelar alertas programadas pendientes');
     expect(mockUpdateDoc).not.toHaveBeenCalled();
+  });
+});
+
+describe('vault PayPal accounts', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-09T12:00:00Z'));
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('rejects PayPal creation without a linked principal Lank account', async () => {
+    await expect(createVaultPaypalAccount({
+      email: 'paypal@example.com',
+      password: 'secret',
+    })).rejects.toThrow('Selecciona una cuenta principal para vincular PayPal');
+
+    expect(mockSetDoc).not.toHaveBeenCalled();
+  });
+
+  it('rejects PayPal creation when the linked principal does not exist', async () => {
+    mockGetDoc.mockResolvedValue({
+      exists: () => false,
+      data: () => null,
+    });
+
+    await expect(createVaultPaypalAccount({
+      lankAccountId: '12',
+      email: 'paypal@example.com',
+      password: 'secret',
+    })).rejects.toThrow('La cuenta principal vinculada no existe');
+
+    expect(mockGetDoc).toHaveBeenCalledWith(expect.objectContaining({ path: 'secrets/lank_google_12' }));
+    expect(mockSetDoc).not.toHaveBeenCalled();
+  });
+
+  it('creates PayPal credentials only when linked to an existing principal account', async () => {
+    mockGetDoc
+      .mockResolvedValueOnce(buildSnapshot({
+        type: 'lank_google',
+        lankAccountId: '12',
+        email: 'principal@gmail.com',
+        canonicalAlias: 'Cuenta Principal',
+        fullName: 'Cuenta Principal',
+      }))
+      .mockResolvedValueOnce({
+        exists: () => false,
+        data: () => null,
+      });
+
+    const docId = await createVaultPaypalAccount({
+      lankAccountId: '12',
+      email: 'paypal@example.com',
+      password: 'paypal-secret',
+      notes: 'Pagos',
+    });
+
+    expect(docId).toBe('paypal_12_paypal_example_com');
+    expect(mockSetDoc).toHaveBeenCalledWith(
+      expect.objectContaining({ path: 'secrets/paypal_12_paypal_example_com' }),
+      expect.objectContaining({
+        type: 'paypal',
+        email: 'paypal@example.com',
+        lankAccountId: '12',
+        principalEmail: 'principal@gmail.com',
+        principalAlias: 'Cuenta Principal',
+        notes: 'Pagos',
+        createdAt: '2026-05-09T12:00:00.000Z',
+        updatedAt: '2026-05-09T12:00:00.000Z',
+      }),
+    );
+    const payload = mockSetDoc.mock.calls[0][1];
+    expect(payload.password).toBeTruthy();
+    expect(payload.password).not.toBe('paypal-secret');
   });
 });
 

@@ -4,7 +4,7 @@ import { db } from '../firebase';
 import { useDocument } from '../hooks/useFirestore';
 import { getServiceMeta, getBankMeta } from '../config/services';
 import { encrypt, decrypt, encryptFields, decryptFields } from '../utils/crypto';
-import { completeAlert, createManualAlert, createRealAccount, createLinkedRealAccount, deleteRealAccount, createVaultCard, deleteVaultCard, DEFAULT_MASTER_CONFIG, addRecurringCharge, removeRecurringCharge, toggleRecurringCharge, updateRecurringCharge, createVaultEmailAccount, updateVaultEmailAccount, deleteVaultEmailAccount, createLankMasterAccount, syncVaultEmailPassword } from '../hooks/firestoreActions';
+import { completeAlert, createManualAlert, createRealAccount, createLinkedRealAccount, deleteRealAccount, createVaultCard, deleteVaultCard, DEFAULT_MASTER_CONFIG, addRecurringCharge, removeRecurringCharge, toggleRecurringCharge, updateRecurringCharge, createVaultEmailAccount, updateVaultEmailAccount, deleteVaultEmailAccount, createLankMasterAccount, syncVaultEmailPassword, createVaultPaypalAccount, updateVaultPaypalAccount, deleteVaultPaypalAccount } from '../hooks/firestoreActions';
 import { ConfirmDialog, Toast } from '../components/EditModal';
 import { seedGooglePasswords } from '../utils/seedGooglePasswords';
 import { BadgeIcon, BankIcon, CalendarIcon, CashIcon, CheckCircleIcon, ClipboardIcon, CloseIcon, CreditCardIcon, DotRed, EditIcon, EmailIcon, HashIcon, HourglassIcon, KeyIcon, LinkIcon, LockIcon, LockKeyIcon, NotesIcon, PhoneIcon, PlusIcon, ReceiptIcon, RefreshIcon, SaveIcon, SearchIcon, SeedlingIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, WarningIcon } from '../components/Icons';
@@ -93,6 +93,8 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
  const [googleEditValues, setGoogleEditValues] = useState({ email: '', password: '', notes: '', fullName: '', canonicalAlias: '', whatsapp: '' });
  const [googleCreateModal, setGoogleCreateModal] = useState(null); // { type: 'lank_google' | 'tertiary' }
  const [googleCreateValues, setGoogleCreateValues] = useState({ type: 'tertiary', lankAccountId: '', email: '', password: '', notes: '', canonicalAlias: '', fullName: '', whatsapp: '' });
+ const [paypalModal, setPaypalModal] = useState(null); // { mode: 'create' | 'edit', id? }
+ const [paypalValues, setPaypalValues] = useState({ lankAccountId: '', email: '', password: '', notes: '' });
  const [, setLankRegistry] = useState([]);
 
  // ─── SEGURIDAD: PIN de Bóveda ───
@@ -636,6 +638,55 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
      });
  }, [secrets]);
 
+ const principalEmailAccounts = useMemo(() => {
+   return Object.entries(secrets)
+     .filter(([, s]) => s.type === 'lank_google' && s.lankAccountId)
+     .map(([id, s]) => ({
+       id,
+       lankAccountId: String(s.lankAccountId),
+       email: s.email || '',
+       fullName: s.fullName || '',
+       canonicalAlias: s.canonicalAlias || '',
+       label: `#${s.lankAccountId} ${s.canonicalAlias || s.fullName || s.email}`,
+     }))
+     .sort((a, b) => (parseInt(a.lankAccountId) || 999) - (parseInt(b.lankAccountId) || 999));
+ }, [secrets]);
+
+ const allPaypalAccounts = useMemo(() => {
+   const principalById = new Map(principalEmailAccounts.map(p => [String(p.lankAccountId), p]));
+   return Object.entries(secrets)
+     .filter(([, s]) => s.type === 'paypal')
+     .map(([id, s]) => {
+       const principal = principalById.get(String(s.lankAccountId));
+       return {
+         id,
+         email: s.email || '',
+         password: s.password ? decrypt(s.password) : '',
+         notes: s.notes || '',
+         lankAccountId: s.lankAccountId || '',
+         principalEmail: s.principalEmail || principal?.email || '',
+         principalAlias: s.principalAlias || principal?.canonicalAlias || principal?.fullName || '',
+         updatedAt: s.updatedAt || '',
+       };
+     })
+     .sort((a, b) => {
+       const byPrincipal = (parseInt(a.lankAccountId) || 999) - (parseInt(b.lankAccountId) || 999);
+       return byPrincipal || a.email.localeCompare(b.email);
+     });
+ }, [secrets, principalEmailAccounts]);
+
+ const filteredPaypalAccounts = useMemo(() => {
+   if (!searchQuery || searchQuery.length < 2) return allPaypalAccounts;
+   const q = normalizeSearch(searchQuery);
+   return allPaypalAccounts.filter(s => (
+     nMatch(s.email, q) ||
+     nMatch(s.notes, q) ||
+     nMatch(s.principalEmail, q) ||
+     nMatch(s.principalAlias, q) ||
+     String(s.lankAccountId || '').includes(q)
+   ));
+ }, [allPaypalAccounts, searchQuery]);
+
  // Toggle service expand
  const toggleService = (svc) => {
  setExpandedServices(prev => {
@@ -818,6 +869,129 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
    } catch (err) {
      showToast(err.message || 'Error al crear la cuenta', 'error');
    }
+ };
+
+ const openCreatePaypalModal = () => {
+   if (principalEmailAccounts.length === 0) {
+     showToast('Primero crea una cuenta principal para vincular PayPal', 'error');
+     return;
+   }
+   setPaypalValues({ lankAccountId: principalEmailAccounts[0].lankAccountId, email: '', password: '', notes: '' });
+   setPaypalModal({ mode: 'create' });
+ };
+
+ const openEditPaypalModal = (account) => {
+   setPaypalValues({
+     lankAccountId: String(account.lankAccountId || ''),
+     email: account.email || '',
+     password: account.password || '',
+     notes: account.notes || '',
+   });
+   setPaypalModal({ mode: 'edit', id: account.id });
+ };
+
+ const handleSavePaypalAccount = async () => {
+   if (!paypalValues.lankAccountId) {
+     showToast('Selecciona una cuenta principal para PayPal', 'error');
+     return;
+   }
+   if (!paypalValues.email) {
+     showToast('El email de PayPal es obligatorio', 'error');
+     return;
+   }
+
+   try {
+     if (paypalModal?.mode === 'edit') {
+       await updateVaultPaypalAccount(paypalModal.id, paypalValues);
+       showToast('Cuenta PayPal actualizada correctamente');
+     } else {
+       await createVaultPaypalAccount(paypalValues);
+       showToast('Cuenta PayPal creada correctamente');
+     }
+     setPaypalModal(null);
+     await refreshVaultData();
+   } catch (err) {
+     showToast(err.message || 'Error al guardar PayPal', 'error');
+   }
+ };
+
+ const renderPaypalCard = (s) => {
+   const pwKey = `paypal-${s.id}`;
+   return (
+     <div className="vault-credential-card" key={s.id}>
+       <div className="vault-card-header">
+         <div className="vault-card-label">{s.email}</div>
+         <span className="vault-card-ref" style={{ background: 'rgba(0,112,186,0.15)', color: '#0070ba' }}>
+           PayPal · Lank #{s.lankAccountId}
+         </span>
+       </div>
+       <div className="vault-card-body">
+         <div className="vault-field">
+           <label><EmailIcon size={16} /> Email PayPal</label>
+           <div className="vault-field-value">
+             <span>{s.email}</span>
+             <button className="vault-copy-btn" onClick={() => copyToClipboard(s.email, 'Email PayPal')}><ClipboardIcon size={16} /></button>
+           </div>
+         </div>
+         <div className="vault-field">
+           <label><LockKeyIcon size={16} /> Contraseña PayPal</label>
+           <div className="vault-field-value">
+             {s.password ? (
+               <>
+                 <span className={`vault-password ${revealedFields.has(pwKey) ? 'revealed' : ''}`}>
+                   {revealedFields.has(pwKey) ? s.password : '••••••••••••'}
+                 </span>
+                 <RevealBtn fieldKey={pwKey} />
+                 <CopyBtn text={s.password} label="Contraseña PayPal" />
+               </>
+             ) : <span className="vault-no-data">Sin contraseña</span>}
+           </div>
+         </div>
+         <div className="vault-field">
+           <label><UserIcon size={16} /> Cuenta principal vinculada</label>
+           <span>
+             #{s.lankAccountId} {s.principalAlias || s.principalEmail || ''}
+             {s.principalEmail && (
+               <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '6px' }}>
+                 {s.principalEmail}
+               </span>
+             )}
+           </span>
+         </div>
+         {s.notes && (
+           <div className="vault-field">
+             <label><NotesIcon size={16} /> Notas</label>
+             <div className="vault-field-value vault-notes">{s.notes}</div>
+           </div>
+         )}
+       </div>
+       <div className="vault-card-actions">
+         <button className="vault-action-btn edit" onClick={() => openEditPaypalModal(s)}>
+           <EditIcon size={16} /> Editar
+         </button>
+         <button className="vault-action-btn view" onClick={() => onNavigate && onNavigate('accounts', s.lankAccountId)}>
+           Ver cuenta Lank
+         </button>
+         <button className="vault-action-btn delete" onClick={() => {
+           setConfirmDialog({
+             message: `¿Eliminar la cuenta PayPal ${s.email} vinculada a Lank #${s.lankAccountId}?`,
+             onConfirm: async () => {
+               try {
+                 await deleteVaultPaypalAccount(s.id);
+                 showToast(`PayPal "${s.email}" eliminado`);
+                 await refreshVaultData();
+               } catch (err) {
+                 showToast(err.message || 'Error al eliminar PayPal', 'error');
+               }
+               setConfirmDialog(null);
+             },
+           });
+         }}>
+           <TrashIcon size={16} /> Eliminar
+         </button>
+       </div>
+     </div>
+   );
  };
 
  // ─── SAVE CARD ───
@@ -1365,6 +1539,9 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
         </button>
         <button className={`vault-tab ${activeTab === 'google' ? 'active' : ''}`} onClick={() => setActiveTab('google')}>
           <EmailIcon size={16} /> Cuentas de Correo
+        </button>
+        <button className={`vault-tab ${activeTab === 'paypal' ? 'active' : ''}`} onClick={() => setActiveTab('paypal')}>
+          <CreditCardIcon size={16} /> PayPal ({allPaypalAccounts.length})
         </button>
         <button className={`vault-tab ${activeTab === 'apppasswords' ? 'active' : ''}`} onClick={() => setActiveTab('apppasswords')}>
           <LockKeyIcon size={16} /> App Passwords
@@ -2008,6 +2185,45 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
           </div>
         );
       })()}
+
+      {/* ═══ TAB: PAYPAL ═══ */}
+      {activeTab === 'paypal' && (
+        <div className="vault-credentials-section">
+          <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
+            <button
+              className="vault-action-btn create"
+              style={{ padding: '10px 20px', fontSize: '13px' }}
+              onClick={openCreatePaypalModal}
+              disabled={principalEmailAccounts.length === 0}
+              title={principalEmailAccounts.length === 0 ? 'Primero crea una cuenta principal' : 'Crear PayPal vinculado a una cuenta principal'}
+            >
+              <PlusIcon size={16} /> Nueva cuenta PayPal
+            </button>
+          </div>
+
+          <div className="vault-service-group">
+            <div className="vault-service-header expanded" style={{ '--svc-color': '#0070ba', cursor: 'default' }}>
+              <div className="vault-service-header-left">
+                <div style={{ width: 36, height: 36, borderRadius: 8, background: '#0070ba', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 15 }}>PP</div>
+                <div>
+                  <div className="vault-service-name">Cuentas PayPal</div>
+                  <div className="vault-service-count">{filteredPaypalAccounts.length} cuentas · Solo vinculadas a cuentas principales</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="vault-accounts-grid">
+              {filteredPaypalAccounts.length > 0 ? filteredPaypalAccounts.map(renderPaypalCard) : (
+                <div className="empty-state" style={{ padding: '20px' }}>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+                    No hay cuentas PayPal. Primero debe existir una cuenta principal y luego puedes vincular PayPal desde "Nueva cuenta PayPal".
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ═══ TAB: APP PASSWORDS ═══ */}
       {activeTab === 'apppasswords' && (() => {
@@ -2878,6 +3094,78 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
               <button className="vault-modal-btn cancel" onClick={() => setGoogleCreateModal(null)}>Cancelar</button>
               <button className="vault-modal-btn save" onClick={handleCreateGoogleAccount}>
                 <PlusIcon size={16} /> Crear cuenta
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ MODAL: Crear / Editar Cuenta PayPal ═══ */}
+      {paypalModal && (
+        <div className="vault-modal-overlay"
+          onMouseDown={e => { mouseDownOnOverlayRef.current = e.target === e.currentTarget; }}
+          onClick={e => { if (mouseDownOnOverlayRef.current && e.target === e.currentTarget) setPaypalModal(null); mouseDownOnOverlayRef.current = false; }}
+        >
+          <div className="vault-modal">
+            <div className="vault-modal-header">
+              <h3><CreditCardIcon size={16} /> {paypalModal.mode === 'edit' ? 'Editar cuenta PayPal' : 'Nueva cuenta PayPal'}</h3>
+              <button className="vault-modal-close" onClick={() => setPaypalModal(null)}><CloseIcon size={16} /></button>
+            </div>
+            <div className="vault-modal-form">
+              <div className="vault-form-group">
+                <label><UserIcon size={16} /> Cuenta principal vinculada</label>
+                <select
+                  value={paypalValues.lankAccountId}
+                  onChange={e => setPaypalValues(p => ({ ...p, lankAccountId: e.target.value }))}
+                >
+                  <option value="">Seleccionar cuenta principal</option>
+                  {principalEmailAccounts.map(account => (
+                    <option key={account.id} value={account.lankAccountId}>
+                      {account.label} · {account.email}
+                    </option>
+                  ))}
+                </select>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  PayPal siempre debe quedar asociado a una cuenta principal existente.
+                </span>
+              </div>
+              <div className="vault-form-group">
+                <label><EmailIcon size={16} /> Email PayPal</label>
+                <input
+                  type="email"
+                  value={paypalValues.email}
+                  onChange={e => setPaypalValues(p => ({ ...p, email: e.target.value }))}
+                  placeholder="paypal@ejemplo.com"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="vault-form-group">
+                <label><LockKeyIcon size={16} /> Contraseña PayPal</label>
+                <div className="vault-password-input-group">
+                  <input
+                    type={revealedFields.has('paypal-modal-pw') ? 'text' : 'password'}
+                    value={paypalValues.password}
+                    onChange={e => setPaypalValues(p => ({ ...p, password: e.target.value }))}
+                    placeholder={paypalModal.mode === 'edit' ? 'Dejar igual si no cambia' : 'Contraseña de PayPal'}
+                    autoComplete="off"
+                  />
+                  <RevealBtn fieldKey="paypal-modal-pw" />
+                </div>
+              </div>
+              <div className="vault-form-group">
+                <label><NotesIcon size={16} /> Notas / Comentarios</label>
+                <textarea
+                  value={paypalValues.notes}
+                  onChange={e => setPaypalValues(p => ({ ...p, notes: e.target.value }))}
+                  placeholder="Uso de esta cuenta PayPal, banco vinculado, observaciones, etc."
+                  rows={3}
+                />
+              </div>
+            </div>
+            <div className="vault-modal-actions">
+              <button className="vault-modal-btn cancel" onClick={() => setPaypalModal(null)}>Cancelar</button>
+              <button className="vault-modal-btn save" onClick={handleSavePaypalAccount}>
+                <SaveIcon size={16} /> Guardar PayPal
               </button>
             </div>
           </div>
