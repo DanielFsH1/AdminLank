@@ -6,6 +6,7 @@ import { db } from '../firebase';
 import { useDocument } from '../hooks/useFirestore';
 import { ACCESS_TYPES, buildServiceConfig, normalizeServiceKey } from '../config/services';
 import { setServiceCatalogEntryActive, upsertServiceCatalogEntry } from '../hooks/firestoreActions';
+import { authenticatedFetch } from '../utils/authenticatedFetch';
 
 import { AnalyzeIcon, BankIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClockIcon, CloseIcon, ContainerIcon, CreditCardIcon, DollarIcon, DownloadIcon, EditIcon, EmailIcon, FileStorageIcon, HourglassIcon, KeyIcon, LightbulbIcon, LockIcon, LockKeyIcon, MailboxIcon, MoneyIcon, PackageIcon, PlusIcon, SaveIcon, ShieldCheckIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, TrendUpIcon, UsersIcon, WarningIcon, XCircleIcon } from '../components/Icons';
 
@@ -518,7 +519,7 @@ export default function Tools() {
     setStorageLoading(true);
     setStorageError(null);
     try {
-      const res = await fetch(`${CLOUD_FUNCTIONS_URL}/manage_storage`);
+      const res = await authenticatedFetch(`${CLOUD_FUNCTIONS_URL}/manage_storage`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setStorageData(data);
@@ -541,7 +542,7 @@ export default function Tools() {
     setCleanupLoading(true);
     setCleanupResult(null);
     try {
-      const res = await fetch(`${CLOUD_FUNCTIONS_URL}/manage_storage`, {
+      const res = await authenticatedFetch(`${CLOUD_FUNCTIONS_URL}/manage_storage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, pinHash }),
@@ -566,7 +567,7 @@ export default function Tools() {
   const savePolicies = useCallback(async (pinHash) => {
     setPolicySaving(true);
     try {
-      const res = await fetch(`${CLOUD_FUNCTIONS_URL}/manage_storage`, {
+      const res = await authenticatedFetch(`${CLOUD_FUNCTIONS_URL}/manage_storage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'set_policies', policies, pinHash }),

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAdminbotState } from '../hooks/adminbotState';
+import { authenticatedFetch } from '../utils/authenticatedFetch';
 import { AnalyzeIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClipboardIcon, ClockIcon, CloudSunIcon, DoorIcon, EmailIcon, EmptyMailIcon, HourglassIcon, InboxIcon, LightningIcon, MoneyIcon, MoonIcon, PinIcon, RefreshIcon, SatelliteIcon, SearchIcon, SleepIcon, StopwatchIcon, TargetIcon, UsersIcon, WarningIcon, WrenchIcon, XCircleIcon } from '../components/Icons';
 
 const CLOUD_FUNCTIONS_URL = '***REMOVED***';
@@ -55,6 +56,18 @@ function timeSince(dateStr) {
 
 function getProfileImg(accountId) {
  return `/assets/profiles/account_${accountId}.png`;
+}
+
+async function requireOkResponse(response) {
+ if (response.ok) return response;
+ let message = `HTTP ${response.status}`;
+ try {
+ const data = await response.json();
+ message = data.error || data.message || message;
+ } catch {
+ // Mantener el mensaje HTTP si la respuesta no trae JSON.
+ }
+ throw new Error(message);
 }
 
 export default function Analyze({ navData }) {
@@ -215,7 +228,7 @@ export default function Analyze({ navData }) {
  setAnalysisRunning(true);
  setAnalysisResult(null);
  try {
-      const res = await fetch(`${CLOUD_FUNCTIONS_URL}/analyze_emails`, {
+      const res = await authenticatedFetch(`${CLOUD_FUNCTIONS_URL}/analyze_emails`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -240,11 +253,11 @@ export default function Analyze({ navData }) {
       // Desactivar - directo sin confirmación
       setScheduleEnabled(false);
       setScheduleStartTime(null);
-      fetch(`${CLOUD_FUNCTIONS_URL}/update_schedule`, {
+      authenticatedFetch(`${CLOUD_FUNCTIONS_URL}/update_schedule`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: false, frequencyHours: scheduleFrequency }),
-      }).catch(err => {
+      }).then(requireOkResponse).catch(err => {
         console.error('Error actualizando schedule:', err);
         setScheduleEnabled(true); // revert
       });
@@ -301,7 +314,7 @@ export default function Analyze({ navData }) {
  setActiveHoursEnd(activeHoursPayload.endHour);
 
  try {
-      await fetch(`${CLOUD_FUNCTIONS_URL}/update_schedule`, {
+      const res = await authenticatedFetch(`${CLOUD_FUNCTIONS_URL}/update_schedule`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -311,6 +324,7 @@ export default function Analyze({ navData }) {
           activeHours: activeHoursPayload,
         }),
       });
+      await requireOkResponse(res);
       if (runNow) {
         handleRunAnalysis();
       }
@@ -326,7 +340,7 @@ export default function Analyze({ navData }) {
  setScheduleFrequency(freq);
  // Recalculate startTime to maintain the same start hour but with new frequency
  try {
-      await fetch(`${CLOUD_FUNCTIONS_URL}/update_schedule`, {
+      const res = await authenticatedFetch(`${CLOUD_FUNCTIONS_URL}/update_schedule`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -341,6 +355,7 @@ export default function Analyze({ navData }) {
           },
         }),
       });
+      await requireOkResponse(res);
  } catch (err) {
       console.error('Error actualizando frecuencia:', err);
  }
