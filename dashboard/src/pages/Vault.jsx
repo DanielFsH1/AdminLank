@@ -677,6 +677,10 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
      });
  }, [secrets, principalEmailAccounts]);
 
+ const principalIdsWithPaypal = useMemo(() => {
+   return new Set(allPaypalAccounts.map(p => String(p.lankAccountId)));
+ }, [allPaypalAccounts]);
+
  const filteredPaypalAccounts = useMemo(() => {
    if (!searchQuery || searchQuery.length < 2) return allPaypalAccounts;
    const q = normalizeSearch(searchQuery);
@@ -878,7 +882,12 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
      showToast('Primero crea una cuenta principal para vincular PayPal', 'error');
      return;
    }
-   setPaypalValues({ lankAccountId: principalEmailAccounts[0].lankAccountId, email: '', password: '', notes: '' });
+   const available = principalEmailAccounts.filter(a => !principalIdsWithPaypal.has(a.lankAccountId));
+   if (available.length === 0) {
+     showToast('Todas las cuentas principales ya tienen PayPal vinculado', 'error');
+     return;
+   }
+   setPaypalValues({ lankAccountId: available[0].lankAccountId, email: available[0].email, password: '', notes: '' });
    setPaypalModal({ mode: 'create' });
  };
 
@@ -3118,10 +3127,18 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
                 <label><UserIcon size={16} /> Cuenta principal vinculada</label>
                 <select
                   value={paypalValues.lankAccountId}
-                  onChange={e => setPaypalValues(p => ({ ...p, lankAccountId: e.target.value }))}
+                  onChange={e => {
+                    const selectedId = e.target.value;
+                    const principal = principalEmailAccounts.find(a => a.lankAccountId === selectedId);
+                    setPaypalValues(p => ({ ...p, lankAccountId: selectedId, email: principal?.email || p.email }));
+                  }}
                 >
                   <option value="">Seleccionar cuenta principal</option>
-                  {principalEmailAccounts.map(account => (
+                  {principalEmailAccounts
+                    .filter(account => paypalModal.mode === 'edit'
+                      ? true
+                      : !principalIdsWithPaypal.has(account.lankAccountId))
+                    .map(account => (
                     <option key={account.id} value={account.lankAccountId}>
                       {account.label} · {account.email}
                     </option>
