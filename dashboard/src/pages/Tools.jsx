@@ -6,7 +6,7 @@ import { db } from '../firebase';
 import { useDocument } from '../hooks/useFirestore';
 import { ACCESS_TYPES, buildServiceConfig, normalizeServiceKey } from '../config/services';
 import { setServiceCatalogEntryActive, upsertServiceCatalogEntry } from '../hooks/firestoreActions';
-import { authenticatedFetch } from '../utils/authenticatedFetch';
+import { authenticatedFetch, ensureAdminFunctionResponse } from '../utils/authenticatedFetch';
 
 import { AnalyzeIcon, BankIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClockIcon, CloseIcon, ContainerIcon, CreditCardIcon, DollarIcon, DownloadIcon, EditIcon, EmailIcon, FileStorageIcon, HourglassIcon, KeyIcon, LightbulbIcon, LockIcon, LockKeyIcon, MailboxIcon, MoneyIcon, PackageIcon, PlusIcon, SaveIcon, ShieldCheckIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, TrendUpIcon, UsersIcon, WarningIcon, XCircleIcon } from '../components/Icons';
 
@@ -520,7 +520,7 @@ export default function Tools() {
     setStorageError(null);
     try {
       const res = await authenticatedFetch(`${CLOUD_FUNCTIONS_URL}/manage_storage`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await ensureAdminFunctionResponse(res);
       const data = await res.json();
       setStorageData(data);
       if (data.policies) {
@@ -547,8 +547,8 @@ export default function Tools() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, pinHash }),
       });
+      await ensureAdminFunctionResponse(res);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       setCleanupResult(data);
       setTimeout(() => loadStorageData(), 1500);
     } catch (err) {
@@ -572,8 +572,7 @@ export default function Tools() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'set_policies', policies, pinHash }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      await ensureAdminFunctionResponse(res);
       setPoliciesDirty(false);
     } catch (err) {
       setStorageError(`Error guardando políticas: ${err.message}`);

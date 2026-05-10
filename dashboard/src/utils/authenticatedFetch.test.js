@@ -13,7 +13,7 @@ describe('authenticatedFetch', () => {
     const { authenticatedFetch } = await import('./authenticatedFetch');
 
     await expect(authenticatedFetch('https://example.test/status')).rejects.toThrow(
-      'Sesión Firebase requerida',
+      'Sesión Firebase expirada o faltante',
     );
   });
 
@@ -42,5 +42,40 @@ describe('authenticatedFetch', () => {
     });
 
     vi.unstubAllGlobals();
+  });
+
+  it('explica 401 como sesión expirada o faltante', async () => {
+    const { getAdminFunctionErrorMessage } = await import('./authenticatedFetch');
+    const response = {
+      status: 401,
+      json: vi.fn().mockResolvedValue({ error: 'Authorization Bearer token requerido' }),
+    };
+
+    await expect(getAdminFunctionErrorMessage(response)).resolves.toBe(
+      'Sesión Firebase expirada o faltante. Vuelve a iniciar sesión en AdminLank.',
+    );
+  });
+
+  it('explica 403 como cuenta no autorizada', async () => {
+    const { getAdminFunctionErrorMessage } = await import('./authenticatedFetch');
+    const response = {
+      status: 403,
+      json: vi.fn().mockResolvedValue({ error: 'Acceso restringido al administrador de AdminLank' }),
+    };
+
+    await expect(getAdminFunctionErrorMessage(response)).resolves.toBe(
+      'Esta cuenta no tiene permisos de administrador para AdminLank.',
+    );
+  });
+
+  it('ensureAdminFunctionResponse lanza mensajes admin claros cuando la respuesta falla', async () => {
+    const { ensureAdminFunctionResponse } = await import('./authenticatedFetch');
+    const response = {
+      ok: false,
+      status: 500,
+      json: vi.fn().mockResolvedValue({ error: 'Fallo interno' }),
+    };
+
+    await expect(ensureAdminFunctionResponse(response)).rejects.toThrow('Fallo interno');
   });
 });

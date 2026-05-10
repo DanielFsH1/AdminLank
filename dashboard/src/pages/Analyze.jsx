@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAdminbotState } from '../hooks/adminbotState';
-import { authenticatedFetch } from '../utils/authenticatedFetch';
+import { authenticatedFetch, ensureAdminFunctionResponse } from '../utils/authenticatedFetch';
 import { AnalyzeIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClipboardIcon, ClockIcon, CloudSunIcon, DoorIcon, EmailIcon, EmptyMailIcon, HourglassIcon, InboxIcon, LightningIcon, MoneyIcon, MoonIcon, PinIcon, RefreshIcon, SatelliteIcon, SearchIcon, SleepIcon, StopwatchIcon, TargetIcon, UsersIcon, WarningIcon, WrenchIcon, XCircleIcon } from '../components/Icons';
 
 const CLOUD_FUNCTIONS_URL = '***REMOVED***';
@@ -56,18 +56,6 @@ function timeSince(dateStr) {
 
 function getProfileImg(accountId) {
  return `/assets/profiles/account_${accountId}.png`;
-}
-
-async function requireOkResponse(response) {
- if (response.ok) return response;
- let message = `HTTP ${response.status}`;
- try {
- const data = await response.json();
- message = data.error || data.message || message;
- } catch {
- // Mantener el mensaje HTTP si la respuesta no trae JSON.
- }
- throw new Error(message);
 }
 
 export default function Analyze({ navData }) {
@@ -232,6 +220,7 @@ export default function Analyze({ navData }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
+      await ensureAdminFunctionResponse(res);
       const data = await res.json();
       if (data.success) {
         setAnalysisResult({ type: 'success', ...data });
@@ -257,7 +246,7 @@ export default function Analyze({ navData }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: false, frequencyHours: scheduleFrequency }),
-      }).then(requireOkResponse).catch(err => {
+      }).then(ensureAdminFunctionResponse).catch(err => {
         console.error('Error actualizando schedule:', err);
         setScheduleEnabled(true); // revert
       });
@@ -324,7 +313,7 @@ export default function Analyze({ navData }) {
           activeHours: activeHoursPayload,
         }),
       });
-      await requireOkResponse(res);
+      await ensureAdminFunctionResponse(res);
       if (runNow) {
         handleRunAnalysis();
       }
@@ -355,7 +344,7 @@ export default function Analyze({ navData }) {
           },
         }),
       });
-      await requireOkResponse(res);
+      await ensureAdminFunctionResponse(res);
  } catch (err) {
       console.error('Error actualizando frecuencia:', err);
  }

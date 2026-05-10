@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { limit } from 'firebase/firestore';
 import { useCollection, useDocument } from '../hooks/useFirestore';
 import { useAdminbotState } from '../hooks/adminbotState';
-import { authenticatedFetch } from '../utils/authenticatedFetch';
+import { authenticatedFetch, ensureAdminFunctionResponse } from '../utils/authenticatedFetch';
 import { AnalyzeIcon, BarChartIcon, BellIcon, BuildIcon, CheckIcon, ClipboardIcon, ClockIcon, CloseIcon, DotGray, DotGreen, DotRed, DotYellow, EmailIcon, GlobeIcon, InboxIcon, KeyIcon, LightningIcon, LockKeyIcon, MailboxIcon, RefreshIcon, SatelliteIcon, SaveIcon, ServerIcon, TrendUpIcon, WarningIcon } from '../components/Icons';
 
 const CLOUD_FN_BASE = '***REMOVED***';
@@ -299,7 +299,7 @@ export default function Status() {
  for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         const resp = await authenticatedFetch(`${CLOUD_FN_BASE}/health_check`);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status} — ${resp.statusText}`);
+        await ensureAdminFunctionResponse(resp);
         const data = await resp.json();
         setHealthData(data);
         setLastChecked(new Date().toISOString());
