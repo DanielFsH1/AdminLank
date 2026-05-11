@@ -100,6 +100,23 @@ async function applyCreditCardBalanceAdjustment(transaction, cardId, amount, tim
   });
 }
 
+export async function applyCreditBalanceByBankId(bankId, amountDelta) {
+  if (!bankId || amountDelta === 0) return;
+  await runTransaction(db, async (transaction) => {
+    const bankRef = doc(db, 'banks', bankId);
+    const bankSnap = await transaction.get(bankRef);
+    if (!bankSnap.exists()) return;
+    const bank = bankSnap.data();
+    if (!bank.creditAccount) return;
+    const now = nowISO();
+    transaction.update(bankRef, {
+      'creditAccount.currentBalance': Number(bank.creditAccount.currentBalance || 0) + amountDelta,
+      'creditAccount.updatedAt': now,
+      updatedAt: now,
+    });
+  });
+}
+
 function buildVaultEmailDocId(type, { email, lankAccountId }) {
   if (type === 'lank_google' && lankAccountId) {
     return `lank_google_${String(lankAccountId).trim()}`;

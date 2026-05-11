@@ -3,7 +3,7 @@ import { useDocument } from '../hooks/useFirestore';
 import { collection, getDocs, doc, getDoc, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { formatMXN, getBankMeta, getProfileImage, BANKS, setCustomBankAccounts } from '../config/services';
-import { confirmRecurringExpense, generateRecurringExpenses, logManualChange } from '../hooks/firestoreActions';
+import { confirmRecurringExpense, generateRecurringExpenses, logManualChange, applyCreditBalanceByBankId } from '../hooks/firestoreActions';
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
 import { BankIcon, BarChartIcon, CalendarIcon, CheckCircleIcon, ClipboardIcon, ClockIcon, CloseIcon, CreditCardIcon, DepositIcon, EditIcon, ExpenseIcon, FolderIcon, HourglassIcon, KeyIcon, LinkIcon, MoneyIcon, PlusIcon, ReceiptIcon, RefreshIcon, SaveIcon, TrashIcon, TrendUpIcon, WarningIcon } from '../components/Icons';
 
@@ -71,7 +71,17 @@ export default function Finance() {
  const [removeDepositConfirm, setRemoveDepositConfirm] = useState(null);
  const [depositToast, setDepositToast] = useState({ visible: false, message: '', type: 'success' });
 
- const [ledgerFilter, setLedgerFilter] = useState('all'); // 'all' | 'expenses' | 'income'
+ const [ledgerFilter, setLedgerFilter] = useState('all'); // 'all' | 'expenses' | 'income' | 'payments'
+
+ // Pagos a crédito
+ const [addCreditPaymentModal, setAddCreditPaymentModal] = useState(false);
+ const [editCreditPaymentModal, setEditCreditPaymentModal] = useState(null);
+ const [removeCreditPaymentConfirm, setRemoveCreditPaymentConfirm] = useState(null);
+ const [creditPaymentToast, setCreditPaymentToast] = useState({ visible: false, message: '', type: 'success' });
+
+ const showCreditPaymentToast = useCallback((msg, type = 'success') => {
+   setCreditPaymentToast({ visible: true, message: msg, type });
+ }, []);
 
  const showDepositToast = useCallback((msg, type = 'success') => {
    setDepositToast({ visible: true, message: msg, type });
@@ -111,6 +121,12 @@ export default function Finance() {
  const creditCardOptions = useMemo(() => {
    return creditAccounts.map(ca => ({ value: ca.id, label: `${ca.bank} (Crédito)` }));
  }, [creditAccounts]);
+
+ const paymentSourceOptions = useMemo(() => {
+   const debitOpts = bankAccountOptions.map(b => ({ value: `debit:${b.value}`, label: `${b.label} (Débito)` }));
+   const creditOpts = creditCardOptions.map(c => ({ value: `credit:${c.value}`, label: c.label }));
+   return [...debitOpts, ...creditOpts];
+ }, [bankAccountOptions, creditCardOptions]);
 
  // Historial de meses
  const [monthlyHistory, setMonthlyHistory] = useState([]);
@@ -417,10 +433,14 @@ export default function Finance() {
  };
  if (values.subscription?.trim()) newEntry.subscription = values.subscription.trim();
  if (values.note?.trim()) newEntry.notes = [values.note.trim()];
- if (values.creditCard) {
-   newEntry.creditCardBankId = values.creditCard;
-   const cc = creditAccounts.find(c => c.id === values.creditCard);
+ const ps = values.paymentSource || '';
+ if (ps.startsWith('credit:')) {
+   const bankId = ps.slice(7);
+   newEntry.creditCardBankId = bankId;
+   const cc = creditAccounts.find(c => c.id === bankId);
    if (cc) newEntry.creditCardBankName = cc.bank;
+ } else if (ps.startsWith('debit:')) {
+   newEntry.debitAccountBank = ps.slice(6);
  }
 
  // Guardar en manual-ledger
@@ -431,6 +451,10 @@ export default function Finance() {
  // Actualizar totales del mes correspondiente
  const monthKey = getEntryMonthKey(effectiveAt);
  await updateMonthTotals(monthKey, amount, entryType, 1);
+
+ if (newEntry.creditCardBankId) {
+   await applyCreditBalanceByBankId(newEntry.creditCardBankId, amount);
+ }
 
  const typeLabels = { expense: 'Gasto', investment: 'Gasto (inversi\u00f3n)', income_adjustment: 'Ajuste positivo', expense_refund: 'Devoluci\u00f3n' };
  const monthLabel = monthKey === currentMonthKey ? '' : ` (${monthKey})`;
@@ -460,13 +484,17 @@ export default function Finance() {
  else delete updatedEntry.subscription;
  if (values.note?.trim()) updatedEntry.notes = [values.note.trim()];
  else delete updatedEntry.notes;
- if (values.creditCard) {
-   updatedEntry.creditCardBankId = values.creditCard;
-   const cc = creditAccounts.find(c => c.id === values.creditCard);
+ const ps = values.paymentSource || '';
+ delete updatedEntry.creditCardBankId;
+ delete updatedEntry.creditCardBankName;
+ delete updatedEntry.debitAccountBank;
+ if (ps.startsWith('credit:')) {
+   const bankId = ps.slice(7);
+   updatedEntry.creditCardBankId = bankId;
+   const cc = creditAccounts.find(c => c.id === bankId);
    if (cc) updatedEntry.creditCardBankName = cc.bank;
- } else {
-   delete updatedEntry.creditCardBankId;
-   delete updatedEntry.creditCardBankName;
+ } else if (ps.startsWith('debit:')) {
+   updatedEntry.debitAccountBank = ps.slice(6);
  }
 
  const ledgerRef = doc(db, 'finance', 'manual-ledger');
@@ -486,6 +514,13 @@ export default function Finance() {
  const newMonthKey = getEntryMonthKey(effectiveAt);
  await updateMonthTotals(oldMonthKey, oldEntry.amount || 0, oldEntry.type || 'expense', -1);
  await updateMonthTotals(newMonthKey, amount, entryType, 1);
+
+ if (oldEntry.creditCardBankId) {
+   await applyCreditBalanceByBankId(oldEntry.creditCardBankId, -(oldEntry.amount || 0));
+ }
+ if (updatedEntry.creditCardBankId) {
+   await applyCreditBalanceByBankId(updatedEntry.creditCardBankId, amount);
+ }
 
  showExpenseToast(`Gasto actualizado: ${values.description.trim()}`);
  };
@@ -510,6 +545,10 @@ export default function Finance() {
  // Revertir totales del mes correspondiente
  const monthKey = getEntryMonthKey(entry.effectiveAt);
  await updateMonthTotals(monthKey, entry.amount || 0, entry.type || 'expense', -1);
+
+ if (entry.creditCardBankId) {
+   await applyCreditBalanceByBankId(entry.creditCardBankId, -(entry.amount || 0));
+ }
 
  showExpenseToast(`Entrada eliminada: ${entry.description}`);
  setRemoveExpenseConfirm(null);
@@ -639,6 +678,119 @@ export default function Finance() {
    }
  };
 
+ // ─── Pagos a cuentas de crédito ───────────────────────────────────
+
+ const handleAddCreditPayment = async (values) => {
+   const amount = parseFloat(values.amount);
+   if (!values.creditAccount || isNaN(amount) || amount <= 0) return;
+   if (!values.description?.trim()) return;
+
+   const today = new Date().toISOString().slice(0, 10);
+   const effectiveAt = values.effectiveAt || today;
+   const cc = creditAccounts.find(c => c.id === values.creditAccount);
+
+   const newEntry = {
+     entryId: `creditpmt:${effectiveAt}:${Date.now()}`,
+     type: 'credit_payment',
+     description: values.description.trim(),
+     amount,
+     effectiveAt,
+     status: 'confirmed',
+     creditCardBankId: values.creditAccount,
+     creditCardBankName: cc?.bank || '',
+     createdAt: new Date().toISOString(),
+   };
+   if (values.note?.trim()) newEntry.notes = [values.note.trim()];
+
+   const ledgerRef = doc(db, 'finance', 'manual-ledger');
+   const currentEntries = ledger?.entries || [];
+   await updateDoc(ledgerRef, { entries: [...currentEntries, newEntry] });
+
+   await applyCreditBalanceByBankId(values.creditAccount, -amount);
+
+   showCreditPaymentToast(`Pago de ${formatMXN(amount)} a ${cc?.bank || 'crédito'} registrado`);
+
+   logManualChange('add_credit_payment', `Pago a crédito: ${cc?.bank} — ${formatMXN(amount)}`, {
+     collection: 'finance', documentId: 'manual-ledger',
+     after: { description: values.description.trim(), amount, creditAccount: cc?.bank, effectiveAt },
+   });
+ };
+
+ const handleEditCreditPayment = async (values) => {
+   if (!editCreditPaymentModal) return;
+   const { entry: oldEntry } = editCreditPaymentModal;
+   const amount = parseFloat(values.amount);
+   if (!values.creditAccount || !values.description?.trim() || isNaN(amount) || amount <= 0) return;
+
+   const today = new Date().toISOString().slice(0, 10);
+   const effectiveAt = values.effectiveAt || today;
+   const cc = creditAccounts.find(c => c.id === values.creditAccount);
+
+   const updatedEntry = {
+     ...oldEntry,
+     description: values.description.trim(),
+     amount,
+     effectiveAt,
+     creditCardBankId: values.creditAccount,
+     creditCardBankName: cc?.bank || '',
+     updatedAt: new Date().toISOString(),
+   };
+   if (values.note?.trim()) updatedEntry.notes = [values.note.trim()];
+   else delete updatedEntry.notes;
+
+   const ledgerRef = doc(db, 'finance', 'manual-ledger');
+   const currentEntries = ledger?.entries || [];
+   const entryIndex = findLedgerEntryIndex(currentEntries, oldEntry);
+   if (entryIndex < 0) {
+     showCreditPaymentToast('No se encontró el pago a editar.', 'error');
+     return;
+   }
+
+   const updatedEntries = [...currentEntries];
+   updatedEntries[entryIndex] = updatedEntry;
+   await updateDoc(ledgerRef, { entries: updatedEntries });
+
+   if (oldEntry.creditCardBankId) {
+     await applyCreditBalanceByBankId(oldEntry.creditCardBankId, oldEntry.amount || 0);
+   }
+   await applyCreditBalanceByBankId(values.creditAccount, -amount);
+
+   showCreditPaymentToast(`Pago actualizado: ${values.description.trim()}`);
+ };
+
+ const handleRemoveCreditPaymentConfirm = async () => {
+   if (removeCreditPaymentConfirm === null) return;
+   const { entry } = removeCreditPaymentConfirm;
+   try {
+     const ledgerRef = doc(db, 'finance', 'manual-ledger');
+     const currentEntries = ledger?.entries || [];
+     const entryIndex = findLedgerEntryIndex(currentEntries, entry);
+     if (entryIndex < 0) {
+       showCreditPaymentToast('No se encontró el pago a eliminar.', 'error');
+       setRemoveCreditPaymentConfirm(null);
+       return;
+     }
+
+     const updatedEntries = currentEntries.filter((_, i) => i !== entryIndex);
+     await updateDoc(ledgerRef, { entries: updatedEntries });
+
+     if (entry.creditCardBankId) {
+       await applyCreditBalanceByBankId(entry.creditCardBankId, entry.amount || 0);
+     }
+
+     showCreditPaymentToast(`Pago eliminado: ${entry.description}`);
+     setRemoveCreditPaymentConfirm(null);
+
+     logManualChange('remove_credit_payment', `Pago a crédito eliminado: ${entry.description} — ${formatMXN(entry.amount)}`, {
+       collection: 'finance', documentId: 'manual-ledger',
+       before: { description: entry.description, amount: entry.amount, creditAccount: entry.creditCardBankName },
+     });
+   } catch (err) {
+     showCreditPaymentToast(`Error al eliminar: ${err.message}`, 'error');
+     throw err;
+   }
+ };
+
  if (loadingOverview || loadingLedger) return <div className="empty-state"><div className="loading-spinner" /></div>;
  if (!overview) return (
     <div className="empty-state">
@@ -659,7 +811,9 @@ export default function Finance() {
  const allEntries = ledger?.entries || [];
  const entries = allEntries.filter(e => getEntryMonthKey(e.effectiveAt) === currentMonthKey);
  const depositEntries = entries.filter(e => e.type === 'deposit');
- const expenseEntries = entries.filter(e => e.type !== 'deposit');
+ const expenseEntries = entries.filter(e => e.type !== 'deposit' && e.type !== 'credit_payment');
+ const creditPaymentEntries = entries.filter(e => e.type === 'credit_payment');
+ const totalCreditPayments = creditPaymentEntries.reduce((s, e) => s + (e.amount || 0), 0);
 
  // Cálculos principales — solo del mes actual
  const pendingAmount = (t.withdrawalRequestedGross || 0) - (t.withdrawalCompletedGross || 0);
@@ -768,9 +922,11 @@ export default function Finance() {
           <div className="credit-accounts-grid">
             {creditAccounts.map(acct => {
               const bankMeta = getBankMeta(acct.bank);
-              const utilPct = acct.creditLimit > 0 ? Math.min(100, Math.round((acct.currentBalance / acct.creditLimit) * 100)) : 0;
-              const utilClass = utilPct <= 30 ? 'low' : utilPct <= 70 ? 'medium' : 'high';
-              const available = Math.max(0, (acct.creditLimit || 0) - (acct.currentBalance || 0));
+              const balance = acct.currentBalance || 0;
+              const hasFavor = balance < 0;
+              const utilPct = acct.creditLimit > 0 ? Math.min(100, Math.max(0, Math.round((balance / acct.creditLimit) * 100))) : 0;
+              const utilClass = hasFavor ? 'low' : utilPct <= 30 ? 'low' : utilPct <= 70 ? 'medium' : 'high';
+              const available = (acct.creditLimit || 0) - balance;
               const expandSection = creditExpandSection[acct.id] || null;
               const installments = acct.installments || [];
               const statements = [...(acct.monthlyStatements || [])].sort((a, b) => (b.monthKey || '').localeCompare(a.monthKey || ''));
@@ -798,14 +954,14 @@ export default function Finance() {
                   {/* Utilization bar */}
                   <div className="credit-util-bar-wrap">
                     <div className="credit-util-bar-labels">
-                      <span>Usado: {formatMXN(acct.currentBalance)}</span>
+                      <span>{hasFavor ? 'Saldo a favor' : 'Usado'}: {formatMXN(Math.abs(balance))}</span>
                       <span>Disponible: {formatMXN(available)}</span>
                     </div>
                     <div className="credit-util-bar">
-                      <div className={`credit-util-fill ${utilClass}`} style={{ width: `${utilPct}%` }} />
+                      <div className={`credit-util-fill ${utilClass}`} style={{ width: `${hasFavor ? 0 : utilPct}%` }} />
                     </div>
-                    <div className={`credit-util-pct`} style={{ color: utilClass === 'low' ? '#10b981' : utilClass === 'medium' ? '#f59e0b' : '#ef4444' }}>
-                      {utilPct}% utilizado
+                    <div className={`credit-util-pct`} style={{ color: hasFavor ? '#8b5cf6' : utilClass === 'low' ? '#10b981' : utilClass === 'medium' ? '#f59e0b' : '#ef4444' }}>
+                      {hasFavor ? `Saldo a favor: ${formatMXN(Math.abs(balance))}` : `${utilPct}% utilizado`}
                     </div>
                   </div>
 
@@ -820,7 +976,7 @@ export default function Finance() {
                     <div className="credit-date-item">
                       <div>
                         <div className="credit-date-label">Límite de pago</div>
-                        <div className="credit-date-value">Día {acct.paymentDueDay}</div>
+                        <div className="credit-date-value">Día {acct.daysAfterCutoff ? ((parseInt(acct.cutoffDay || 1, 10) + parseInt(acct.daysAfterCutoff, 10) - 1) % 31) + 1 : acct.paymentDueDay} <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 400 }}>({acct.daysAfterCutoff || '?'}d después corte)</span></div>
                       </div>
                     </div>
                   </div>
@@ -1055,6 +1211,11 @@ export default function Finance() {
               <button className="alert-action-btn edit" onClick={() => setAddDepositModal(true)} style={{ fontSize: '12px', background: 'rgba(16,185,129,0.1)', color: '#10b981' }}>
                 <PlusIcon size={14} /> Ingreso
               </button>
+              {creditAccounts.length > 0 && (
+                <button className="alert-action-btn edit" onClick={() => setAddCreditPaymentModal(true)} style={{ fontSize: '12px', background: 'rgba(139,92,246,0.1)', color: '#8b5cf6' }}>
+                  <PlusIcon size={14} /> Pago Crédito
+                </button>
+              )}
             </div>
           </div>
 
@@ -1069,11 +1230,17 @@ export default function Finance() {
             <button className={`alert-tab ${ledgerFilter === 'income' ? 'active' : ''}`} onClick={() => setLedgerFilter('income')}>
               <DepositIcon size={12} /> Ingresos ({depositEntries.length})
             </button>
+            {creditPaymentEntries.length > 0 && (
+              <button className={`alert-tab ${ledgerFilter === 'payments' ? 'active' : ''}`} onClick={() => setLedgerFilter('payments')}>
+                <CreditCardIcon size={12} /> Pagos crédito ({creditPaymentEntries.length})
+              </button>
+            )}
           </div>
 
           {(() => {
             const filteredEntries = ledgerFilter === 'expenses' ? expenseEntries
               : ledgerFilter === 'income' ? depositEntries
+              : ledgerFilter === 'payments' ? creditPaymentEntries
               : entries;
 
             const sortedEntries = [...filteredEntries].sort((a, b) => (b.effectiveAt || '').localeCompare(a.effectiveAt || ''));
@@ -1084,7 +1251,7 @@ export default function Finance() {
             if (sortedEntries.length === 0) {
               return (
                 <div className="empty-state" style={{ padding: '20px' }}>
-                  <p>{ledgerFilter === 'expenses' ? 'Sin gastos este mes' : ledgerFilter === 'income' ? 'Sin ingresos este mes' : 'Sin movimientos este mes'}</p>
+                  <p>{ledgerFilter === 'expenses' ? 'Sin gastos este mes' : ledgerFilter === 'income' ? 'Sin ingresos este mes' : ledgerFilter === 'payments' ? 'Sin pagos a crédito este mes' : 'Sin movimientos este mes'}</p>
                 </div>
               );
             }
@@ -1120,6 +1287,7 @@ export default function Finance() {
                             {entry.isRecurring && <span>· <RefreshIcon size={12} /> Recurrente</span>}
                             {cardLabel && <span>· <CreditCardIcon size={12} /> {cardLabel}</span>}
                             {!cardLabel && entry.creditCardBankName && <span>· <CreditCardIcon size={12} /> {entry.creditCardBankName}</span>}
+                            {entry.debitAccountBank && <span>· <BankIcon size={12} /> {entry.debitAccountBank}</span>}
                             {entryBankMeta && (
                               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
                                 · {entryBankMeta.logo && <img src={entryBankMeta.logo} style={{ width: '14px', height: '14px', borderRadius: '3px', objectFit: 'cover' }} alt="" onError={e => { e.target.style.display = 'none'; }} />}
@@ -1205,13 +1373,15 @@ export default function Finance() {
                 )}
                 {confirmedEntries.map((entry, i) => {
                   const isDeposit = entry.type === 'deposit';
-                  const typeLabels = { expense: <><ExpenseIcon size={14} /> Gasto</>, investment: <><ExpenseIcon size={14} /> Inversión</>, income_adjustment: <><MoneyIcon size={14} /> Ajuste +</>, expense_refund: <><RefreshIcon size={14} /> Devolución</>, deposit: <><DepositIcon size={14} /> Ingreso</> };
-                  const typeBadge = { expense: 'badge-danger', investment: 'badge-danger', income_adjustment: 'badge-success', expense_refund: 'badge-info', deposit: 'badge-success' };
+                  const isCreditPayment = entry.type === 'credit_payment';
+                  const typeLabels = { expense: <><ExpenseIcon size={14} /> Gasto</>, investment: <><ExpenseIcon size={14} /> Inversión</>, income_adjustment: <><MoneyIcon size={14} /> Ajuste +</>, expense_refund: <><RefreshIcon size={14} /> Devolución</>, deposit: <><DepositIcon size={14} /> Ingreso</>, credit_payment: <><CreditCardIcon size={14} /> Pago crédito</> };
+                  const typeBadge = { expense: 'badge-danger', investment: 'badge-danger', income_adjustment: 'badge-success', expense_refund: 'badge-info', deposit: 'badge-success', credit_payment: 'badge-info' };
+                  const borderColor = isCreditPayment ? '#8b5cf6' : isDeposit ? '#10b981' : 'var(--accent-danger, #ef4444)';
                   const cardLabel = entry.cardLabel || (entry.cardId && entry.notes?.[0]?.startsWith('Cobro automático — ')
                     ? entry.notes[0].replace('Cobro automático — ', '') : '');
                   const entryBankMeta = entry.bankAccount ? getBankMeta(entry.bankAccount) : null;
                   return (
-                    <div className="ledger-entry" key={`confirmed-${i}`} style={{ borderLeft: `3px solid ${isDeposit ? '#10b981' : 'var(--accent-danger, #ef4444)'}` }}>
+                    <div className="ledger-entry" key={`confirmed-${i}`} style={{ borderLeft: `3px solid ${borderColor}` }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
                         <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 600, fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
@@ -1224,6 +1394,7 @@ export default function Finance() {
                             {entry.isRecurring && <span>· <RefreshIcon size={12} /> Recurrente</span>}
                             {cardLabel && <span>· <CreditCardIcon size={12} /> {cardLabel}</span>}
                             {!cardLabel && entry.creditCardBankName && <span>· <CreditCardIcon size={12} /> {entry.creditCardBankName}</span>}
+                            {entry.debitAccountBank && <span>· <BankIcon size={12} /> {entry.debitAccountBank}</span>}
                             {entryBankMeta && (
                               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
                                 · {entryBankMeta.logo && <img src={entryBankMeta.logo} style={{ width: '14px', height: '14px', borderRadius: '3px', objectFit: 'cover' }} alt="" onError={e => { e.target.style.display = 'none'; }} />}
@@ -1233,12 +1404,12 @@ export default function Finance() {
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <div style={{ fontWeight: 700, fontSize: '16px', color: isDeposit ? '#10b981' : 'inherit' }}>
+                          <div style={{ fontWeight: 700, fontSize: '16px', color: isDeposit ? '#10b981' : isCreditPayment ? '#8b5cf6' : 'inherit' }}>
                             {isDeposit ? '+' : '-'}{formatMXN(entry.amount)}
                           </div>
                           <button
                             className="clabe-remove-btn"
-                            onClick={() => isDeposit ? setEditDepositModal({ entry }) : setEditExpenseModal({ entry })}
+                            onClick={() => isCreditPayment ? setEditCreditPaymentModal({ entry }) : isDeposit ? setEditDepositModal({ entry }) : setEditExpenseModal({ entry })}
                             title="Editar"
                             style={{ fontSize: '11px' }}
                           >
@@ -1246,7 +1417,7 @@ export default function Finance() {
                           </button>
                           <button
                             className="clabe-remove-btn"
-                            onClick={() => isDeposit ? setRemoveDepositConfirm({ entry }) : setRemoveExpenseConfirm({ entry })}
+                            onClick={() => isCreditPayment ? setRemoveCreditPaymentConfirm({ entry }) : isDeposit ? setRemoveDepositConfirm({ entry }) : setRemoveExpenseConfirm({ entry })}
                             title="Eliminar"
                           >
                             <TrashIcon size={14} />
@@ -1694,12 +1865,12 @@ export default function Finance() {
             { value: 'expense', label: 'Gasto' },
             { value: 'investment', label: 'Gasto (inversión)' },
           ]},
-          { key: 'creditCard', label: 'Tarjeta de crédito', type: 'select', placeholder: 'Sin tarjeta', options: creditCardOptions },
+          { key: 'paymentSource', label: 'Fuente de pago', type: 'select', placeholder: 'Sin cuenta específica', options: paymentSourceOptions },
           { key: 'effectiveAt', label: `Fecha efectiva (${minDate} a ${maxDate})`, type: 'date', hint: 'Dejar vacío = fecha de hoy. Si la fecha cae en otro mes, el gasto se aplica a ese mes.' },
           { key: 'subscription', label: 'Suscripción (opcional)', placeholder: 'Ej: YouTube Premium, ChatGPT Plus...' },
           { key: 'note', label: 'Nota (opcional)', placeholder: 'Contexto adicional del gasto' },
         ]}
-        initialValues={{ description: '', amount: '', type: 'expense', creditCard: '', effectiveAt: '', subscription: '', note: '' }}
+        initialValues={{ description: '', amount: '', type: 'expense', paymentSource: '', effectiveAt: '', subscription: '', note: '' }}
         saveLabel={<><ExpenseIcon size={16} /> Registrar</>}
         confirmMessage="Se registrará este gasto y se actualizarán los totales del mes correspondiente."
       />
@@ -1721,7 +1892,7 @@ export default function Finance() {
               { value: 'expense', label: 'Gasto' },
               { value: 'investment', label: 'Gasto (inversión)' },
             ]},
-            { key: 'creditCard', label: 'Tarjeta de crédito', type: 'select', placeholder: 'Sin tarjeta', options: creditCardOptions },
+            { key: 'paymentSource', label: 'Fuente de pago', type: 'select', placeholder: 'Sin cuenta específica', options: paymentSourceOptions },
             { key: 'effectiveAt', label: `Fecha efectiva (${minDate} a ${maxDate})`, type: 'date', hint: 'Si cambias a otro mes, el gasto se mueve a ese mes.' },
             { key: 'subscription', label: 'Suscripción (opcional)', placeholder: 'Ej: YouTube Premium, ChatGPT Plus...' },
             { key: 'note', label: 'Nota (opcional)', placeholder: 'Contexto adicional del gasto' },
@@ -1730,7 +1901,11 @@ export default function Finance() {
             description: editExpenseModal.entry.description || '',
             amount: editExpenseModal.entry.amount || '',
             type: editExpenseModal.entry.type || 'expense',
-            creditCard: editExpenseModal.entry.creditCardBankId || '',
+            paymentSource: editExpenseModal.entry.creditCardBankId
+              ? `credit:${editExpenseModal.entry.creditCardBankId}`
+              : editExpenseModal.entry.debitAccountBank
+                ? `debit:${editExpenseModal.entry.debitAccountBank}`
+                : '',
             effectiveAt: editExpenseModal.entry.effectiveAt || '',
             subscription: editExpenseModal.entry.subscription || '',
             note: (editExpenseModal.entry.notes || [])[0] || '',
@@ -1826,6 +2001,72 @@ export default function Finance() {
 
       {/* Toast depósitos */}
       <Toast {...depositToast} onClose={() => setDepositToast(prev => ({ ...prev, visible: false }))} />
+
+      {/* ═══ MODALES DE PAGOS A CRÉDITO ═══ */}
+
+      {/* Modal: Registrar pago a crédito */}
+      <EditModal
+        open={addCreditPaymentModal}
+        onClose={() => setAddCreditPaymentModal(false)}
+        onSave={handleAddCreditPayment}
+        validate={validateExpenseDate}
+        title="Registrar pago a crédito"
+        icon={<CreditCardIcon size={16} />}
+        fields={[
+          { key: 'creditAccount', label: 'Cuenta de crédito', type: 'select', required: true, placeholder: 'Seleccionar cuenta', options: creditCardOptions },
+          { key: 'amount', label: 'Monto (MXN)', required: true, type: 'number', placeholder: '0.00' },
+          { key: 'description', label: 'Descripción', required: true, placeholder: 'Ej: Pago mensual tarjeta BBVA' },
+          { key: 'effectiveAt', label: `Fecha efectiva (${minDate} a ${maxDate})`, type: 'date', hint: 'Dejar vacío = fecha de hoy.' },
+          { key: 'note', label: 'Nota (opcional)', placeholder: 'Contexto adicional del pago' },
+        ]}
+        initialValues={{ creditAccount: creditCardOptions.length === 1 ? creditCardOptions[0].value : '', amount: '', description: '', effectiveAt: '', note: '' }}
+        saveLabel={<><CreditCardIcon size={16} /> Registrar pago</>}
+        confirmMessage="Se registrará este pago y se reducirá el saldo de la cuenta de crédito. Este movimiento NO afecta gastos ni ganancia neta."
+      />
+
+      {/* Modal: Editar pago a crédito existente */}
+      {editCreditPaymentModal && (
+        <EditModal
+          open={true}
+          onClose={() => setEditCreditPaymentModal(null)}
+          onSave={handleEditCreditPayment}
+          validate={validateExpenseDate}
+          title="Editar pago a crédito"
+          icon={<CreditCardIcon size={16} />}
+          resetKey={editCreditPaymentModal.entry.entryId}
+          fields={[
+            { key: 'creditAccount', label: 'Cuenta de crédito', type: 'select', required: true, placeholder: 'Seleccionar cuenta', options: creditCardOptions },
+            { key: 'amount', label: 'Monto (MXN)', required: true, type: 'number', placeholder: '0.00' },
+            { key: 'description', label: 'Descripción', required: true, placeholder: 'Ej: Pago mensual tarjeta BBVA' },
+            { key: 'effectiveAt', label: `Fecha efectiva (${minDate} a ${maxDate})`, type: 'date', hint: 'Si cambias a otro mes, el pago se mueve a ese mes.' },
+            { key: 'note', label: 'Nota (opcional)', placeholder: 'Contexto adicional del pago' },
+          ]}
+          initialValues={{
+            creditAccount: editCreditPaymentModal.entry.creditCardBankId || '',
+            amount: editCreditPaymentModal.entry.amount || '',
+            description: editCreditPaymentModal.entry.description || '',
+            effectiveAt: editCreditPaymentModal.entry.effectiveAt || '',
+            note: (editCreditPaymentModal.entry.notes || [])[0] || '',
+          }}
+          saveLabel="Guardar cambios"
+          confirmMessage="Se actualizará este pago y se recalculará el saldo de la cuenta de crédito."
+        />
+      )}
+
+      {/* Diálogo: Confirmar eliminación de pago a crédito */}
+      <ConfirmDialog
+        open={!!removeCreditPaymentConfirm}
+        onClose={() => setRemoveCreditPaymentConfirm(null)}
+        onConfirm={handleRemoveCreditPaymentConfirm}
+        title="Eliminar pago a crédito"
+        message={removeCreditPaymentConfirm ? `¿Eliminar pago "${removeCreditPaymentConfirm.entry.description}" por ${formatMXN(removeCreditPaymentConfirm.entry.amount)}? El saldo de la cuenta de crédito se revertirá.` : ''}
+        confirmLabel={<><TrashIcon size={16} /> Sí, eliminar</>}
+        danger
+        icon={<WarningIcon size={16} />}
+      />
+
+      {/* Toast pagos a crédito */}
+      <Toast {...creditPaymentToast} onClose={() => setCreditPaymentToast(prev => ({ ...prev, visible: false }))} />
 
  </>
  );

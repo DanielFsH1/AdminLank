@@ -470,7 +470,7 @@ def generate_sim_recharge_alerts(db):
 
 def generate_credit_alerts(db):
     """
-    Revisa las cuentas de crédito en finance/credit-accounts.
+    Revisa las cuentas de crédito desde la colección banks.
     Genera alertas de:
       - credit_cutoff: X días antes de la fecha de corte
       - credit_payment_due: X días antes de la fecha límite de pago
@@ -486,11 +486,17 @@ def generate_credit_alerts(db):
     current_year = now_mx.year
     last_day = calendar.monthrange(current_year, current_month)[1]
 
-    credit_ref = db.document('finance/credit-accounts')
-    credit_snap = credit_ref.get()
-    if not credit_snap.exists:
-        return 0
-    accounts = credit_snap.to_dict().get('accounts', [])
+    accounts = []
+    for bank_doc in db.collection('banks').stream():
+        bank_data = bank_doc.to_dict()
+        ca = bank_data.get('creditAccount')
+        if ca:
+            accounts.append({
+                'id': bank_doc.id,
+                'bank': bank_data.get('name', ''),
+                **ca,
+            })
+
     if not accounts:
         return 0
 
@@ -546,8 +552,12 @@ def generate_credit_alerts(db):
                     existing_alerts.append(alert)
                     alerts_generated += 1
 
-        # Fecha límite de pago
-        due_day = acct.get('paymentDueDay')
+        # Fecha límite de pago — compute from daysAfterCutoff or fallback to paymentDueDay
+        days_after = acct.get('daysAfterCutoff')
+        if days_after and cutoff_day:
+            due_day = ((cutoff_day + int(days_after) - 1) % last_day) + 1
+        else:
+            due_day = acct.get('paymentDueDay')
         if due_day:
             effective_due = min(due_day, last_day)
             alert_day = effective_due - days_before

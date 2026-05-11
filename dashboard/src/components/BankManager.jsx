@@ -169,7 +169,7 @@ export default function BankManager({ vaultCards = {} }) {
 
   // ─── Credit account ───
   const openCreateCredit = (bankId) => {
-    setCreditValues({ creditLimit: '', currentBalance: '0', cutoffDay: '', paymentDueDay: '', alertDaysBefore: '1', paymentClabe: '', paymentClabeNote: '' });
+    setCreditValues({ creditLimit: '', currentBalance: '0', cutoffDay: '', daysAfterCutoff: '20', alertDaysBefore: '1', paymentClabe: '', paymentClabeNote: '' });
     setCreditModal({ bankId, mode: 'create' });
   };
 
@@ -177,7 +177,7 @@ export default function BankManager({ vaultCards = {} }) {
     const c = bank.creditAccount;
     setCreditValues({
       creditLimit: c.creditLimit || '', currentBalance: c.currentBalance || '0',
-      cutoffDay: c.cutoffDay || '', paymentDueDay: c.paymentDueDay || '', alertDaysBefore: c.alertDaysBefore || '1',
+      cutoffDay: c.cutoffDay || '', daysAfterCutoff: c.daysAfterCutoff || (c.paymentDueDay && c.cutoffDay ? Math.min(30, Math.max(10, c.paymentDueDay - c.cutoffDay + (c.paymentDueDay <= c.cutoffDay ? 30 : 0))) : '20'), alertDaysBefore: c.alertDaysBefore || '1',
       paymentClabe: c.paymentClabe || '', paymentClabeNote: c.paymentClabeNote || '',
     });
     setCreditModal({ bankId: bank.id, mode: 'edit' });
@@ -623,11 +623,13 @@ export default function BankManager({ vaultCards = {} }) {
                   </select>
                 </div>
                 <div className="vault-form-group">
-                  <label>Día límite pago</label>
-                  <select value={creditValues.paymentDueDay} onChange={e => setCreditValues(p => ({ ...p, paymentDueDay: e.target.value }))}>
-                    <option value="">Día...</option>
-                    {Array.from({ length: 31 }, (_, i) => <option key={i + 1} value={i + 1}>Día {i + 1}</option>)}
-                  </select>
+                  <label>Días después del corte</label>
+                  <input type="number" value={creditValues.daysAfterCutoff} onChange={e => setCreditValues(p => ({ ...p, daysAfterCutoff: e.target.value }))} placeholder="20" min="10" max="30" />
+                  {creditValues.cutoffDay && creditValues.daysAfterCutoff && (
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      Día de pago: {((parseInt(creditValues.cutoffDay, 10) + parseInt(creditValues.daysAfterCutoff, 10) - 1) % 31) + 1}
+                    </div>
+                  )}
                 </div>
                 <div className="vault-form-group">
                   <label>Alerta (días)</label>
@@ -916,7 +918,7 @@ export default function BankManager({ vaultCards = {} }) {
           <div className="credit-date-item">
             <div>
               <div className="credit-date-label">Límite de pago</div>
-              <div className="credit-date-value">Día {credit.paymentDueDay}</div>
+              <div className="credit-date-value">Día {credit.daysAfterCutoff ? ((parseInt(credit.cutoffDay || 1, 10) + parseInt(credit.daysAfterCutoff, 10) - 1) % 31) + 1 : credit.paymentDueDay} <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 400 }}>({credit.daysAfterCutoff || '?'}d después corte)</span></div>
             </div>
           </div>
         </div>
