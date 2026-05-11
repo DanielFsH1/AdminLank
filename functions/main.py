@@ -448,6 +448,11 @@ def resolve_withdrawal_destination(event, db=None, snowball_config=None, known_b
         event['destinationClabe'] = clabe
 
     if not clabe:
+        legacy_account_number = core.normalize_account_number(event.get('accountNumber'))
+        if legacy_account_number:
+            event['movementType'] = 'external_bank'
+            event['classificationStatus'] = 'legacy_account_number'
+            return {'movementType': 'external_bank', 'classificationStatus': 'legacy_account_number'}
         event['movementType'] = 'unknown_destination'
         event['classificationStatus'] = 'missing_clabe'
         return {'movementType': 'unknown_destination', 'classificationStatus': 'missing_clabe'}

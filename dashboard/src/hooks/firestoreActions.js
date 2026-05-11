@@ -49,6 +49,104 @@ function parseRecurringExpenseAmount(amount) {
   return parsedAmount;
 }
 
+export function normalizeClabe(value) {
+  return String(value || '').replace(/\D+/g, '');
+}
+
+function normalizeSnowballId(value) {
+  return String(value || '').trim();
+}
+
+function activeSnowballConnections(config) {
+  return Object.entries(config?.connections || {})
+    .map(([id, connection]) => ({ id, ...connection }))
+    .filter(connection => connection.active !== false);
+}
+
+export function validateSnowballConfig(config = {}) {
+  const wallets = config.wallets || {};
+  const activeConnections = activeSnowballConnections(config);
+  const outgoing = new Map();
+  const incoming = new Map();
+  const graph = new Map();
+
+  activeConnections.forEach((connection) => {
+    const from = normalizeSnowballId(connection.fromAccountId);
+    const to = normalizeSnowballId(connection.toAccountId);
+    const destinationType = connection.destinationType || 'lank_wallet';
+
+    if (!from) {
+      throw new Error('Cada conexión Snowball necesita una cuenta origen');
+    }
+    if (outgoing.has(from)) {
+      throw new Error(`La cuenta Lank #${from} solo puede tener una conexión activa de salida`);
+    }
+    outgoing.set(from, connection.id);
+
+    if (destinationType === 'lank_wallet') {
+      if (!to) {
+        throw new Error('Selecciona la cuenta Lank destino');
+      }
+      if (from === to) {
+        throw new Error('Una cuenta Lank no puede apuntar a sí misma');
+      }
+      if (incoming.has(to)) {
+        throw new Error(`La cuenta Lank #${to} solo puede recibir una conexión activa`);
+      }
+      const wallet = wallets[to];
+      const destinationClabe = normalizeClabe(connection.destinationClabe);
+      const walletClabe = normalizeClabe(wallet?.walletClabe || wallet?.clabe);
+      if (!walletClabe || wallet?.active === false) {
+        throw new Error(`La cuenta Lank #${to} necesita una CLABE interna activa`);
+      }
+      if (destinationClabe && destinationClabe !== walletClabe) {
+        throw new Error(`La CLABE destino no coincide con la billetera de Lank #${to}`);
+      }
+      incoming.set(to, connection.id);
+      graph.set(from, to);
+    } else if (destinationType === 'external_bank') {
+      if (!normalizeSnowballId(connection.destinationBankId)) {
+        throw new Error('Selecciona un banco externo registrado');
+      }
+      if (!normalizeClabe(connection.destinationClabe)) {
+        throw new Error('El banco externo necesita CLABE');
+      }
+    } else {
+      throw new Error('Tipo de destino Snowball inválido');
+    }
+  });
+
+  for (const start of graph.keys()) {
+    const visited = new Set();
+    let current = start;
+    while (graph.has(current)) {
+      if (visited.has(current)) {
+        throw new Error('La cadena Snowball contiene un ciclo');
+      }
+      visited.add(current);
+      current = graph.get(current);
+    }
+  }
+
+  return true;
+}
+
+export async function saveSnowballConfig(nextConfig, auditDescription = 'Configuración Snowball actualizada') {
+  validateSnowballConfig(nextConfig);
+  const payload = {
+    wallets: nextConfig.wallets || {},
+    connections: nextConfig.connections || {},
+    updatedAt: nowISO(),
+    updatedBy: 'dashboard',
+  };
+  await setDoc(doc(db, 'config', 'snowball'), payload, { merge: true });
+  logManualChange('snowball_config_update', auditDescription, {
+    collection: 'config',
+    documentId: 'snowball',
+    after: payload,
+  });
+}
+
 const SCHEDULED_ALERT_PRIORITIES = new Set(['critical', 'high', 'medium', 'low']);
 
 function isValidScheduledAlertDate(dateString) {

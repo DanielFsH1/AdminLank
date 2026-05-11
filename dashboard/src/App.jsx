@@ -14,6 +14,7 @@ const Subscriptions = lazy(() => import('./pages/Subscriptions'));
 const Accounts = lazy(() => import('./pages/Accounts'));
 const Alerts = lazy(() => import('./pages/Alerts'));
 const Finance = lazy(() => import('./pages/Finance'));
+const Snowball = lazy(() => import('./pages/Snowball'));
 const Analyze = lazy(() => import('./pages/Analyze'));
 const Status = lazy(() => import('./pages/Status'));
 const Tools = lazy(() => import('./pages/Tools'));
@@ -22,7 +23,7 @@ const History = lazy(() => import('./pages/History'));
 const SimCards = lazy(() => import('./pages/SimCards'));
 const Notes = lazy(() => import('./pages/Notes'));
 
-const TAB_ORDER = ['overview','subscriptions','accounts','alerts','finance','vault','sim-cards','analyze','history','notes','status','tools'];
+const TAB_ORDER = ['overview','subscriptions','accounts','alerts','finance','snowball','vault','sim-cards','analyze','history','notes','status','tools'];
 
 const TAB_TITLES = {
   overview: 'Resumen General',
@@ -30,6 +31,7 @@ const TAB_TITLES = {
   accounts: 'Cuentas Lank',
   alerts: 'Alertas',
   finance: 'Finanzas',
+  snowball: 'Efecto Bola de Nieve',
   'sim-cards': 'SIM Cards',
   analyze: 'Analizar',
   status: 'Estado del Sistema',
@@ -45,6 +47,7 @@ const TAB_SHORT = {
   accounts: 'Cuentas',
   alerts: 'Alertas',
   finance: 'Finanzas',
+  snowball: 'Snowball',
   'sim-cards': 'SIM Cards',
   analyze: 'Analizar',
   vault: 'Bóveda',
@@ -60,6 +63,7 @@ const TAB_SUBTITLES = {
   accounts: 'Registro de cuentas Lank',
   alerts: 'Notificaciones y advertencias',
   finance: 'Ingresos, egresos y reportes',
+  snowball: 'Cadenas de CLABEs internas Lank',
   'sim-cards': 'Control de recargas de tarjetas SIM',
   analyze: 'Procesamiento de correos',
   status: 'Salud y monitoreo de servicios',
@@ -204,6 +208,7 @@ function App() {
       case 'accounts': return <Accounts navData={navData} onNavigate={handleNavigate} servicesConfig={servicesConfig} />;
       case 'alerts': return <Alerts onNavigate={handleNavigate} navData={navData} servicesConfig={servicesConfig} />;
       case 'finance': return <Finance />;
+      case 'snowball': return <Snowball />;
       case 'sim-cards': return <SimCards onNavigate={handleNavigate} />;
       case 'analyze': return <Analyze onNavigate={handleNavigate} navData={navData} servicesConfig={servicesConfig} />;
       case 'status': return <Status />;

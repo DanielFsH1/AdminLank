@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
 import { useCollection } from '../hooks/useFirestore';
-import { BarChartIcon, KeyIcon, UsersIcon, BellIcon, MoneyIcon, AnalyzeIcon, LockIcon, ToolboxIcon, DoorIcon, NotepadIcon } from './Icons';
+import { BarChartIcon, KeyIcon, UsersIcon, BellIcon, MoneyIcon, AnalyzeIcon, LockIcon, ToolboxIcon, DoorIcon, NotepadIcon, LinkIcon } from './Icons';
 
 // SIM Card icon for sidebar
 const SimCardIcon = (props) => (
@@ -34,6 +34,7 @@ const NAV_ITEMS = [
   { id: 'accounts', icon: UsersIcon, label: 'Cuentas Lank' },
   { id: 'alerts', icon: BellIcon, label: 'Alertas', showBadge: true },
   { id: 'finance', icon: MoneyIcon, label: 'Finanzas' },
+  { id: 'snowball', icon: LinkIcon, label: 'Bola de Nieve' },
   { id: 'vault', icon: LockIcon, label: 'Bóveda' },
   { id: 'sim-cards', icon: SimCardIcon, label: 'SIM Cards' },
   { id: 'analyze', icon: AnalyzeIcon, label: 'Analizar' },
