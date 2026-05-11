@@ -135,6 +135,82 @@ def test_protected_dashboard_endpoint_keeps_options_public(monkeypatch):
     assert response.status == 204
 
 
+def test_parse_event_detects_withdrawal_by_clabe_when_subject_varies():
+    body = """
+    Tu extracción de fondos se encuentra en revisión.
+    Monto: 1250.50
+    CLABE destino: 646180123456789012
+    """
+
+    event = main.core.parse_event(
+        "Actualización sobre tu movimiento",
+        body,
+        account_id=1,
+        source="lank",
+    )
+
+    assert event["kind"] == "withdrawal_detected"
+    assert event["amount"] == "1250.50"
+    assert event["accountNumber"] == "646180123456789012"
+    assert event["clabes"] == ["646180123456789012"]
+
+
+def test_classify_event_marks_internal_snowball_transfer():
+    db = FakeDb(documents={
+        "config/snowball": {
+            "wallets": {
+                "1": {"accountId": "1", "walletClabe": "646180111111111111", "active": True},
+                "2": {"accountId": "2", "walletClabe": "646180123456789012", "active": True},
+            },
+            "connections": {
+                "snowball_1_2": {
+                    "id": "snowball_1_2",
+                    "fromAccountId": "1",
+                    "destinationType": "lank_wallet",
+                    "toAccountId": "2",
+                    "destinationClabe": "646180123456789012",
+                    "active": True,
+                }
+            },
+        }
+    })
+    event = {
+        "kind": "withdrawal_completed",
+        "accountId": 1,
+        "amount": "500",
+        "accountNumber": "646180123456789012",
+        "clabes": ["646180123456789012"],
+    }
+
+    review = main.classify_event(event, {}, db=db)
+
+    assert review["category"] == "info"
+    assert review["matchStatus"] == "snowball_internal"
+    assert event["movementType"] == "snowball_internal"
+    assert event["destinationAccountId"] == "2"
+    assert event["snowballConnectionId"] == "snowball_1_2"
+
+
+def test_classify_event_marks_unknown_clabe_for_review():
+    db = FakeDb(documents={
+        "config/snowball": {"wallets": {}, "connections": {}},
+        "config/bank-accounts": {"accounts": []},
+    })
+    event = {
+        "kind": "withdrawal_completed",
+        "accountId": 1,
+        "amount": "500",
+        "accountNumber": "646180999999999999",
+        "clabes": ["646180999999999999"],
+    }
+
+    review = main.classify_event(event, {}, db=db)
+
+    assert review["category"] == "review"
+    assert review["matchStatus"] == "unclassified_clabe"
+    assert event["movementType"] == "unclassified_clabe"
+
+
 class FakeDocSnapshot:
     def __init__(self, data=None, exists=True, reference=None, doc_id=None):
         self._data = data or {}
@@ -1259,3 +1335,107 @@ def test_scheduled_analysis_skips_duplicate_slot_when_last_run_is_same_slot(monk
 
     assert result is None
     assert db.collection("adminbot-work").store == {}
+
+
+# ── generate_credit_cutoff_statements ──
+
+
+def test_generate_credit_cutoff_statements_creates_snapshot_on_cutoff_day(monkeypatch):
+    from datetime import timedelta, timezone as tz
+
+    mexico_tz = tz(timedelta(hours=-6))
+    frozen = lank_alerts.datetime(2026, 5, 15, 10, 0, tzinfo=mexico_tz)
+
+    class FrozenDT(lank_alerts.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen if tz is None else frozen.astimezone(tz)
+
+    monkeypatch.setattr(lank_alerts, "datetime", FrozenDT)
+
+    db = FakeDb()
+    db.collections["banks"] = FakeCollection({
+        "bank-klar": {
+            "name": "Klar",
+            "creditAccount": {
+                "cutoffDay": 15,
+                "currentBalance": 5000,
+                "creditLimit": 20000,
+                "monthlyStatements": [],
+            },
+        },
+    })
+
+    result = lank_alerts.generate_credit_cutoff_statements(db)
+
+    assert result == 1
+    updated = db.collections["banks"].store["bank-klar"]
+    stmts = updated.get("creditAccount.monthlyStatements")
+    assert stmts is not None
+    assert len(stmts) == 1
+    assert stmts[0]["monthKey"] == "2026-05"
+    assert stmts[0]["closingBalance"] == 5000
+    assert stmts[0]["creditLimit"] == 20000
+    assert stmts[0]["cutoffDay"] == 15
+
+
+def test_generate_credit_cutoff_statements_deduplicates(monkeypatch):
+    from datetime import timedelta, timezone as tz
+
+    mexico_tz = tz(timedelta(hours=-6))
+    frozen = lank_alerts.datetime(2026, 5, 15, 10, 0, tzinfo=mexico_tz)
+
+    class FrozenDT(lank_alerts.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen if tz is None else frozen.astimezone(tz)
+
+    monkeypatch.setattr(lank_alerts, "datetime", FrozenDT)
+
+    db = FakeDb()
+    db.collections["banks"] = FakeCollection({
+        "bank-klar": {
+            "name": "Klar",
+            "creditAccount": {
+                "cutoffDay": 15,
+                "currentBalance": 5000,
+                "creditLimit": 20000,
+                "monthlyStatements": [{"monthKey": "2026-05", "closingBalance": 4500}],
+            },
+        },
+    })
+
+    result = lank_alerts.generate_credit_cutoff_statements(db)
+
+    assert result == 0
+
+
+def test_generate_credit_cutoff_statements_skips_non_cutoff_day(monkeypatch):
+    from datetime import timedelta, timezone as tz
+
+    mexico_tz = tz(timedelta(hours=-6))
+    frozen = lank_alerts.datetime(2026, 5, 10, 10, 0, tzinfo=mexico_tz)
+
+    class FrozenDT(lank_alerts.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen if tz is None else frozen.astimezone(tz)
+
+    monkeypatch.setattr(lank_alerts, "datetime", FrozenDT)
+
+    db = FakeDb()
+    db.collections["banks"] = FakeCollection({
+        "bank-klar": {
+            "name": "Klar",
+            "creditAccount": {
+                "cutoffDay": 15,
+                "currentBalance": 5000,
+                "creditLimit": 20000,
+                "monthlyStatements": [],
+            },
+        },
+    })
+
+    result = lank_alerts.generate_credit_cutoff_statements(db)
+
+    assert result == 0

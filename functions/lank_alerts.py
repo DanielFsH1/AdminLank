@@ -597,3 +597,55 @@ def generate_credit_alerts(db):
                     alerts_generated += 1
 
     return alerts_generated
+
+
+def generate_credit_cutoff_statements(db):
+    """
+    On the cutoff day, snapshot currentBalance as a monthlyStatement.
+    Deduplicates by monthKey. Returns count of statements created.
+    """
+    from datetime import timedelta, timezone as tz
+    import calendar
+
+    mexico_tz = tz(timedelta(hours=-6))
+    now_mx = datetime.now(mexico_tz)
+    today_day = now_mx.day
+    current_month = now_mx.month
+    current_year = now_mx.year
+    last_day = calendar.monthrange(current_year, current_month)[1]
+    month_key = f'{current_year}-{str(current_month).zfill(2)}'
+
+    statements_created = 0
+
+    for bank_doc in db.collection('banks').stream():
+        bank_data = bank_doc.to_dict()
+        ca = bank_data.get('creditAccount')
+        if not ca:
+            continue
+
+        cutoff_day = ca.get('cutoffDay')
+        if not cutoff_day:
+            continue
+
+        effective_cutoff = min(int(cutoff_day), last_day)
+        if today_day != effective_cutoff:
+            continue
+
+        existing_statements = ca.get('monthlyStatements') or []
+        if any(s.get('monthKey') == month_key for s in existing_statements):
+            continue
+
+        statement = {
+            'monthKey': month_key,
+            'closingBalance': ca.get('currentBalance', 0),
+            'creditLimit': ca.get('creditLimit', 0),
+            'cutoffDay': cutoff_day,
+            'createdAt': _now(),
+        }
+        existing_statements.append(statement)
+        db.collection('banks').document(bank_doc.id).update({
+            'creditAccount.monthlyStatements': existing_statements,
+        })
+        statements_created += 1
+
+    return statements_created

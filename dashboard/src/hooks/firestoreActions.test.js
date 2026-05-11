@@ -45,6 +45,7 @@ import {
   deleteVaultEmailAccount,
   createSlotDeletionAlert,
   createScheduledManualAlert,
+  validateSnowballConfig,
 } from './firestoreActions';
 
 function buildSnapshot(data) {
@@ -323,6 +324,39 @@ describe('confirmRecurringExpense', () => {
     const ledgerUpdateCall = mockTransactionUpdate.mock.calls.find(([ref]) => ref.path === 'finance/manual-ledger');
     expect(ledgerUpdateCall).toBeTruthy();
     expect(ledgerUpdateCall[1].entries[0].status).toBe('confirmed');
+  });
+});
+
+describe('validateSnowballConfig', () => {
+  it('rechaza que varias cuentas apunten a la misma cuenta Lank activa', () => {
+    const config = {
+      wallets: {
+        1: { accountId: '1', walletClabe: '646180111111111111', active: true },
+        2: { accountId: '2', walletClabe: '646180222222222222', active: true },
+        3: { accountId: '3', walletClabe: '646180333333333333', active: true },
+      },
+      connections: {
+        a: { fromAccountId: '1', destinationType: 'lank_wallet', toAccountId: '3', destinationClabe: '646180333333333333', active: true },
+        b: { fromAccountId: '2', destinationType: 'lank_wallet', toAccountId: '3', destinationClabe: '646180333333333333', active: true },
+      },
+    };
+
+    expect(() => validateSnowballConfig(config)).toThrow('solo puede recibir una conexión activa');
+  });
+
+  it('rechaza ciclos en conexiones internas activas', () => {
+    const config = {
+      wallets: {
+        1: { accountId: '1', walletClabe: '646180111111111111', active: true },
+        2: { accountId: '2', walletClabe: '646180222222222222', active: true },
+      },
+      connections: {
+        a: { fromAccountId: '1', destinationType: 'lank_wallet', toAccountId: '2', destinationClabe: '646180222222222222', active: true },
+        b: { fromAccountId: '2', destinationType: 'lank_wallet', toAccountId: '1', destinationClabe: '646180111111111111', active: true },
+      },
+    };
+
+    expect(() => validateSnowballConfig(config)).toThrow('ciclo');
   });
 });
 

@@ -200,9 +200,47 @@ def find_first(pattern, text, flags=re.I):
     return normalize_space(m.group(1)) if m else None
 
 
-def parse_event(subject, body, account_id, source, name_aliases=None):
-    kind = subject_kind(subject)
+def extract_clabes(text):
+    """Extract 18-digit CLABE candidates, allowing spaces or dashes between digits."""
+    if not text:
+        return []
+    candidates = []
+    seen = set()
+    for match in re.finditer(r'(?<!\d)(?:\d[\s-]?){18}(?!\d)', text):
+        digits = re.sub(r'\D+', '', match.group(0))
+        if len(digits) == 18 and digits not in seen:
+            candidates.append(digits)
+            seen.add(digits)
+    return candidates
+
+
+def infer_withdrawal_kind(subject, body):
+    exact = subject_kind(subject)
+    if exact != 'unknown':
+        return exact
+
     merged = f'{subject}\n{body}'
+    if not extract_clabes(merged):
+        return exact
+
+    text = merged.lower()
+    has_withdrawal_signal = any(word in text for word in [
+        'retiro', 'retiraste', 'retirar', 'extracción', 'extraccion', 'fondos',
+    ])
+    if not has_withdrawal_signal:
+        return exact
+
+    if any(word in text for word in ['éxito', 'exito', 'completado', 'completada', 'retiraste']):
+        return 'withdrawal_completed'
+    if any(word in text for word in ['procesada', 'proceso', 'solicitud', 'revisión', 'revision']):
+        return 'withdrawal_detected'
+    return 'withdrawal_detected'
+
+
+def parse_event(subject, body, account_id, source, name_aliases=None):
+    kind = infer_withdrawal_kind(subject, body)
+    merged = f'{subject}\n{body}'
+    clabes = extract_clabes(merged)
     event = {
         'kind': kind,
         'source': source,
@@ -219,6 +257,7 @@ def parse_event(subject, body, account_id, source, name_aliases=None):
         'joinDate': parse_embedded_date(body),
         'expectedPaymentDate': parse_payment_due(body),
         'notes': [],
+        'clabes': clabes,
     }
 
     # Construir alternancia de nombres de servicio para regex
@@ -285,17 +324,17 @@ def parse_event(subject, body, account_id, source, name_aliases=None):
     elif kind == 'payment_cashback':
         event['status'] = 'acreditado'
         event['action'] = 'registrar ingreso cashback'
-    elif kind == 'withdrawal_requested':
-        event['amount'] = find_first(r'Monto:\s*([0-9]+(?:\.[0-9]+)?)', body)
+    elif kind in {'withdrawal_requested', 'withdrawal_detected'}:
+        event['amount'] = find_first(r'Monto:\s*([0-9,]+(?:\.[0-9]+)?)', body)
         event['accountType'] = find_first(r'Tipo de cuenta:\s*([^\n]+)', body)
-        event['accountNumber'] = find_first(r'Cuenta o numero tarjeta:\s*([0-9]+)', body)
+        event['accountNumber'] = find_first(r'Cuenta o numero tarjeta:\s*([0-9]+)', body) or (clabes[0] if clabes else None)
         event['bank'] = _clean_bank(find_first(r'Banco:\s*([^\n]+)', body))
-        event['status'] = 'en proceso'
-        event['action'] = 'esperar confirmación'
+        event['status'] = 'en proceso' if kind == 'withdrawal_requested' else 'pendiente revisión'
+        event['action'] = 'esperar confirmación' if kind == 'withdrawal_requested' else 'clasificar retiro por CLABE'
     elif kind == 'withdrawal_completed':
-        event['amount'] = find_first(r'Monto:\s*([0-9]+(?:\.[0-9]+)?)', body)
+        event['amount'] = find_first(r'Monto:\s*([0-9,]+(?:\.[0-9]+)?)', body)
         event['accountType'] = find_first(r'Tipo de cuenta:\s*([^\n]+)', body)
-        event['accountNumber'] = find_first(r'Cuenta o numero tarjeta:\s*([0-9]+)', body)
+        event['accountNumber'] = find_first(r'Cuenta o numero tarjeta:\s*([0-9]+)', body) or (clabes[0] if clabes else None)
         event['bank'] = _clean_bank(find_first(r'Banco:\s*([^\n]+)', body))
         event['status'] = 'completado'
         event['action'] = 'registrar retiro'

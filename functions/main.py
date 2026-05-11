@@ -36,7 +36,7 @@ LANK_FROM = '***REMOVED***'
 IGNORED_EVENT_KINDS = {'payment_user', 'payment_cashback', 'monthly_summary', 'cashback_validated', 'unknown'}
 JOIN_EVENT_KINDS = {'user_join_direct', 'user_join_transferred'}
 LEAVE_EVENT_KINDS = {'user_left_self', 'user_left_transferred'}
-WITHDRAWAL_EVENT_KINDS = {'withdrawal_requested', 'withdrawal_completed'}
+WITHDRAWAL_EVENT_KINDS = {'withdrawal_requested', 'withdrawal_completed', 'withdrawal_detected'}
 ROUTINE_INFO_EVENT_KINDS = {'group_validated', 'cashback_validated', 'monthly_summary'}
 # Servicios donde altas/bajas de usuarios no requieren acción administrativa
 # (no hay cuentas reales que gestionar, solo se monitorean renovaciones)
@@ -309,6 +309,31 @@ def load_schedule_config(db):
     return {'enabled': False, 'frequencyHours': 6}
 
 
+def load_snowball_config(db):
+    """Load Snowball wallet/connection config from Firestore config/snowball."""
+    try:
+        doc = db.document('config/snowball').get()
+        if doc.exists:
+            data = doc.to_dict() or {}
+            return {
+                'wallets': data.get('wallets') or {},
+                'connections': data.get('connections') or {},
+            }
+    except Exception:
+        pass
+    return {'wallets': {}, 'connections': {}}
+
+
+def load_known_bank_accounts(db):
+    try:
+        banks_doc = db.document('config/bank-accounts').get()
+        if banks_doc.exists:
+            return banks_doc.to_dict().get('accounts', [])
+    except Exception:
+        pass
+    return []
+
+
 def load_system_flags(db):
     doc = db.document('config/system-flags').get()
     if doc.exists:
@@ -393,6 +418,104 @@ def match_user(account_context, user_name, user_email):
 
 # ─────────────────────── EVENT CLASSIFICATION ───────────────────────
 
+def _normalize_clabe(value):
+    digits = core.normalize_account_number(value)
+    return digits if digits and len(digits) == 18 else None
+
+
+def _event_destination_clabe(event):
+    for candidate in event.get('clabes') or []:
+        clabe = _normalize_clabe(candidate)
+        if clabe:
+            return clabe
+    return _normalize_clabe(event.get('accountNumber'))
+
+
+def _match_known_bank_by_clabe(clabe, known_banks):
+    if not clabe:
+        return None
+    for kb in known_banks or []:
+        kb_digits = _normalize_clabe(kb.get('clabe') or kb.get('accountNumber'))
+        if kb_digits == clabe:
+            return kb
+    return None
+
+
+def resolve_withdrawal_destination(event, db=None, snowball_config=None, known_banks=None):
+    """Classify withdrawal destination as internal Snowball, external bank, or unclassified."""
+    clabe = _event_destination_clabe(event)
+    if clabe:
+        event['destinationClabe'] = clabe
+
+    if not clabe:
+        event['movementType'] = 'unknown_destination'
+        event['classificationStatus'] = 'missing_clabe'
+        return {'movementType': 'unknown_destination', 'classificationStatus': 'missing_clabe'}
+
+    if snowball_config is None and db is not None:
+        snowball_config = load_snowball_config(db)
+    snowball_config = snowball_config or {'wallets': {}, 'connections': {}}
+
+    wallets = snowball_config.get('wallets') or {}
+    for wallet_key, wallet in wallets.items():
+        wallet_clabe = _normalize_clabe(wallet.get('walletClabe') or wallet.get('clabe'))
+        if wallet.get('active') is False:
+            continue
+        if wallet_clabe != clabe:
+            continue
+
+        from_account = str(event.get('accountId') or '').strip()
+        connection_match = None
+        for connection_key, connection in (snowball_config.get('connections') or {}).items():
+            if connection.get('active') is False:
+                continue
+            if connection.get('destinationType') != 'lank_wallet':
+                continue
+            if str(connection.get('fromAccountId') or '').strip() != from_account:
+                continue
+            if _normalize_clabe(connection.get('destinationClabe')) != clabe:
+                continue
+            connection_match = {**connection, 'id': connection.get('id') or connection_key}
+            break
+
+        destination_account_id = str(wallet.get('accountId') or wallet_key)
+        event.update({
+            'movementType': 'snowball_internal',
+            'classificationStatus': 'classified',
+            'destinationAccountId': destination_account_id,
+            'snowballConnectionId': connection_match.get('id') if connection_match else None,
+        })
+        return {
+            'movementType': 'snowball_internal',
+            'classificationStatus': 'classified',
+            'destinationAccountId': destination_account_id,
+            'snowballConnectionId': event.get('snowballConnectionId'),
+        }
+
+    if known_banks is None and db is not None:
+        known_banks = load_known_bank_accounts(db)
+    known_bank = _match_known_bank_by_clabe(clabe, known_banks or [])
+    if known_bank:
+        event.update({
+            'movementType': 'external_bank',
+            'classificationStatus': 'classified',
+            'knownBankAccount': known_bank,
+            'destinationBankId': known_bank.get('bankId') or known_bank.get('id') or known_bank.get('bank'),
+        })
+        return {
+            'movementType': 'external_bank',
+            'classificationStatus': 'classified',
+            'knownBankAccount': known_bank,
+            'destinationBankId': event.get('destinationBankId'),
+        }
+
+    event.update({
+        'movementType': 'unclassified_clabe',
+        'classificationStatus': 'pending_review',
+    })
+    return {'movementType': 'unclassified_clabe', 'classificationStatus': 'pending_review'}
+
+
 def classify_event(event, db_context, db=None):
     service = core.canonical_subscription(event.get('subscription')) or event.get('subscription')
     kind = event.get('kind')
@@ -401,20 +524,39 @@ def classify_event(event, db_context, db=None):
         'dbGroupStatus': None, 'matchStatus': None, 'matchesCurrent': [], 'matchesStale': [],
     }
 
-    if kind in {'withdrawal_requested', 'withdrawal_completed'}:
+    if kind in WITHDRAWAL_EVENT_KINDS:
         amount = core.parse_amount(event.get('amount'))
         bank = event.get('bank') or 'banco no informado'
-        account_number = event.get('accountNumber') or 'cuenta no informada'
+        account_number = event.get('destinationClabe') or event.get('accountNumber') or 'cuenta no informada'
+        destination = resolve_withdrawal_destination(event, db=db)
+        if destination['movementType'] == 'snowball_internal':
+            review['category'] = 'info' if kind == 'withdrawal_completed' else 'pending'
+            review['action'] = 'transferencia interna Snowball'
+            review['reason'] = f'transferencia interna Snowball por ${amount or event.get("amount") or "?"} hacia Lank #{destination.get("destinationAccountId")}'
+            review['matchStatus'] = 'snowball_internal'
+            return review
+        if destination['movementType'] == 'unclassified_clabe':
+            review['category'] = 'review'
+            review['action'] = 'clasificar CLABE de retiro'
+            review['reason'] = f'CLABE no clasificada en Snowball ni bancos externos: {account_number}'
+            review['matchStatus'] = 'unclassified_clabe'
+            return review
+        if kind == 'withdrawal_detected':
+            review['category'] = 'review'
+            review['action'] = 'revisar retiro detectado por CLABE'
+            review['reason'] = f'retiro detectado por ${amount or event.get("amount") or "?"} hacia {bank} / {account_number}'
+            review['matchStatus'] = destination.get('movementType') or 'detected'
+            return review
         if kind == 'withdrawal_requested':
             review['category'] = 'pending'
             review['action'] = 'esperar confirmación del retiro'
             review['reason'] = f'retiro solicitado por ${amount or event.get("amount") or "?"} hacia {bank} / {account_number}'
-            review['matchStatus'] = 'awaiting_completion'
+            review['matchStatus'] = destination.get('movementType') or 'awaiting_completion'
         else:
             review['category'] = 'info'
             review['action'] = 'retiro confirmado'
             review['reason'] = f'retiro completado por ${amount or event.get("amount") or "?"} hacia {bank} / {account_number}'
-            review['matchStatus'] = 'completed'
+            review['matchStatus'] = destination.get('movementType') or 'completed'
         return review
 
     if kind in IGNORED_EVENT_KINDS:
@@ -1094,6 +1236,9 @@ def update_finance_from_analysis(db, ok_accounts):
             month_idx = email_dt.month - 1
             month_name = MONTH_NAMES_EN[month_idx]
 
+            destination = resolve_withdrawal_destination(evt, db=db)
+            destination_clabe = evt.get('destinationClabe') or evt.get('accountNumber')
+
             withdrawal_events.append({
                 'kind': kind,
                 'accountId': a_id,
@@ -1101,7 +1246,13 @@ def update_finance_from_analysis(db, ok_accounts):
                 'amount': amount,
                 'bank': (evt.get('bank') or '').strip()[:30] or None,
                 'accountType': evt.get('accountType'),
-                'accountNumber': evt.get('accountNumber'),
+                'accountNumber': destination_clabe,
+                'destinationClabe': evt.get('destinationClabe'),
+                'movementType': destination.get('movementType') or evt.get('movementType'),
+                'classificationStatus': destination.get('classificationStatus') or evt.get('classificationStatus'),
+                'snowballConnectionId': destination.get('snowballConnectionId') or evt.get('snowballConnectionId'),
+                'destinationAccountId': destination.get('destinationAccountId') or evt.get('destinationAccountId'),
+                'destinationBankId': destination.get('destinationBankId') or evt.get('destinationBankId'),
                 'emailDate': email_dt.isoformat(),
                 'monthName': month_name,
                 'monthKey': f'{email_dt.year}-{str(email_dt.month).zfill(2)}',
@@ -1113,13 +1264,7 @@ def update_finance_from_analysis(db, ok_accounts):
         return 0
 
     # Load known bank accounts for enrichment
-    known_banks = []
-    try:
-        banks_doc = db.document('config/bank-accounts').get()
-        if banks_doc.exists:
-            known_banks = banks_doc.to_dict().get('accounts', [])
-    except Exception:
-        pass
+    known_banks = load_known_bank_accounts(db)
 
     def match_known_bank(account_number):
         if not account_number:
@@ -1141,7 +1286,15 @@ def update_finance_from_analysis(db, ok_accounts):
         record_ref = db.document(f'{parent_path}/records/{we["withdrawalId"]}')
         existing = record_ref.get()
 
-        known = match_known_bank(we.get('accountNumber'))
+        known = match_known_bank(we.get('accountNumber')) if we.get('movementType') == 'external_bank' else None
+        base_payload = {
+            'movementType': we.get('movementType') or 'unknown_destination',
+            'classificationStatus': we.get('classificationStatus') or 'pending_review',
+            'destinationClabe': we.get('destinationClabe') or we.get('accountNumber'),
+            'snowballConnectionId': we.get('snowballConnectionId'),
+            'destinationAccountId': we.get('destinationAccountId'),
+            'destinationBankId': we.get('destinationBankId'),
+        }
 
         if we['kind'] == 'withdrawal_requested':
             if existing.exists:
@@ -1161,6 +1314,7 @@ def update_finance_from_analysis(db, ok_accounts):
                 'status': 'requested',
                 'createdBy': 'cloud_function',
                 'createdAt': now.isoformat(),
+                **base_payload,
             })
             records_written += 1
             months_affected.add(we['monthKey'])
@@ -1175,6 +1329,7 @@ def update_finance_from_analysis(db, ok_accounts):
                     'completedAt': we['emailDate'],
                     'status': 'completed',
                     'updatedAt': now.isoformat(),
+                    **base_payload,
                 })
             else:
                 # Try to find a matching pending record to upgrade
@@ -1190,6 +1345,7 @@ def update_finance_from_analysis(db, ok_accounts):
                             'completedAt': we['emailDate'],
                             'status': 'completed',
                             'updatedAt': now.isoformat(),
+                            **base_payload,
                         })
                         matched = True
                         break
@@ -1212,8 +1368,31 @@ def update_finance_from_analysis(db, ok_accounts):
                         'status': 'completed',
                         'createdBy': 'cloud_function',
                         'createdAt': now.isoformat(),
+                        **base_payload,
                     })
 
+            records_written += 1
+            months_affected.add(we['monthKey'])
+
+        elif we['kind'] == 'withdrawal_detected':
+            if existing.exists:
+                continue
+            record_ref.set({
+                'withdrawalId': we['withdrawalId'],
+                'accountId': we['accountId'],
+                'accountAlias': we['accountAlias'],
+                'requestedAt': we['emailDate'],
+                'completedAt': None,
+                'amount': we['amount'],
+                'bank': we['bank'],
+                'accountType': we['accountType'],
+                'accountNumber': we['accountNumber'],
+                'knownBankAccount': known,
+                'status': 'review',
+                'createdBy': 'cloud_function',
+                'createdAt': now.isoformat(),
+                **base_payload,
+            })
             records_written += 1
             months_affected.add(we['monthKey'])
 
@@ -1231,12 +1410,25 @@ def _recalculate_overview_totals(db, month_name, month_key):
         total_completed_gross = 0.0
         pending_count = 0
         completed_count = 0
+        snowball_internal_gross = 0.0
+        snowball_internal_count = 0
+        unclassified_gross = 0.0
+        unclassified_count = 0
 
         records = db.collection(f'finance/withdrawals-{month_name}/records').stream()
         for rec in records:
             rd = rec.to_dict()
             amount = float(rd.get('amount') or 0)
             status = rd.get('status', '')
+            movement_type = rd.get('movementType') or 'external_bank'
+            if movement_type == 'snowball_internal':
+                snowball_internal_gross += amount
+                snowball_internal_count += 1
+                continue
+            if movement_type == 'unclassified_clabe':
+                unclassified_gross += amount
+                unclassified_count += 1
+                continue
             # Every withdrawal (requested or completed) contributes to requestedGross
             total_requested_gross += amount
             if status == 'completed':
@@ -1266,6 +1458,10 @@ def _recalculate_overview_totals(db, month_name, month_key):
             'estimatedNetWallet': round(wallet_credits - manual_expenses - manual_investments, 2),
             'pendingWithdrawals': pending_count,
             'completedWithdrawals': completed_count,
+            'snowballInternalGross': round(snowball_internal_gross, 2),
+            'snowballInternalTransfers': snowball_internal_count,
+            'unclassifiedClabeGross': round(unclassified_gross, 2),
+            'unclassifiedClabeWithdrawals': unclassified_count,
         }
 
         # Usar update() para SOLO modificar totals, sin tocar months, access, notes, etc.
@@ -2323,6 +2519,11 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
     if credit_alert_count > 0:
         print(f'Credit alerts generated: {credit_alert_count}')
         alerts_generated += credit_alert_count
+
+    # Snapshot automático de saldo al día de corte
+    cutoff_statements = lank_alerts.generate_credit_cutoff_statements(db)
+    if cutoff_statements > 0:
+        print(f'Credit cutoff statements created: {cutoff_statements}')
 
     # Alertas de recarga de SIM Cards (7 días antes del 15 de cada mes)
     sim_alert_count = lank_alerts.generate_sim_recharge_alerts(db)
