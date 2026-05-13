@@ -337,7 +337,7 @@ class FakeDb:
         return batch
 
 
-def test_save_notifications_enriches_service_user_and_trace_fields_from_raw_mail():
+def test_save_notifications_keeps_raw_mail_trace_without_operational_parse_fields():
     db = FakeDb()
 
     main.save_notifications(
@@ -352,21 +352,16 @@ def test_save_notifications_enriches_service_user_and_trace_fields_from_raw_mail
             "messageId": "<msg-201>",
         }],
         analysis_timestamp="2026-05-10T20:05:00+00:00",
-        services_config={
-            "youtube": {
-                "name": "YouTube Premium",
-                "active": True,
-                "nameAliases": ["YouTube", "YouTube Premium"],
-            },
-        },
     )
 
     item = db.documents["notifications/2"]["items"][0]
     assert item["messageId"] == "<msg-201>"
-    assert item["parsedService"] == "YouTube Premium"
-    assert item["parsedUserAlias"] == "Kytzia1"
-    assert item["parseConfidence"] == "high"
-    assert item["parseNotes"] == []
+    assert item["subject"] == "Un usuario ha dejado tu grupo"
+    assert item["bodySnippet"] == "El usuario Kytzia1 ha dejado el grupo de YouTube."
+    assert "parsedService" not in item
+    assert "parsedUserAlias" not in item
+    assert "parseConfidence" not in item
+    assert "parseNotes" not in item
 
 
 def test_telegram_webhook_does_not_auto_register_without_explicit_flag(monkeypatch):
