@@ -1790,8 +1790,8 @@ body {
   font-size: 13px;
 }
 .snowball-node {
-  min-width: 190px;
-  max-width: 240px;
+  min-width: 220px;
+  max-width: 280px;
   min-height: 74px;
   border: 1px solid var(--border-primary);
   border-radius: 8px;
@@ -1815,6 +1815,88 @@ body {
 .snowball-node.terminal {
   border-color: var(--accent-success);
   background: rgba(16,185,129,0.08);
+}
+.snowball-account-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.snowball-account-identity.compact { gap: 8px; }
+.snowball-account-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: 0 0 auto;
+  border: 2px solid var(--border-accent);
+  background: var(--bg-card);
+}
+.snowball-account-identity.compact .snowball-account-avatar {
+  width: 34px;
+  height: 34px;
+}
+.snowball-account-avatar.fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+.snowball-account-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.snowball-account-copy strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.snowball-account-copy strong span {
+  color: var(--accent-primary);
+  font-size: 12px;
+}
+.snowball-account-copy > span {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.snowball-account-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
+}
+.snowball-account-option {
+  width: 100%;
+  min-height: 58px;
+  text-align: left;
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  background: var(--bg-input);
+  padding: 9px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
+}
+.snowball-account-option:hover {
+  border-color: var(--accent-primary);
+  background: rgba(59,130,246,0.08);
+}
+.snowball-account-option.selected {
+  border-color: var(--accent-success);
+  background: rgba(16,185,129,0.1);
+}
+.snowball-option-empty {
+  border: 1px dashed var(--border-primary);
+  border-radius: 8px;
+  padding: 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+  background: var(--bg-input);
 }
 .snowball-grid {
   display: grid;
@@ -1861,6 +1943,7 @@ body {
   .snowball-section { padding: 14px; }
   .snowball-section-header { flex-direction: column; align-items: stretch; }
   .snowball-node { min-width: 170px; }
+  .snowball-account-options { grid-template-columns: 1fr; }
 }
 
 /* ═══ Finance: Bank Accordion ═══ */
