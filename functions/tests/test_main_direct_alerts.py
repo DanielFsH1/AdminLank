@@ -337,6 +337,38 @@ class FakeDb:
         return batch
 
 
+def test_save_notifications_enriches_service_user_and_trace_fields_from_raw_mail():
+    db = FakeDb()
+
+    main.save_notifications(
+        db,
+        2,
+        "Silva Herrera",
+        [{
+            "uid": 201,
+            "date": "Sun, 10 May 2026 20:00:00 +0000",
+            "subject": "Un usuario ha dejado tu grupo",
+            "bodySnippet": "El usuario Kytzia1 ha dejado el grupo de YouTube.",
+            "messageId": "<msg-201>",
+        }],
+        analysis_timestamp="2026-05-10T20:05:00+00:00",
+        services_config={
+            "youtube": {
+                "name": "YouTube Premium",
+                "active": True,
+                "nameAliases": ["YouTube", "YouTube Premium"],
+            },
+        },
+    )
+
+    item = db.documents["notifications/2"]["items"][0]
+    assert item["messageId"] == "<msg-201>"
+    assert item["parsedService"] == "YouTube Premium"
+    assert item["parsedUserAlias"] == "Kytzia1"
+    assert item["parseConfidence"] == "high"
+    assert item["parseNotes"] == []
+
+
 def test_telegram_webhook_does_not_auto_register_without_explicit_flag(monkeypatch):
     db = FakeDb(documents={"config/telegram-settings": {"botToken": "telegram-token", "enabled": True}})
     sent_messages = []
