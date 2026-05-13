@@ -92,8 +92,8 @@ function formatScheduledDate(value) {
 }
 
 export default function Alerts({ onNavigate, navData }) {
- const { data: alerts, loading } = useCollection('alerts');
- const { data: scheduledAlerts = [], loading: scheduledLoading } = useCollection('scheduled-alerts');
+ const { data: alerts, loading } = useCollection('alerts', { realtime: true });
+ const { data: scheduledAlerts = [], loading: scheduledLoading } = useCollection('scheduled-alerts', { realtime: true });
  const [activeTab, setActiveTab] = useState('pending');
  const [filterPriority, setFilterPriority] = useState('all');
  const [searchQuery, setSearchQuery] = useState('');

@@ -43,8 +43,8 @@ function buildLegacyManualEntryIdentifier(entry) {
 }
 
 export default function Finance() {
- const { data: overview, loading: loadingOverview, error: errorOverview } = useDocument('finance', 'overview');
- const { data: ledger, loading: loadingLedger } = useDocument('finance', 'manual-ledger');
+ const { data: overview, loading: loadingOverview, error: errorOverview } = useDocument('finance', 'overview', { realtime: true });
+ const { data: ledger, loading: loadingLedger } = useDocument('finance', 'manual-ledger', { realtime: true });
  const [withdrawals, setWithdrawals] = useState([]);
  const [wTab, setWTab] = useState('all');
  const [withdrawalsCollapsed, setWithdrawalsCollapsed] = useState(true); // colapsado por defecto en móvil
