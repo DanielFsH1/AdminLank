@@ -1932,6 +1932,10 @@ body {
   background: rgba(16,185,129,0.1);
   padding: 12px;
 }
+.snowball-selected-account.bank {
+  border-color: var(--bank-color, var(--accent-success));
+  background: color-mix(in srgb, var(--bank-color, var(--accent-success)) 12%, var(--bg-card));
+}
 .snowball-change-btn {
   border: 1px solid var(--border-primary);
   border-radius: 8px;
