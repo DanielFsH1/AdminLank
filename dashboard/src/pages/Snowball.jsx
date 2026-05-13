@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useCollection, useDocument } from '../hooks/useFirestore';
 import { saveSnowballConfig, normalizeClabe } from '../hooks/firestoreActions';
+import { getProfileImage } from '../config/services';
+import { buildSnowballAccountOptions } from '../utils/snowballAvailability';
 import { BankIcon, CheckCircleIcon, EditIcon, LinkIcon, PlusIcon, SaveIcon, ToggleOffIcon, ToggleOnIcon, TrashIcon, WarningIcon } from '../components/Icons';
 
 const EMPTY_CONFIG = { wallets: {}, connections: {} };
@@ -8,6 +10,59 @@ const EMPTY_CONFIG = { wallets: {}, connections: {} };
 function accountLabel(account) {
   if (!account) return 'Cuenta no encontrada';
   return `#${account.id} ${account.canonicalAlias || account.fullName || account.email || 'Cuenta Lank'}`;
+}
+
+function accountName(account) {
+  if (!account) return 'Cuenta no encontrada';
+  return account.canonicalAlias || account.fullName || account.email || 'Cuenta Lank';
+}
+
+function AccountIdentity({ account, detail, compact = false }) {
+  if (!account) {
+    return (
+      <div className={`snowball-account-identity ${compact ? 'compact' : ''} missing`}>
+        <div className="snowball-account-avatar fallback">?</div>
+        <div className="snowball-account-copy">
+          <strong>Cuenta no encontrada</strong>
+          {detail && <span>{detail}</span>}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className={`snowball-account-identity ${compact ? 'compact' : ''}`}>
+      <img
+        src={getProfileImage(account.id)}
+        className="snowball-account-avatar"
+        alt=""
+        onError={event => { event.currentTarget.style.display = 'none'; }}
+      />
+      <div className="snowball-account-copy">
+        <strong><span>#{account.id}</span> {accountName(account)}</strong>
+        {detail && <span>{detail}</span>}
+      </div>
+    </div>
+  );
+}
+
+function AccountOptionGrid({ accounts, selectedId, onSelect, emptyText }) {
+  if (!accounts.length) {
+    return <div className="snowball-option-empty">{emptyText}</div>;
+  }
+  return (
+    <div className="snowball-account-options">
+      {accounts.map(account => (
+        <button
+          type="button"
+          key={account.id}
+          className={`snowball-account-option ${String(selectedId || '') === String(account.id) ? 'selected' : ''}`}
+          onClick={() => onSelect(account.id)}
+        >
+          <AccountIdentity account={account} detail="Disponible" compact />
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function activeConnections(config) {
@@ -41,6 +96,7 @@ function buildChains(config, accountById, bankById) {
       nodes.push({
         type: 'account',
         accountId: current,
+        account: accountById.get(String(current)),
         label: accountLabel(accountById.get(String(current))),
         walletClabe: config.wallets?.[current]?.walletClabe || '',
       });
@@ -116,6 +172,16 @@ export default function Snowball() {
   const connections = useMemo(() => Object.entries(config.connections || {}).map(([id, c]) => ({ id, ...c })), [config]);
   const chains = useMemo(() => buildChains(config, accountById, bankById), [config, accountById, bankById]);
   const activeCount = connections.filter(connection => connection.active !== false).length;
+  const connectionAccountOptions = useMemo(() => {
+    if (!connectionModal) return null;
+    return buildSnowballAccountOptions({
+      accounts,
+      config,
+      editingConnection: connectionModal.id ? connectionModal : null,
+      fromAccountId: connectionModal.fromAccountId,
+      destinationType: connectionModal.destinationType || 'lank_wallet',
+    });
+  }, [accounts, config, connectionModal]);
 
   async function persist(nextConfig, description) {
     setSaving(true);
@@ -275,8 +341,10 @@ export default function Snowball() {
                   <div className="snowball-chain-part" key={`${chain.start}-${node.accountId}`}>
                     {index > 0 && <div className="snowball-arrow">-&gt;</div>}
                     <div className="snowball-node">
-                      <strong>{node.label}</strong>
-                      <span>{node.walletClabe || 'CLABE interna pendiente'}</span>
+                      <AccountIdentity
+                        account={node.account}
+                        detail={node.walletClabe || 'CLABE interna pendiente'}
+                      />
                     </div>
                   </div>
                 ))}
@@ -314,7 +382,13 @@ export default function Snowball() {
                   const wallet = config.wallets?.[account.id];
                   return (
                     <tr key={account.id}>
-                      <td>{accountLabel(account)}</td>
+                      <td>
+                        <AccountIdentity
+                          account={account}
+                          detail={wallet?.walletClabe ? 'Billetera configurada' : 'Sin CLABE interna'}
+                          compact
+                        />
+                      </td>
                       <td>{wallet?.walletClabe || 'Sin CLABE'}</td>
                       <td>{wallet?.active === false ? 'Inactiva' : wallet?.walletClabe ? 'Activa' : 'Pendiente'}</td>
                       <td>
@@ -350,8 +424,14 @@ export default function Snowball() {
                     : bankById.get(connection.destinationBankId);
                   return (
                     <tr key={connection.id}>
-                      <td>{accountLabel(from)}</td>
-                      <td>{connection.destinationType === 'lank_wallet' ? accountLabel(to) : to?.name || 'Banco externo'}</td>
+                      <td><AccountIdentity account={from} detail="Salida Snowball" compact /></td>
+                      <td>
+                        {connection.destinationType === 'lank_wallet' ? (
+                          <AccountIdentity account={to} detail="Entrada interna" compact />
+                        ) : (
+                          to?.name || 'Banco externo'
+                        )}
+                      </td>
                       <td>{connection.destinationClabe || 'Sin CLABE'}</td>
                       <td>{connection.active === false ? 'Inactiva' : 'Activa'}</td>
                       <td className="snowball-actions">
@@ -396,13 +476,19 @@ export default function Snowball() {
 
       {connectionModal && (
         <SnowballModal title="Conexión Snowball" onClose={() => setConnectionModal(null)} onSave={saveConnection} saving={saving}>
-          <label className="edit-modal-field">
+          <div className="edit-modal-field">
             <span className="edit-modal-label">Cuenta origen</span>
-            <select className="edit-modal-input" value={connectionModal.fromAccountId || ''} onChange={event => setConnectionModal(p => ({ ...p, fromAccountId: event.target.value }))}>
-              <option value="">Seleccionar cuenta</option>
-              {accounts.map(account => <option key={account.id} value={account.id}>{accountLabel(account)}</option>)}
-            </select>
-          </label>
+            <AccountOptionGrid
+              accounts={connectionAccountOptions?.originAccounts || []}
+              selectedId={connectionModal.fromAccountId}
+              emptyText="No hay cuentas disponibles como salida."
+              onSelect={(accountId) => setConnectionModal((previous) => ({
+                ...previous,
+                fromAccountId: accountId,
+                toAccountId: String(previous.toAccountId || '') === String(accountId) ? '' : previous.toAccountId,
+              }))}
+            />
+          </div>
           <label className="edit-modal-field">
             <span className="edit-modal-label">Tipo de destino</span>
             <select className="edit-modal-input" value={connectionModal.destinationType || 'lank_wallet'} onChange={event => setConnectionModal(p => ({ ...p, destinationType: event.target.value, toAccountId: '', destinationBankId: '' }))}>
@@ -411,13 +497,15 @@ export default function Snowball() {
             </select>
           </label>
           {(connectionModal.destinationType || 'lank_wallet') === 'lank_wallet' ? (
-            <label className="edit-modal-field">
+            <div className="edit-modal-field">
               <span className="edit-modal-label">Cuenta destino</span>
-              <select className="edit-modal-input" value={connectionModal.toAccountId || ''} onChange={event => setConnectionModal(p => ({ ...p, toAccountId: event.target.value }))}>
-                <option value="">Seleccionar cuenta destino</option>
-                {accounts.map(account => <option key={account.id} value={account.id}>{accountLabel(account)}</option>)}
-              </select>
-            </label>
+              <AccountOptionGrid
+                accounts={connectionAccountOptions?.destinationAccounts || []}
+                selectedId={connectionModal.toAccountId}
+                emptyText="No hay cuentas disponibles como entrada interna."
+                onSelect={(accountId) => setConnectionModal(previous => ({ ...previous, toAccountId: accountId }))}
+              />
+            </div>
           ) : (
             <label className="edit-modal-field">
               <span className="edit-modal-label">Banco externo final</span>
