@@ -34,9 +34,11 @@ app = initialize_app()
 
 LANK_FROM = '***REMOVED***'
 IGNORED_EVENT_KINDS = {'payment_user', 'payment_cashback', 'monthly_summary', 'cashback_validated', 'unknown'}
+ADMINBOT_REVIEW_FINANCE_EVENT_KINDS = {'payment_user', 'payment_cashback'}
 JOIN_EVENT_KINDS = {'user_join_direct', 'user_join_transferred'}
 LEAVE_EVENT_KINDS = {'user_left_self', 'user_left_transferred'}
 WITHDRAWAL_EVENT_KINDS = {'withdrawal_requested', 'withdrawal_completed', 'withdrawal_detected'}
+FINANCE_EVENT_KINDS = WITHDRAWAL_EVENT_KINDS | ADMINBOT_REVIEW_FINANCE_EVENT_KINDS
 ROUTINE_INFO_EVENT_KINDS = {'group_validated', 'cashback_validated', 'monthly_summary'}
 # Servicios donde altas/bajas de usuarios no requieren acción administrativa
 # (no hay cuentas reales que gestionar, solo se monitorean renovaciones)
@@ -964,7 +966,11 @@ def analyze_account(account, rates, days, db_context, db, last_uid=None, service
                 event['amount'] = amt
 
             review = classify_event(event, db_context, db)
-            if review['category'] == 'ignore' and event.get('kind') in IGNORED_EVENT_KINDS:
+            if (
+                review['category'] == 'ignore'
+                and event.get('kind') in IGNORED_EVENT_KINDS
+                and event.get('kind') not in ADMINBOT_REVIEW_FINANCE_EVENT_KINDS
+            ):
                 continue
 
             dedupe_key = message_id or '|'.join([
@@ -1655,6 +1661,178 @@ def analysis_totals(ok_accounts):
     }
 
 
+def _raw_email_by_uid(account):
+    return {
+        str(raw.get('uid')): raw
+        for raw in account.get('rawEmails', [])
+        if raw.get('uid') is not None
+    }
+
+
+def _event_uid(row):
+    return row.get('uid') or row.get('event', {}).get('uid')
+
+
+def _finance_action_for_event(event):
+    kind = event.get('kind')
+    if kind in {'payment_user', 'payment_cashback'}:
+        return 'review_and_register_deposit'
+    if kind == 'withdrawal_requested':
+        if event.get('movementType') == 'unclassified_clabe':
+            return 'review_unclassified_withdrawal_clabe'
+        return 'watch_withdrawal_until_completed'
+    if kind == 'withdrawal_completed':
+        if event.get('movementType') == 'unclassified_clabe':
+            return 'review_unclassified_withdrawal_clabe'
+        return 'verify_withdrawal_record'
+    if kind == 'withdrawal_detected':
+        return 'review_withdrawal_email'
+    return 'review_finance_event'
+
+
+def _build_finance_work_item(account, row, raw_email):
+    event = row.get('event', {})
+    kind = event.get('kind')
+    amount = core.parse_amount(event.get('amount'))
+    item = {
+        'kind': kind,
+        'accountId': account.get('accountId'),
+        'accountAlias': account.get('accountAlias', ''),
+        'uid': _event_uid(row),
+        'messageId': row.get('messageId') or (raw_email or {}).get('messageId'),
+        'subject': row.get('subject') or (raw_email or {}).get('subject'),
+        'amount': amount if amount is not None else event.get('amount'),
+        'action': _finance_action_for_event(event),
+        'rawEmail': raw_email or {},
+        'event': {
+            'kind': kind,
+            'amount': event.get('amount'),
+            'accountNumber': event.get('accountNumber'),
+            'destinationClabe': event.get('destinationClabe'),
+            'movementType': event.get('movementType'),
+            'classificationStatus': event.get('classificationStatus'),
+            'knownBankAccount': event.get('knownBankAccount'),
+            'destinationAccountId': event.get('destinationAccountId'),
+            'destinationBankId': event.get('destinationBankId'),
+            'snowballConnectionId': event.get('snowballConnectionId'),
+            'action': event.get('action'),
+        },
+    }
+    return item
+
+
+def build_adminbot_domain_summary(ok_accounts, finance_records=0, alerts_generated=0):
+    membership_items = []
+    finance_items = []
+    unknown_items = []
+    accounts_summary = {}
+
+    for account in ok_accounts or []:
+        account_id = str(account.get('accountId'))
+        raw_by_uid = _raw_email_by_uid(account)
+        account_domains = set()
+        account_membership = 0
+        account_finance = 0
+        account_unknown = 0
+
+        for row in account.get('events', []):
+            event = row.get('event', {})
+            kind = event.get('kind')
+            uid = _event_uid(row)
+            raw_email = raw_by_uid.get(str(uid), {})
+
+            if kind in FINANCE_EVENT_KINDS:
+                account_domains.add('finance')
+                account_finance += 1
+                finance_items.append(_build_finance_work_item(account, row, raw_email))
+            elif kind in JOIN_EVENT_KINDS | LEAVE_EVENT_KINDS | {'group_deactivated', 'group_validated'}:
+                account_domains.add('membership')
+                account_membership += 1
+                membership_items.append({
+                    'kind': kind,
+                    'accountId': account.get('accountId'),
+                    'accountAlias': account.get('accountAlias', ''),
+                    'uid': uid,
+                    'service': row.get('dbReview', {}).get('service') or event.get('subscription'),
+                    'userAlias': event.get('userName'),
+                    'action': row.get('dbReview', {}).get('action') or event.get('action'),
+                    'subject': row.get('subject') or raw_email.get('subject'),
+                })
+            elif kind == 'unknown':
+                account_domains.add('unknown')
+                account_unknown += 1
+                unknown_items.append({
+                    'kind': kind,
+                    'accountId': account.get('accountId'),
+                    'accountAlias': account.get('accountAlias', ''),
+                    'uid': uid,
+                    'subject': row.get('subject') or raw_email.get('subject'),
+                    'rawEmail': raw_email,
+                })
+
+        if account.get('rawEmails') and account_finance and not account_membership:
+            message = 'Hubo movimiento financiero; no hubo cambios de membresía.'
+        elif account.get('rawEmails') and account_membership:
+            message = 'Hubo novedad de membresía/grupos.'
+        elif account.get('rawEmails'):
+            message = 'Hubo correos crudos sin trabajo operativo clasificado.'
+        else:
+            message = 'Sin correos crudos en esta corrida.'
+
+        if account.get('rawEmails') or account_domains:
+            accounts_summary[account_id] = {
+                'accountId': account.get('accountId'),
+                'accountAlias': account.get('accountAlias', ''),
+                'domains': sorted(account_domains),
+                'membershipEvents': account_membership,
+                'financeEvents': account_finance,
+                'unknownEvents': account_unknown,
+                'message': message,
+            }
+
+    finance_requires_review = any(
+        item.get('kind') in ADMINBOT_REVIEW_FINANCE_EVENT_KINDS
+        or item.get('event', {}).get('classificationStatus') in {'pending_review', 'missing_clabe'}
+        for item in finance_items
+    )
+
+    return {
+        'membership': {
+            'eventCount': len(membership_items),
+            'items': membership_items,
+            'message': (
+                'Hay cambios de membresía/grupos para revisar.'
+                if membership_items
+                else 'No hubo cambios de membresía/grupos en esta corrida.'
+            ),
+        },
+        'finance': {
+            'eventCount': len(finance_items),
+            'recordsUpdated': finance_records,
+            'items': finance_items,
+            'requiresAdminBotReview': finance_requires_review,
+            'message': (
+                'Hubo movimiento financiero; revisar retiros, depósitos y CLABEs.'
+                if finance_items
+                else 'No hubo movimiento financiero en esta corrida.'
+            ),
+        },
+        'unknown': {
+            'eventCount': len(unknown_items),
+            'items': unknown_items,
+        },
+        'accounts': accounts_summary,
+        'financeWorkItems': finance_items,
+        'operatorGuidance': [
+            'No narrar eventos financieros como grupos vacíos.',
+            'Separar membresía/grupos de finanzas en la respuesta final.',
+            'Para retiros, usar la CLABE como llave: Snowball primero, bancos externos después.',
+            'Para depósitos/pagos acreditados, AdminBot debe revisar el correo crudo y registrar si corresponde.',
+        ],
+        'alertsGeneratedByBackend': alerts_generated,
+    }
+
+
 def build_failed_accounts_payload(report):
     failed_accounts = [a for a in report['accounts'] if a['access'] != 'ok']
     return failed_accounts, [{
@@ -1665,7 +1843,7 @@ def build_failed_accounts_payload(report):
     } for a in failed_accounts]
 
 
-def persist_latest_analysis_report(db, report, ok_accounts, totals, alerts_generated, failed_payload):
+def persist_latest_analysis_report(db, report, ok_accounts, totals, alerts_generated, failed_payload, domain_summary=None):
     db.document('analysis/latest-report').set({
         'generatedAt': report['generatedAt'],
         'mode': 'UID tracking' if report.get('usedUidTracking') else 'date fallback',
@@ -1689,6 +1867,7 @@ def persist_latest_analysis_report(db, report, ok_accounts, totals, alerts_gener
             'relevant': a['summary']['relevant'],
         } for a in ok_accounts],
         'failedAccounts': failed_payload,
+        'domainSummary': domain_summary or {},
     })
 
 
@@ -1747,8 +1926,23 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
 
         totals = analysis_totals(ok_accounts)
         failed_accounts, failed_accounts_payload = build_failed_accounts_payload(report)
+
+        # Update finance documents from withdrawal events before creating the
+        # AdminBot job, so the job can explain what was already written.
+        finance_records = 0
+        try:
+            finance_records = update_finance_from_analysis(db, ok_accounts)
+        except Exception as e:
+            print(f'Warning: finance update failed: {e}')
+
+        domain_summary = build_adminbot_domain_summary(
+            ok_accounts,
+            finance_records=finance_records,
+            alerts_generated=alerts_generated,
+        )
         persist_latest_analysis_report(
             db, report, ok_accounts, totals, alerts_generated, failed_accounts_payload,
+            domain_summary=domain_summary,
         )
 
         queued_job = adminbot_work_queue.enqueue_analysis_job(
@@ -1769,6 +1963,10 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
                     'totalRawEmails': totals['totalRawEmails'],
                     'alertsGeneratedByBackend': alerts_generated,
                 },
+                'domainSummary': domain_summary,
+                'financeWorkItems': domain_summary.get('financeWorkItems', []),
+                'operatorGuidance': domain_summary.get('operatorGuidance', []),
+                'financeRecordsUpdated': finance_records,
                 'telegramPolicy': {
                     'sendStart': True,
                     'sendFinal': True,
@@ -1782,13 +1980,6 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
             run_source='dashboard',
             analysis_generated_at=report['generatedAt'],
         )
-
-        # Update finance documents from withdrawal events
-        finance_records = 0
-        try:
-            finance_records = update_finance_from_analysis(db, ok_accounts)
-        except Exception as e:
-            print(f'Warning: finance update failed: {e}')
 
         # Run cleanup
         cleanup_old_data(db)
@@ -1846,6 +2037,7 @@ def analyze_emails(req: https_fn.Request) -> https_fn.Response:
             extra_findings=agent_findings,
             finance_records=finance_records,
             schedule_config=schedule_config,
+            domain_summary=domain_summary,
         )
         agent_review_text = lank_agent_review.build_notification_text(agent_review)
 
@@ -2450,8 +2642,25 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
 
     totals = analysis_totals(ok_accounts)
     failed_accounts, failed_accounts_payload = build_failed_accounts_payload(report)
+
+    # Update finance documents from withdrawal events before creating the
+    # AdminBot job, so the job can explain what was already written.
+    finance_records = 0
+    try:
+        finance_records = update_finance_from_analysis(db, ok_accounts)
+        if finance_records > 0:
+            print(f'Finance: {finance_records} withdrawal records updated')
+    except Exception as e:
+        print(f'Warning: scheduled finance update failed: {e}')
+
+    domain_summary = build_adminbot_domain_summary(
+        ok_accounts,
+        finance_records=finance_records,
+        alerts_generated=alerts_generated,
+    )
     persist_latest_analysis_report(
         db, report, ok_accounts, totals, alerts_generated, failed_accounts_payload,
+        domain_summary=domain_summary,
     )
 
     queued_job = adminbot_work_queue.enqueue_analysis_job(
@@ -2473,6 +2682,10 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
                 'totalRawEmails': totals['totalRawEmails'],
                 'alertsGeneratedByBackend': alerts_generated,
             },
+            'domainSummary': domain_summary,
+            'financeWorkItems': domain_summary.get('financeWorkItems', []),
+            'operatorGuidance': domain_summary.get('operatorGuidance', []),
+            'financeRecordsUpdated': finance_records,
             'telegramPolicy': {
                 'sendStart': True,
                 'sendFinal': True,
@@ -2487,14 +2700,6 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
         analysis_generated_at=report['generatedAt'],
         schedule_slot=current_slot.isoformat(),
     )
-
-    # Update finance documents from withdrawal events
-    try:
-        finance_records = update_finance_from_analysis(db, ok_accounts)
-        if finance_records > 0:
-            print(f'Finance: {finance_records} withdrawal records updated')
-    except Exception as e:
-        print(f'Warning: scheduled finance update failed: {e}')
 
     cleanup_old_data(db)
 
@@ -2554,8 +2759,9 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
         failed_accounts=failed_accounts,
         alerts_generated=alerts_generated,
         extra_findings=agent_findings,
-        finance_records=finance_records if 'finance_records' in locals() else 0,
+        finance_records=finance_records,
         schedule_config=schedule_config,
+        domain_summary=domain_summary,
     )
     agent_review_text = lank_agent_review.build_notification_text(agent_review)
 

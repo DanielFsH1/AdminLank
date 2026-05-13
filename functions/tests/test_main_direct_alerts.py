@@ -211,6 +211,93 @@ def test_classify_event_marks_unknown_clabe_for_review():
     assert event["movementType"] == "unclassified_clabe"
 
 
+def test_build_domain_summary_separates_finance_from_membership_and_deposits_create_work():
+    ok_accounts = [{
+        "accountId": 17,
+        "accountAlias": "Marco Fuentes",
+        "access": "ok",
+        "rawEmails": [
+            {
+                "uid": 301,
+                "subject": "Retiraste tus fondos con éxito",
+                "messageId": "<withdrawal-301>",
+                "bodySnippet": "Monto: 500. Cuenta o numero tarjeta: 646180123456789012",
+            },
+            {
+                "uid": 302,
+                "subject": "¡Ya acreditamos tu pago!",
+                "messageId": "<deposit-302>",
+                "bodySnippet": "Depósito $80 exitoso",
+            },
+        ],
+        "events": [
+            {
+                "uid": 301,
+                "date": "Tue, 12 May 2026 22:00:00 +0000",
+                "event": {
+                    "kind": "withdrawal_completed",
+                    "amount": "500",
+                    "accountNumber": "646180123456789012",
+                    "destinationClabe": "646180123456789012",
+                    "movementType": "external_bank",
+                    "classificationStatus": "classified",
+                    "knownBankAccount": {"bank": "BBVA", "clabe": "646180123456789012"},
+                },
+            },
+            {
+                "uid": 302,
+                "date": "Tue, 12 May 2026 22:01:00 +0000",
+                "event": {
+                    "kind": "payment_user",
+                    "amount": "80",
+                    "action": "registrar ingreso",
+                },
+            },
+        ],
+    }]
+
+    domain_summary = main.build_adminbot_domain_summary(
+        ok_accounts,
+        finance_records=1,
+        alerts_generated=0,
+    )
+
+    assert domain_summary["membership"]["eventCount"] == 0
+    assert domain_summary["membership"]["message"] == "No hubo cambios de membresía/grupos en esta corrida."
+    assert domain_summary["finance"]["eventCount"] == 2
+    assert domain_summary["finance"]["recordsUpdated"] == 1
+    assert domain_summary["finance"]["requiresAdminBotReview"] is True
+    assert [item["kind"] for item in domain_summary["financeWorkItems"]] == [
+        "withdrawal_completed",
+        "payment_user",
+    ]
+    deposit_item = domain_summary["financeWorkItems"][1]
+    assert deposit_item["action"] == "review_and_register_deposit"
+    assert deposit_item["rawEmail"]["subject"] == "¡Ya acreditamos tu pago!"
+
+
+def test_build_domain_summary_marks_finance_only_accounts_without_group_empty_language():
+    ok_accounts = [{
+        "accountId": 18,
+        "accountAlias": "Andrés Casanova",
+        "access": "ok",
+        "rawEmails": [{"uid": 401, "subject": "¡Ya acreditamos tu pago!"}],
+        "events": [{
+            "uid": 401,
+            "event": {
+                "kind": "payment_user",
+                "amount": "80",
+            },
+        }],
+    }]
+
+    domain_summary = main.build_adminbot_domain_summary(ok_accounts, finance_records=0, alerts_generated=0)
+
+    assert domain_summary["accounts"]["18"]["domains"] == ["finance"]
+    assert domain_summary["accounts"]["18"]["message"] == "Hubo movimiento financiero; no hubo cambios de membresía."
+    assert "Sin grupos resolubles" not in str(domain_summary)
+
+
 class FakeDocSnapshot:
     def __init__(self, data=None, exists=True, reference=None, doc_id=None):
         self._data = data or {}
@@ -986,14 +1073,29 @@ def test_analyze_emails_enqueues_adminbot_work_after_saving_latest_report(monkey
             "review": 0,
             "rawEmailCount": 1,
         },
-        "rawEmails": [{"uid": 101, "subject": "Alta"}],
-        "events": [],
+        "rawEmails": [{
+            "uid": 101,
+            "subject": "¡Ya acreditamos tu pago!",
+            "messageId": "<deposit-101>",
+            "bodySnippet": "Depósito $80 exitoso",
+        }],
+        "events": [{
+            "uid": 101,
+            "subject": "¡Ya acreditamos tu pago!",
+            "messageId": "<deposit-101>",
+            "event": {
+                "kind": "payment_user",
+                "amount": "80",
+                "action": "registrar ingreso",
+            },
+            "dbReview": {"category": "ignore", "action": "ignorar"},
+        }],
         "maxUid": 101,
     })
     monkeypatch.setattr(main, "save_notifications", lambda *args, **kwargs: None)
     monkeypatch.setattr(main, "generate_alerts_for_accounts", lambda *args, **kwargs: (0, {}, [], []))
     monkeypatch.setattr(main, "save_analysis_state", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(main, "update_finance_from_analysis", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(main, "update_finance_from_analysis", lambda *_args, **_kwargs: 1)
     monkeypatch.setattr(main, "cleanup_old_data", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(main.lank_alerts, "generate_missing_phone_alerts", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(main.lank_alerts, "generate_credit_alerts", lambda *_args, **_kwargs: 0)
@@ -1033,6 +1135,12 @@ def test_analyze_emails_enqueues_adminbot_work_after_saving_latest_report(monkey
         "totalRawEmails": 1,
         "alertsGeneratedByBackend": 0,
     }
+    assert payload["financeRecordsUpdated"] == 1
+    assert payload["domainSummary"]["finance"]["eventCount"] == 1
+    assert payload["domainSummary"]["finance"]["recordsUpdated"] == 1
+    assert payload["domainSummary"]["accounts"]["12"]["domains"] == ["finance"]
+    assert payload["financeWorkItems"][0]["action"] == "review_and_register_deposit"
+    assert db.documents["analysis/latest-report"]["domainSummary"]["finance"]["eventCount"] == 1
 
 
 def test_analyze_emails_includes_scheduled_manual_alerts_in_backend_count(monkeypatch):
