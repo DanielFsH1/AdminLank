@@ -1832,7 +1832,20 @@ body {
   border: 2px solid var(--border-accent);
   background: var(--bg-card);
 }
+.snowball-bank-logo {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex: 0 0 auto;
+  border: 2px solid var(--bank-color, var(--border-accent));
+  background: var(--bg-card);
+}
 .snowball-account-identity.compact .snowball-account-avatar {
+  width: 34px;
+  height: 34px;
+}
+.snowball-account-identity.compact .snowball-bank-logo {
   width: 34px;
   height: 34px;
 }
@@ -1842,6 +1855,14 @@ body {
   justify-content: center;
   color: var(--text-muted);
   font-weight: 700;
+}
+.snowball-bank-logo.fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bank-color, var(--accent-primary));
+  color: #fff;
+  font-weight: 800;
 }
 .snowball-account-copy {
   min-width: 0;
@@ -1890,6 +1911,35 @@ body {
   border-color: var(--accent-success);
   background: rgba(16,185,129,0.1);
 }
+.snowball-account-option.bank.selected {
+  border-color: var(--bank-color, var(--accent-success));
+  background: color-mix(in srgb, var(--bank-color, var(--accent-success)) 12%, var(--bg-card));
+}
+.snowball-selected-account {
+  min-height: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--accent-success);
+  border-radius: 8px;
+  background: rgba(16,185,129,0.1);
+  padding: 12px;
+}
+.snowball-change-btn {
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.snowball-change-btn:hover {
+  border-color: var(--accent-primary);
+}
 .snowball-option-empty {
   border: 1px dashed var(--border-primary);
   border-radius: 8px;
@@ -1913,7 +1963,10 @@ body {
   gap: 6px;
   min-width: 120px;
 }
-.snowball-modal { max-width: 560px; }
+.snowball-modal {
+  width: min(920px, calc(100vw - 40px));
+  max-width: 920px;
+}
 .snowball-check {
   display: flex;
   align-items: center;
@@ -1944,6 +1997,15 @@ body {
   .snowball-section-header { flex-direction: column; align-items: stretch; }
   .snowball-node { min-width: 170px; }
   .snowball-account-options { grid-template-columns: 1fr; }
+  .snowball-modal {
+    width: calc(100vw - 20px);
+    max-width: calc(100vw - 20px);
+  }
+  .snowball-selected-account {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .snowball-change-btn { width: 100%; }
 }
 
 /* ═══ Finance: Bank Accordion ═══ */
