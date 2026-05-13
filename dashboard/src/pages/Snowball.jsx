@@ -3,6 +3,7 @@ import { useCollection, useDocument } from '../hooks/useFirestore';
 import { saveSnowballConfig, normalizeClabe } from '../hooks/firestoreActions';
 import { getProfileImage } from '../config/services';
 import { buildSnowballAccountOptions } from '../utils/snowballAvailability';
+import { buildSnowballBankOptions, resolveSnowballBankOptionId } from '../utils/snowballBanks';
 import { BankIcon, CheckCircleIcon, EditIcon, LinkIcon, PlusIcon, SaveIcon, ToggleOffIcon, ToggleOnIcon, TrashIcon, WarningIcon } from '../components/Icons';
 
 const EMPTY_CONFIG = { wallets: {}, connections: {} };
@@ -45,6 +46,41 @@ function AccountIdentity({ account, detail, compact = false }) {
   );
 }
 
+function BankIdentity({ bank, compact = false }) {
+  if (!bank) {
+    return (
+      <div className={`snowball-account-identity ${compact ? 'compact' : ''} missing`}>
+        <div className="snowball-bank-logo fallback">?</div>
+        <div className="snowball-account-copy">
+          <strong>Banco no encontrado</strong>
+          <span>CLABE pendiente</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`snowball-account-identity ${compact ? 'compact' : ''}`}>
+      {bank.logoUrl ? (
+        <img
+          src={bank.logoUrl}
+          className="snowball-bank-logo"
+          alt=""
+          onError={event => { event.currentTarget.style.display = 'none'; }}
+        />
+      ) : (
+        <div className="snowball-bank-logo fallback" style={{ '--bank-color': bank.color }}>
+          {(bank.name || 'B')[0]}
+        </div>
+      )}
+      <div className="snowball-account-copy">
+        <strong>{bank.name || 'Banco externo'}</strong>
+        <span>{bank.clabe || 'Sin CLABE'}{bank.note ? ` · ${bank.note}` : ''}</span>
+      </div>
+    </div>
+  );
+}
+
 function AccountOptionGrid({ accounts, selectedId, onSelect, onClear, emptyText, collapseWhenSelected = false }) {
   const selectedAccount = accounts.find(account => String(account.id) === String(selectedId || ''));
   if (collapseWhenSelected && selectedAccount) {
@@ -71,6 +107,27 @@ function AccountOptionGrid({ accounts, selectedId, onSelect, onClear, emptyText,
           onClick={() => onSelect(account.id)}
         >
           <AccountIdentity account={account} detail="Disponible" compact />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function BankOptionGrid({ banks, selectedId, onSelect, emptyText }) {
+  if (!banks.length) {
+    return <div className="snowball-option-empty">{emptyText}</div>;
+  }
+  return (
+    <div className="snowball-account-options">
+      {banks.map(bank => (
+        <button
+          type="button"
+          key={bank.id}
+          className={`snowball-account-option bank ${String(selectedId || '') === String(bank.id) ? 'selected' : ''}`}
+          onClick={() => onSelect(bank.id)}
+          style={{ '--bank-color': bank.color }}
+        >
+          <BankIdentity bank={bank} compact />
         </button>
       ))}
     </div>
@@ -116,11 +173,12 @@ function buildChains(config, accountById, bankById) {
       const connection = byFrom.get(String(current));
       if (!connection) break;
       if (connection.destinationType === 'external_bank') {
-        const bank = bankById.get(connection.destinationBankId);
+        const bank = bankById.get(connection.destinationBankAccountId) || bankById.get(connection.destinationBankId);
         terminal = {
           type: 'bank',
           label: bank?.name || connection.destinationBankName || 'Banco externo',
           clabe: connection.destinationClabe,
+          bank,
         };
         break;
       }
@@ -154,6 +212,7 @@ function SnowballModal({ title, children, onClose, onSave, saving }) {
 export default function Snowball() {
   const { data: registryDoc } = useDocument('config', 'account-registry', { realtime: true });
   const { data: snowballDoc, loading: snowballLoading } = useDocument('config', 'snowball', { realtime: true });
+  const { data: bankAccountsConfig } = useDocument('config', 'bank-accounts', { realtime: true });
   const { data: banks } = useCollection('banks', { realtime: true });
   const [walletModal, setWalletModal] = useState(null);
   const [connectionModal, setConnectionModal] = useState(null);
@@ -172,15 +231,15 @@ export default function Snowball() {
   }), [snowballDoc]);
 
   const accountById = useMemo(() => new Map(accounts.map(account => [String(account.id), account])), [accounts]);
-  const bankOptions = useMemo(() => banks
-    .map(bank => ({
-      id: bank.id,
-      name: bank.name || bank.id,
-      clabe: normalizeClabe(bank.debitAccount?.clabe || bank.clabe),
-    }))
-    .filter(bank => bank.clabe)
-    .sort((a, b) => a.name.localeCompare(b.name)), [banks]);
-  const bankById = useMemo(() => new Map(bankOptions.map(bank => [bank.id, bank])), [bankOptions]);
+  const bankOptions = useMemo(() => buildSnowballBankOptions({ banks, bankAccountsConfig }), [banks, bankAccountsConfig]);
+  const bankById = useMemo(() => {
+    const map = new Map();
+    bankOptions.forEach((bank) => {
+      map.set(bank.id, bank);
+      if (!map.has(bank.bankId)) map.set(bank.bankId, bank);
+    });
+    return map;
+  }, [bankOptions]);
   const connections = useMemo(() => Object.entries(config.connections || {}).map(([id, c]) => ({ id, ...c })), [config]);
   const chains = useMemo(() => buildChains(config, accountById, bankById), [config, accountById, bankById]);
   const activeCount = connections.filter(connection => connection.active !== false).length;
@@ -194,6 +253,15 @@ export default function Snowball() {
       destinationType: connectionModal.destinationType || 'lank_wallet',
     });
   }, [accounts, config, connectionModal]);
+  const selectedBankOptionId = useMemo(() => {
+    if (!connectionModal) return '';
+    return resolveSnowballBankOptionId({
+      options: bankOptions,
+      destinationBankAccountId: connectionModal.destinationBankAccountId || connectionModal.destinationBankId,
+      destinationBankId: connectionModal.destinationBankId,
+      destinationClabe: connectionModal.destinationClabe,
+    });
+  }, [bankOptions, connectionModal]);
 
   async function persist(nextConfig, description) {
     setSaving(true);
@@ -258,11 +326,18 @@ export default function Snowball() {
         destinationBankName: null,
       };
     } else {
-      const bank = bankById.get(connectionModal.destinationBankId);
+      const selectedBankId = resolveSnowballBankOptionId({
+        options: bankOptions,
+        destinationBankAccountId: connectionModal.destinationBankAccountId || connectionModal.destinationBankId,
+        destinationBankId: connectionModal.destinationBankId,
+        destinationClabe: connectionModal.destinationClabe,
+      });
+      const bank = bankById.get(selectedBankId);
       payload = {
         ...payload,
         toAccountId: null,
-        destinationBankId: bank?.id || '',
+        destinationBankId: bank?.bankId || '',
+        destinationBankAccountId: bank?.id || '',
         destinationBankName: bank?.name || '',
         destinationClabe: bank?.clabe || '',
       };
@@ -321,7 +396,7 @@ export default function Snowball() {
         <div className="stat-card">
           <div className="stat-card-icon"><BankIcon size={24} /></div>
           <div className="stat-card-value">{bankOptions.length}</div>
-          <div className="stat-card-label">Bancos destino</div>
+          <div className="stat-card-label">CLABEs destino</div>
         </div>
         <div className="stat-card">
           <div className="stat-card-icon"><WarningIcon size={24} /></div>
@@ -364,8 +439,7 @@ export default function Snowball() {
                   <div className="snowball-chain-part">
                     <div className="snowball-arrow">-&gt;</div>
                     <div className="snowball-node terminal">
-                      <strong>{chain.terminal.label}</strong>
-                      <span>{chain.terminal.clabe}</span>
+                      <BankIdentity bank={chain.terminal.bank || { name: chain.terminal.label, clabe: chain.terminal.clabe }} />
                     </div>
                   </div>
                 )}
@@ -441,7 +515,7 @@ export default function Snowball() {
                         {connection.destinationType === 'lank_wallet' ? (
                           <AccountIdentity account={to} detail="Entrada interna" compact />
                         ) : (
-                          to?.name || 'Banco externo'
+                          <BankIdentity bank={to} compact />
                         )}
                       </td>
                       <td>{connection.destinationClabe || 'Sin CLABE'}</td>
@@ -525,13 +599,24 @@ export default function Snowball() {
               />
             </div>
           ) : (
-            <label className="edit-modal-field">
+            <div className="edit-modal-field">
               <span className="edit-modal-label">Banco externo final</span>
-              <select className="edit-modal-input" value={connectionModal.destinationBankId || ''} onChange={event => setConnectionModal(p => ({ ...p, destinationBankId: event.target.value }))}>
-                <option value="">Seleccionar banco</option>
-                {bankOptions.map(bank => <option key={bank.id} value={bank.id}>{bank.name} · {bank.clabe}</option>)}
-              </select>
-            </label>
+              <BankOptionGrid
+                banks={bankOptions}
+                selectedId={selectedBankOptionId}
+                emptyText="No hay CLABEs bancarias disponibles para retiro."
+                onSelect={(bankOptionId) => {
+                  const bank = bankById.get(bankOptionId);
+                  setConnectionModal(previous => ({
+                    ...previous,
+                    destinationBankAccountId: bankOptionId,
+                    destinationBankId: bank?.bankId || '',
+                    destinationBankName: bank?.name || '',
+                    destinationClabe: bank?.clabe || '',
+                  }));
+                }}
+              />
+            </div>
           )}
           <label className="snowball-check">
             <input type="checkbox" checked={connectionModal.active !== false} onChange={event => setConnectionModal(p => ({ ...p, active: event.target.checked }))} />

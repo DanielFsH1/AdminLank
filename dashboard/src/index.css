@@ -1832,7 +1832,20 @@ body {
   border: 2px solid var(--border-accent);
   background: var(--bg-card);
 }
+.snowball-bank-logo {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex: 0 0 auto;
+  border: 2px solid var(--bank-color, var(--border-accent));
+  background: var(--bg-card);
+}
 .snowball-account-identity.compact .snowball-account-avatar {
+  width: 34px;
+  height: 34px;
+}
+.snowball-account-identity.compact .snowball-bank-logo {
   width: 34px;
   height: 34px;
 }
@@ -1842,6 +1855,14 @@ body {
   justify-content: center;
   color: var(--text-muted);
   font-weight: 700;
+}
+.snowball-bank-logo.fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bank-color, var(--accent-primary));
+  color: #fff;
+  font-weight: 800;
 }
 .snowball-account-copy {
   min-width: 0;
@@ -1889,6 +1910,10 @@ body {
 .snowball-account-option.selected {
   border-color: var(--accent-success);
   background: rgba(16,185,129,0.1);
+}
+.snowball-account-option.bank.selected {
+  border-color: var(--bank-color, var(--accent-success));
+  background: color-mix(in srgb, var(--bank-color, var(--accent-success)) 12%, var(--bg-card));
 }
 .snowball-selected-account {
   min-height: 68px;
