@@ -211,7 +211,8 @@ def resolve_join_alert_without_real_access(db, alerts_data, service, account_id,
 
 def build_review_document(db, trigger, report, ok_accounts, failed_accounts,
                           alerts_generated, extra_findings=None,
-                          finance_records=0, schedule_config=None):
+                          finance_records=0, schedule_config=None,
+                          domain_summary=None):
     settings = load_settings(db)
     if not settings.get('enabled', True):
         return {'enabled': False, 'settings': settings, 'shouldNotify': False}
@@ -258,6 +259,7 @@ def build_review_document(db, trigger, report, ok_accounts, failed_accounts,
         'generatedAt': report.get('generatedAt') or _now_iso(),
         'trigger': trigger,
         'metrics': metrics,
+        'domainSummary': domain_summary or {},
         'findingsCount': len(findings),
         'findings': findings,
         'settingsSnapshot': settings,
@@ -301,6 +303,17 @@ def build_notification_text(review_doc):
     pending = metrics.get('pendingAlerts', 0)
     if pending > 0:
         lines.append(f"⚠️ Alertas pendientes en total: {pending}")
+
+    domain_summary = review_doc.get('domainSummary') or {}
+    finance = domain_summary.get('finance') or {}
+    membership = domain_summary.get('membership') or {}
+    if finance.get('eventCount') or membership.get('eventCount'):
+        lines.append(
+            f"Dominios: membresía={membership.get('eventCount', 0)} | "
+            f"finanzas={finance.get('eventCount', 0)}"
+        )
+        if finance.get('eventCount'):
+            lines.append(finance.get('message', 'Hubo movimiento financiero.'))
 
     schedule = review_doc.get('schedule', {})
     if schedule.get('enabled'):
