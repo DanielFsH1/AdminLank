@@ -45,7 +45,19 @@ function AccountIdentity({ account, detail, compact = false }) {
   );
 }
 
-function AccountOptionGrid({ accounts, selectedId, onSelect, emptyText }) {
+function AccountOptionGrid({ accounts, selectedId, onSelect, onClear, emptyText, collapseWhenSelected = false }) {
+  const selectedAccount = accounts.find(account => String(account.id) === String(selectedId || ''));
+  if (collapseWhenSelected && selectedAccount) {
+    return (
+      <div className="snowball-selected-account">
+        <AccountIdentity account={selectedAccount} detail="Cuenta origen seleccionada" />
+        <button type="button" className="snowball-change-btn" onClick={onClear}>
+          Cambiar
+        </button>
+      </div>
+    );
+  }
+
   if (!accounts.length) {
     return <div className="snowball-option-empty">{emptyText}</div>;
   }
@@ -482,6 +494,12 @@ export default function Snowball() {
               accounts={connectionAccountOptions?.originAccounts || []}
               selectedId={connectionModal.fromAccountId}
               emptyText="No hay cuentas disponibles como salida."
+              collapseWhenSelected
+              onClear={() => setConnectionModal(previous => ({
+                ...previous,
+                fromAccountId: '',
+                toAccountId: '',
+              }))}
               onSelect={(accountId) => setConnectionModal((previous) => ({
                 ...previous,
                 fromAccountId: accountId,
