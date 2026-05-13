@@ -19,23 +19,34 @@ const banks = [
 ];
 
 describe('buildSnowballBankOptions', () => {
-  it('incluye CLABEs de retiro de banks con metadatos visuales', () => {
+  it('incluye CLABEs bancarias de debito y credito con metadatos visuales', () => {
     const options = buildSnowballBankOptions({ banks, bankAccountsConfig: null });
 
     expect(options).toEqual([
       expect.objectContaining({
-        id: 'bank:bbva:012345678901234567',
+        id: 'bank:bbva:debit:012345678901234567',
         bankId: 'bbva',
         name: 'BBVA',
         clabe: '012345678901234567',
+        type: 'debito',
         note: 'principal',
         color: '#004481',
         logoUrl: '/bbva.png',
       }),
+      expect.objectContaining({
+        id: 'bank:nu:credit:999999999999999999',
+        bankId: 'nu',
+        name: 'Nu',
+        clabe: '999999999999999999',
+        type: 'credito',
+        note: 'solo pago',
+        color: '#7c3aed',
+        logoUrl: '/nu.png',
+      }),
     ]);
   });
 
-  it('agrega todas las CLABEs externas no credito desde config/bank-accounts', () => {
+  it('agrega todas las CLABEs externas desde config/bank-accounts', () => {
     const options = buildSnowballBankOptions({
       banks,
       bankAccountsConfig: {
@@ -49,7 +60,9 @@ describe('buildSnowballBankOptions', () => {
 
     expect(options.map(option => option.clabe)).toEqual([
       '012345678901234567',
+      '222222222222222222',
       '111111111111111111',
+      '999999999999999999',
       '333333333333333333',
     ]);
     expect(options.find(option => option.clabe === '111111111111111111')).toEqual(expect.objectContaining({
@@ -64,13 +77,13 @@ describe('buildSnowballBankOptions', () => {
 
     expect(resolveSnowballBankOptionId({
       options,
-      destinationBankAccountId: 'bank:bbva:012345678901234567',
-    })).toBe('bank:bbva:012345678901234567');
+      destinationBankAccountId: 'bank:bbva:debit:012345678901234567',
+    })).toBe('bank:bbva:debit:012345678901234567');
 
     expect(resolveSnowballBankOptionId({
       options,
       destinationBankId: 'bbva',
       destinationClabe: '012345678901234567',
-    })).toBe('bank:bbva:012345678901234567');
+    })).toBe('bank:bbva:debit:012345678901234567');
   });
 });
