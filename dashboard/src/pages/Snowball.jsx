@@ -84,12 +84,12 @@ function BankIdentity({ bank, compact = false }) {
   );
 }
 
-function AccountOptionGrid({ accounts, selectedId, onSelect, onClear, emptyText, collapseWhenSelected = false }) {
+function AccountOptionGrid({ accounts, selectedId, onSelect, onClear, emptyText, collapseWhenSelected = false, selectedDetail = 'Cuenta seleccionada' }) {
   const selectedAccount = accounts.find(account => String(account.id) === String(selectedId || ''));
   if (collapseWhenSelected && selectedAccount) {
     return (
       <div className="snowball-selected-account">
-        <AccountIdentity account={selectedAccount} detail="Cuenta origen seleccionada" />
+        <AccountIdentity account={selectedAccount} detail={selectedDetail} />
         <button type="button" className="snowball-change-btn" onClick={onClear}>
           Cambiar
         </button>
@@ -116,7 +116,19 @@ function AccountOptionGrid({ accounts, selectedId, onSelect, onClear, emptyText,
   );
 }
 
-function BankOptionGrid({ banks, selectedId, onSelect, emptyText }) {
+function BankOptionGrid({ banks, selectedId, onSelect, onClear, emptyText, collapseWhenSelected = false }) {
+  const selectedBank = banks.find(bank => String(bank.id) === String(selectedId || ''));
+  if (collapseWhenSelected && selectedBank) {
+    return (
+      <div className="snowball-selected-account bank" style={{ '--bank-color': selectedBank.color }}>
+        <BankIdentity bank={selectedBank} />
+        <button type="button" className="snowball-change-btn" onClick={onClear}>
+          Cambiar
+        </button>
+      </div>
+    );
+  }
+
   if (!banks.length) {
     return <div className="snowball-option-empty">{emptyText}</div>;
   }
@@ -585,6 +597,7 @@ export default function Snowball() {
               selectedId={connectionModal.fromAccountId}
               emptyText="No hay cuentas disponibles como salida."
               collapseWhenSelected
+              selectedDetail="Cuenta origen seleccionada"
               onClear={() => setConnectionModal(previous => ({
                 ...previous,
                 fromAccountId: '',
@@ -599,7 +612,16 @@ export default function Snowball() {
           </div>
           <label className="edit-modal-field">
             <span className="edit-modal-label">Tipo de destino</span>
-            <select className="edit-modal-input" value={connectionModal.destinationType || 'lank_wallet'} onChange={event => setConnectionModal(p => ({ ...p, destinationType: event.target.value, toAccountId: '', destinationBankId: '' }))}>
+            <select className="edit-modal-input" value={connectionModal.destinationType || 'lank_wallet'} onChange={event => setConnectionModal(p => ({
+              ...p,
+              destinationType: event.target.value,
+              toAccountId: '',
+              destinationBankAccountId: '',
+              destinationBankId: '',
+              destinationBankAccountType: '',
+              destinationBankName: '',
+              destinationClabe: '',
+            }))}>
               <option value="lank_wallet">Transferencia interna Lank</option>
               <option value="external_bank">Retiro externo bancario</option>
             </select>
@@ -611,6 +633,12 @@ export default function Snowball() {
                 accounts={connectionAccountOptions?.destinationAccounts || []}
                 selectedId={connectionModal.toAccountId}
                 emptyText="No hay cuentas disponibles como entrada interna."
+                collapseWhenSelected
+                selectedDetail="Cuenta destino seleccionada"
+                onClear={() => setConnectionModal(previous => ({
+                  ...previous,
+                  toAccountId: '',
+                }))}
                 onSelect={(accountId) => setConnectionModal(previous => ({ ...previous, toAccountId: accountId }))}
               />
             </div>
@@ -621,6 +649,15 @@ export default function Snowball() {
                 banks={bankOptions}
                 selectedId={selectedBankOptionId}
                 emptyText="No hay CLABEs bancarias disponibles para retiro."
+                collapseWhenSelected
+                onClear={() => setConnectionModal(previous => ({
+                  ...previous,
+                  destinationBankAccountId: '',
+                  destinationBankId: '',
+                  destinationBankAccountType: '',
+                  destinationBankName: '',
+                  destinationClabe: '',
+                }))}
                 onSelect={(bankOptionId) => {
                   const bank = bankById.get(bankOptionId);
                   setConnectionModal(previous => ({
