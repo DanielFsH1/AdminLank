@@ -3,7 +3,7 @@ import { useCollection, useDocument } from '../hooks/useFirestore';
 import { saveSnowballConfig, normalizeClabe } from '../hooks/firestoreActions';
 import { getProfileImage } from '../config/services';
 import { buildSnowballAccountOptions } from '../utils/snowballAvailability';
-import { buildSnowballBankOptions, resolveSnowballBankOptionId } from '../utils/snowballBanks';
+import { buildBankClabeOptions, resolveBankClabeOptionId } from '../utils/bankClabes';
 import { BankIcon, CheckCircleIcon, EditIcon, LinkIcon, PlusIcon, SaveIcon, ToggleOffIcon, ToggleOnIcon, TrashIcon, WarningIcon } from '../components/Icons';
 
 const EMPTY_CONFIG = { wallets: {}, connections: {} };
@@ -75,7 +75,10 @@ function BankIdentity({ bank, compact = false }) {
       )}
       <div className="snowball-account-copy">
         <strong>{bank.name || 'Banco externo'}</strong>
-        <span>{bank.clabe || 'Sin CLABE'}{bank.note ? ` · ${bank.note}` : ''}</span>
+        <span>
+          <span className="snowball-bank-type">{bank.type === 'credito' ? 'Crédito' : 'Débito'}</span>
+          {bank.clabe || 'Sin CLABE'}{bank.note ? ` · ${bank.note}` : ''}
+        </span>
       </div>
     </div>
   );
@@ -140,7 +143,7 @@ function activeConnections(config) {
     .filter(connection => connection.active !== false);
 }
 
-function buildChains(config, accountById, bankById) {
+function buildChains(config, accountById, bankOptions, bankById) {
   const connections = activeConnections(config);
   const byFrom = new Map(connections.map(connection => [String(connection.fromAccountId), connection]));
   const internalIncoming = new Set(
@@ -173,7 +176,13 @@ function buildChains(config, accountById, bankById) {
       const connection = byFrom.get(String(current));
       if (!connection) break;
       if (connection.destinationType === 'external_bank') {
-        const bank = bankById.get(connection.destinationBankAccountId) || bankById.get(connection.destinationBankId);
+        const bankOptionId = resolveBankClabeOptionId({
+          options: bankOptions,
+          destinationBankAccountId: connection.destinationBankAccountId || connection.destinationBankId,
+          destinationBankId: connection.destinationBankId,
+          destinationClabe: connection.destinationClabe,
+        });
+        const bank = bankById.get(bankOptionId);
         terminal = {
           type: 'bank',
           label: bank?.name || connection.destinationBankName || 'Banco externo',
@@ -231,7 +240,7 @@ export default function Snowball() {
   }), [snowballDoc]);
 
   const accountById = useMemo(() => new Map(accounts.map(account => [String(account.id), account])), [accounts]);
-  const bankOptions = useMemo(() => buildSnowballBankOptions({ banks, bankAccountsConfig }), [banks, bankAccountsConfig]);
+  const bankOptions = useMemo(() => buildBankClabeOptions({ banks, bankAccountsConfig }), [banks, bankAccountsConfig]);
   const bankById = useMemo(() => {
     const map = new Map();
     bankOptions.forEach((bank) => {
@@ -241,7 +250,7 @@ export default function Snowball() {
     return map;
   }, [bankOptions]);
   const connections = useMemo(() => Object.entries(config.connections || {}).map(([id, c]) => ({ id, ...c })), [config]);
-  const chains = useMemo(() => buildChains(config, accountById, bankById), [config, accountById, bankById]);
+  const chains = useMemo(() => buildChains(config, accountById, bankOptions, bankById), [config, accountById, bankOptions, bankById]);
   const activeCount = connections.filter(connection => connection.active !== false).length;
   const connectionAccountOptions = useMemo(() => {
     if (!connectionModal) return null;
@@ -255,7 +264,7 @@ export default function Snowball() {
   }, [accounts, config, connectionModal]);
   const selectedBankOptionId = useMemo(() => {
     if (!connectionModal) return '';
-    return resolveSnowballBankOptionId({
+    return resolveBankClabeOptionId({
       options: bankOptions,
       destinationBankAccountId: connectionModal.destinationBankAccountId || connectionModal.destinationBankId,
       destinationBankId: connectionModal.destinationBankId,
@@ -326,7 +335,7 @@ export default function Snowball() {
         destinationBankName: null,
       };
     } else {
-      const selectedBankId = resolveSnowballBankOptionId({
+      const selectedBankId = resolveBankClabeOptionId({
         options: bankOptions,
         destinationBankAccountId: connectionModal.destinationBankAccountId || connectionModal.destinationBankId,
         destinationBankId: connectionModal.destinationBankId,
@@ -338,6 +347,7 @@ export default function Snowball() {
         toAccountId: null,
         destinationBankId: bank?.bankId || '',
         destinationBankAccountId: bank?.id || '',
+        destinationBankAccountType: bank?.type || '',
         destinationBankName: bank?.name || '',
         destinationClabe: bank?.clabe || '',
       };
@@ -505,9 +515,15 @@ export default function Snowball() {
                   <tr><td colSpan="5">Sin conexiones configuradas.</td></tr>
                 ) : connections.map(connection => {
                   const from = accountById.get(String(connection.fromAccountId));
+                  const bankOptionId = resolveBankClabeOptionId({
+                    options: bankOptions,
+                    destinationBankAccountId: connection.destinationBankAccountId || connection.destinationBankId,
+                    destinationBankId: connection.destinationBankId,
+                    destinationClabe: connection.destinationClabe,
+                  });
                   const to = connection.destinationType === 'lank_wallet'
                     ? accountById.get(String(connection.toAccountId))
-                    : bankById.get(connection.destinationBankId);
+                    : bankById.get(bankOptionId);
                   return (
                     <tr key={connection.id}>
                       <td><AccountIdentity account={from} detail="Salida Snowball" compact /></td>
@@ -611,6 +627,7 @@ export default function Snowball() {
                     ...previous,
                     destinationBankAccountId: bankOptionId,
                     destinationBankId: bank?.bankId || '',
+                    destinationBankAccountType: bank?.type || '',
                     destinationBankName: bank?.name || '',
                     destinationClabe: bank?.clabe || '',
                   }));

@@ -4,6 +4,7 @@ import { collection, getDocs, doc, getDoc, setDoc, updateDoc, onSnapshot } from 
 import { db } from '../firebase';
 import { formatMXN, getBankMeta, getProfileImage, BANKS, setCustomBankAccounts } from '../config/services';
 import { confirmRecurringExpense, generateRecurringExpenses, logManualChange, applyCreditBalanceByBankId } from '../hooks/firestoreActions';
+import { buildBankClabeOptions } from '../utils/bankClabes';
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
 import { BankIcon, BarChartIcon, CalendarIcon, CheckCircleIcon, ClipboardIcon, ClockIcon, CloseIcon, CreditCardIcon, DepositIcon, EditIcon, ExpenseIcon, FolderIcon, HourglassIcon, KeyIcon, LinkIcon, MoneyIcon, PlusIcon, ReceiptIcon, RefreshIcon, SaveIcon, TrashIcon, TrendUpIcon, WarningIcon } from '../components/Icons';
 
@@ -113,8 +114,7 @@ export default function Finance() {
  const [copiedClabe, setCopiedClabe] = useState(null);
 
  const bankAccountOptions = useMemo(() => {
-   const debitClabes = clabes.filter(c => c.type !== 'credito');
-   const bankNames = [...new Set(debitClabes.map(c => c.bank))];
+   const bankNames = [...new Set(clabes.map(c => c.bank))];
    return bankNames.map(b => ({ value: b, label: b }));
  }, [clabes]);
 
@@ -195,33 +195,25 @@ export default function Finance() {
    const unsub = onSnapshot(collection(db, 'banks'), (snap) => {
      if (!snap.empty) {
        banksSourceRef.current = true;
-       const derivedClabes = [];
+       const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+       const derivedClabes = buildBankClabeOptions({ banks: docs }).map(option => ({
+         bank: option.name,
+         clabe: option.clabe,
+         type: option.type,
+         note: option.note,
+         bankId: option.bankId,
+         logoUrl: option.logoUrl,
+         color: option.color,
+       }));
        const derivedCredit = [];
 
-       snap.docs.forEach(d => {
-         const bank = { id: d.id, ...d.data() };
-         if (bank.debitAccount?.clabe) {
-           derivedClabes.push({
-             bank: bank.name,
-             clabe: bank.debitAccount.clabe,
-             type: 'debito',
-             note: bank.debitAccount.note || '',
-           });
-         }
+       docs.forEach(bank => {
          if (bank.creditAccount) {
            derivedCredit.push({
              id: bank.id,
              bank: bank.name,
              ...bank.creditAccount,
             });
-           if (bank.creditAccount.paymentClabe) {
-             derivedClabes.push({
-               bank: bank.name,
-               clabe: bank.creditAccount.paymentClabe,
-               type: 'credito',
-               note: bank.creditAccount.paymentClabeNote || 'sólo para pagar',
-             });
-           }
          }
        });
 
@@ -834,7 +826,7 @@ export default function Finance() {
    if (w.knownBankAccount?.bank) return w.knownBankAccount.bank;
    if (w.accountNumber) {
      const match = clabes.find(c => c.clabe === w.accountNumber);
-     if (match) return match.type === 'credito' ? `${match.bank} Crédito` : match.bank;
+     if (match) return match.bank;
    }
    return w.bank || 'Desconocido';
  };
@@ -1440,174 +1432,96 @@ export default function Finance() {
           <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 400 }}>Editar en Bóveda → Bancos</span>
         </div>
 
-        {/* Cuentas de débito */}
+        {/* CLABEs bancarias disponibles */}
         {(() => {
-          // Construir lista unificada: todos los bancos (de CLABEs + retiros)
-          const debitClabes = clabes.filter(c => c.type !== 'credito');
-          const allDebitBanks = new Set([
-            ...debitClabes.map(c => c.bank),
-            ...Object.keys(byBank).filter(b => !clabes.find(c => c.type === 'credito' && c.bank === b)),
-          ]);
+          const clabeRows = clabes.map((clabeEntry, index) => ({
+            id: clabeEntry.clabe || `${clabeEntry.bank}-${index}`,
+            bankName: clabeEntry.bank,
+            clabeEntry,
+          }));
+          const banksWithoutClabe = Object.keys(byBank)
+            .filter(bankName => !clabes.some(clabeEntry => clabeEntry.bank === bankName))
+            .map(bankName => ({ id: `withdrawals-${bankName}`, bankName, clabeEntry: null }));
+          const rows = [...clabeRows, ...banksWithoutClabe];
 
-          if (allDebitBanks.size === 0 && Object.keys(byBank).length === 0) return null;
+          if (rows.length === 0) return null;
 
           return (
-            <>
-              {allDebitBanks.size > 0 && (
-                <div style={{ marginBottom: '20px' }}>
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px', letterSpacing: '0.5px' }}>
-                    <CreditCardIcon size={16} /> Cuentas de débito
-                  </div>
-                  <div className="bank-grid-3">
-                    {[...allDebitBanks].map(bankName => {
-                      const bankMeta = getBankMeta(bankName);
-                      const clabeEntry = debitClabes.find(c => c.bank === bankName);
-                      const isCopied = clabeEntry && copiedClabe === clabeEntry.clabe;
-                      const bankData = byBank[bankName];
-                      const isOpen = expandedBank === bankName;
+            <div>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px', letterSpacing: '0.5px' }}>
+                <CreditCardIcon size={16} /> CLABEs disponibles
+              </div>
+              <div className="bank-grid-3">
+                {rows.map(({ id, bankName, clabeEntry }) => {
+                  const bankMeta = getBankMeta(bankName);
+                  const color = clabeEntry?.color || bankMeta.color;
+                  const logo = clabeEntry?.logoUrl || bankMeta.logo;
+                  const isCopied = clabeEntry && copiedClabe === clabeEntry.clabe;
+                  const bankData = byBank[bankName];
+                  const isOpen = expandedBank === bankName;
 
-                      return (
-                        <div className="clabe-card" key={bankName} style={{ '--bank-color': bankMeta.color }}>
-                          <div className="clabe-card-header">
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                              {bankMeta.logo && <img src={bankMeta.logo} className="bank-logo-xl" alt="" onError={e => { e.target.style.display = 'none'; }} />}
-                              <div>
-                                <div style={{ fontWeight: 700, fontSize: '14px' }}>{bankName}</div>
-                                {bankData && (
-                                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                                    {bankData.count} retiro{bankData.count !== 1 ? 's' : ''} · {formatMXN(bankData.total)}
-                                  </div>
-                                )}
-                              </div>
+                  return (
+                    <div className={`clabe-card ${clabeEntry?.type === 'credito' ? 'credit' : ''}`} key={id} style={{ '--bank-color': color }}>
+                      <div className="clabe-card-header">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          {logo && <img src={logo} className="bank-logo-xl" alt="" onError={e => { e.target.style.display = 'none'; }} />}
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: '14px' }}>{bankName}</div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                              {clabeEntry ? (clabeEntry.type === 'credito' ? 'Crédito' : 'Débito') : 'Sin CLABE registrada'}
+                              {bankData ? ` · ${bankData.count} retiro${bankData.count !== 1 ? 's' : ''} · ${formatMXN(bankData.total)}` : ''}
                             </div>
                           </div>
-
-                          {/* CLABE copiable */}
-                          {clabeEntry && (
-                            <div
-                              className={`clabe-number ${isCopied ? 'copied' : ''}`}
-                              onClick={() => handleCopyClabe(clabeEntry.clabe, bankName)}
-                              title="Clic para copiar CLABE"
-                            >
-                              <span className="clabe-digits">{clabeEntry.clabe}</span>
-                              <span className="clabe-copy-icon">{isCopied ? <CheckCircleIcon size={16} /> : <ClipboardIcon size={16} />}</span>
-                            </div>
-                          )}
-
-                          {clabeEntry?.note && <div className="clabe-note"><WarningIcon size={16} /> {clabeEntry.note}</div>}
-
-                          {/* Retiros del banco (accordion) */}
-                          {bankData && bankData.items.length > 0 && (
-                            <div style={{ marginTop: '8px' }}>
-                              <div
-                                className="bank-withdrawals-toggle"
-                                onClick={() => setExpandedBank(isOpen ? null : bankName)}
-                              >
-                                <span><ReceiptIcon size={16} /> {bankData.count} retiro{bankData.count !== 1 ? 's' : ''}</span>
-                                <span style={{ fontSize: '12px', color: 'var(--text-muted)', transition: 'transform 0.3s', transform: isOpen ? 'rotate(180deg)' : 'rotate(0)' }}>▼</span>
-                              </div>
-                              {isOpen && (
-                                <div className="bank-accordion-body" style={{ marginTop: '4px' }}>
-                                  {bankData.items
-                                    .sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || ''))
-                                    .map((w, wi) => (
-                                      <div className="bank-accordion-row" key={wi}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                          <span className="bank-accordion-date">
-                                            {w.completedAt
-                                              ? new Date(w.completedAt).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-                                              : 'Pendiente'}
-                                          </span>
-                                        </div>
-                                        <div style={{ fontWeight: 700, fontSize: '15px' }}>{formatMXN(w.amount)}</div>
-                                      </div>
-                                    ))}
-                                </div>
-                              )}
-                            </div>
-                          )}
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+                      </div>
 
-              {/* Cuentas de crédito */}
-              {clabes.filter(c => c.type === 'credito').length > 0 && (
-                <div>
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px', letterSpacing: '0.5px' }}>
-                     Cuentas de crédito (solo para pagar)
-                  </div>
-                  <div className="bank-grid-3">
-                    {clabes.filter(c => c.type === 'credito').map((c, idx) => {
-                      const bankMeta = getBankMeta(c.bank);
-                      const isCopied = copiedClabe === c.clabe;
-                      const bankData = byBank[c.bank];
-                      const isOpen = expandedBank === c.bank;
+                      {clabeEntry && (
+                        <div
+                          className={`clabe-number ${isCopied ? 'copied' : ''}`}
+                          onClick={() => handleCopyClabe(clabeEntry.clabe)}
+                          title="Clic para copiar CLABE"
+                        >
+                          <span className="clabe-digits">{clabeEntry.clabe}</span>
+                          <span className="clabe-copy-icon">{isCopied ? <CheckCircleIcon size={16} /> : <ClipboardIcon size={16} />}</span>
+                        </div>
+                      )}
 
-                      return (
-                        <div className="clabe-card credit" key={`c-${idx}`} style={{ '--bank-color': bankMeta.color }}>
-                          <div className="clabe-card-header">
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                              {bankMeta.logo && <img src={bankMeta.logo} className="bank-logo-xl" alt="" onError={e => { e.target.style.display = 'none'; }} />}
-                              <div>
-                                <div style={{ fontWeight: 700, fontSize: '14px' }}>{c.bank}</div>
-                                {bankData && (
-                                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                                    {bankData.count} retiro{bankData.count !== 1 ? 's' : ''} · {formatMXN(bankData.total)}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
+                      {clabeEntry?.note && <div className="clabe-note"><WarningIcon size={16} /> {clabeEntry.note}</div>}
+
+                      {bankData && bankData.items.length > 0 && (
+                        <div style={{ marginTop: '8px' }}>
                           <div
-                            className={`clabe-number ${isCopied ? 'copied' : ''}`}
-                            onClick={() => handleCopyClabe(c.clabe, c.bank)}
-                            title="Clic para copiar CLABE"
+                            className="bank-withdrawals-toggle"
+                            onClick={() => setExpandedBank(isOpen ? null : bankName)}
                           >
-                            <span className="clabe-digits">{c.clabe}</span>
-                            <span className="clabe-copy-icon">{isCopied ? <CheckCircleIcon size={16} /> : <ClipboardIcon size={16} />}</span>
+                            <span><ReceiptIcon size={16} /> {bankData.count} retiro{bankData.count !== 1 ? 's' : ''}</span>
+                            <span style={{ fontSize: '12px', color: 'var(--text-muted)', transition: 'transform 0.3s', transform: isOpen ? 'rotate(180deg)' : 'rotate(0)' }}>▼</span>
                           </div>
-                          {c.note && <div className="clabe-note"><WarningIcon size={16} /> {c.note}</div>}
-
-                          {/* Retiros del banco de crédito (si existen) */}
-                          {bankData && bankData.items.length > 0 && (
-                            <div style={{ marginTop: '8px' }}>
-                              <div
-                                className="bank-withdrawals-toggle"
-                                onClick={() => setExpandedBank(isOpen ? null : c.bank)}
-                              >
-                                <span><ReceiptIcon size={16} /> {bankData.count} retiro{bankData.count !== 1 ? 's' : ''}</span>
-                                <span style={{ fontSize: '12px', color: 'var(--text-muted)', transition: 'transform 0.3s', transform: isOpen ? 'rotate(180deg)' : 'rotate(0)' }}>▼</span>
-                              </div>
-                              {isOpen && (
-                                <div className="bank-accordion-body" style={{ marginTop: '4px' }}>
-                                  {bankData.items
-                                    .sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || ''))
-                                    .map((w, wi) => (
-                                      <div className="bank-accordion-row" key={wi}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                          <span className="bank-accordion-date">
-                                            {w.completedAt
-                                              ? new Date(w.completedAt).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-                                              : 'Pendiente'}
-                                          </span>
-                                        </div>
-                                        <div style={{ fontWeight: 700, fontSize: '15px' }}>{formatMXN(w.amount)}</div>
-                                      </div>
-                                    ))}
-                                </div>
-                              )}
+                          {isOpen && (
+                            <div className="bank-accordion-body" style={{ marginTop: '4px' }}>
+                              {bankData.items
+                                .sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || ''))
+                                .map((w, wi) => (
+                                  <div className="bank-accordion-row" key={wi}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                      <span className="bank-accordion-date">
+                                        {w.completedAt
+                                          ? new Date(w.completedAt).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+                                          : 'Pendiente'}
+                                      </span>
+                                    </div>
+                                    <div style={{ fontWeight: 700, fontSize: '15px' }}>{formatMXN(w.amount)}</div>
+                                  </div>
+                                ))}
                             </div>
                           )}
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           );
         })()}
       </div>

@@ -1887,6 +1887,12 @@ body {
   line-height: 1.25;
   overflow-wrap: anywhere;
 }
+.snowball-bank-type {
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--text-primary);
+  font-weight: 700;
+}
 .snowball-account-options {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
