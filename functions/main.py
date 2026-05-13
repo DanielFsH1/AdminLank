@@ -941,12 +941,19 @@ def analyze_account(account, rates, days, db_context, db, last_uid=None, service
             subject = core.decode_mime(msg.get('Subject', ''))
             date = core.decode_mime(msg.get('Date', ''))
             body = core.get_text(msg)
+            message_id = core.decode_mime(msg.get('Message-ID', '')).strip()
             uid_int = int(uid)
 
             if uid_int > result['maxUid']:
                 result['maxUid'] = uid_int
             body_snippet = (body or '')[:2000].strip()
-            result['rawEmails'].append({'uid': uid_int, 'date': date, 'subject': subject, 'bodySnippet': body_snippet})
+            result['rawEmails'].append({
+                'uid': uid_int,
+                'date': date,
+                'subject': subject,
+                'bodySnippet': body_snippet,
+                'messageId': message_id or None,
+            })
 
             if is_non_operational_lank_mail(subject, body):
                 continue
@@ -960,7 +967,6 @@ def analyze_account(account, rates, days, db_context, db, last_uid=None, service
             if review['category'] == 'ignore' and event.get('kind') in IGNORED_EVENT_KINDS:
                 continue
 
-            message_id = core.decode_mime(msg.get('Message-ID', '')).strip()
             dedupe_key = message_id or '|'.join([
                 subject.strip().lower(), event.get('kind') or '',
                 str(event.get('subscription') or ''), str(event.get('userName') or ''),
@@ -999,7 +1005,48 @@ def analyze_account(account, rates, days, db_context, db, last_uid=None, service
 
 # ───────────────── NOTIFICATIONS (7-day retention) ──────────────────
 
-def save_notifications(db, account_id, alias, raw_emails, analysis_timestamp=None):
+def _notification_parse_fields(raw, account_id, services_config=None):
+    name_aliases = _build_name_aliases(services_config)
+    try:
+        event = core.parse_event(
+            raw.get('subject', ''),
+            raw.get('bodySnippet', ''),
+            account_id,
+            'notification',
+            name_aliases=name_aliases,
+        )
+    except Exception:
+        return {
+            'parsedService': None,
+            'parsedUserAlias': None,
+            'parseConfidence': 'unresolved',
+            'parseNotes': ['parse_error'],
+        }
+
+    parsed_service = core.canonical_subscription(event.get('subscription'), name_aliases)
+    parsed_user = event.get('userName') or event.get('userEmail')
+    notes = []
+    if not parsed_service:
+        notes.append('unresolved_service')
+    if event.get('kind') in (JOIN_EVENT_KINDS | LEAVE_EVENT_KINDS) and not parsed_user:
+        notes.append('unresolved_user')
+
+    if parsed_service and parsed_user:
+        confidence = 'high'
+    elif parsed_service or parsed_user:
+        confidence = 'medium'
+    else:
+        confidence = 'unresolved'
+
+    return {
+        'parsedService': parsed_service,
+        'parsedUserAlias': parsed_user,
+        'parseConfidence': confidence,
+        'parseNotes': notes,
+    }
+
+
+def save_notifications(db, account_id, alias, raw_emails, analysis_timestamp=None, services_config=None):
     """Save raw email notifications to Firestore with 7-day expiry based on email date."""
     now = datetime.now(timezone.utc)
     cutoff_7d = now - timedelta(days=7)
@@ -1031,8 +1078,10 @@ def save_notifications(db, account_id, alias, raw_emails, analysis_timestamp=Non
             'expiresAt': expires_at.isoformat(),
             'subject': raw.get('subject', ''),
             'bodySnippet': raw.get('bodySnippet', ''),
+            'messageId': raw.get('messageId'),
             'kind': kind,
             'discoveredAt': discovered_at,
+            **_notification_parse_fields(raw, account_id, services_config=services_config),
         })
 
     if notifications:
@@ -1615,6 +1664,7 @@ def run_analysis_accounts(db, accounts, rates, db_context, state, services_confi
                 account.get('canonicalAlias', ''),
                 account_result['rawEmails'],
                 analysis_timestamp=report['generatedAt'],
+                services_config=services_config,
             )
 
         max_uid = account_result.get('maxUid', 0)
