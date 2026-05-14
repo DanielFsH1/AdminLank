@@ -358,6 +358,30 @@ describe('validateSnowballConfig', () => {
 
     expect(() => validateSnowballConfig(config)).toThrow('ciclo');
   });
+
+  it('rechaza usar la misma CLABE bancaria externa como destino activo más de una vez', () => {
+    const config = {
+      wallets: {},
+      connections: {
+        a: {
+          fromAccountId: '1',
+          destinationType: 'external_bank',
+          destinationBankId: 'bank-1',
+          destinationClabe: '012 345 678 901 234 567',
+          active: true,
+        },
+        b: {
+          fromAccountId: '2',
+          destinationType: 'external_bank',
+          destinationBankId: 'bank-1',
+          destinationClabe: '012345678901234567',
+          active: true,
+        },
+      },
+    };
+
+    expect(() => validateSnowballConfig(config)).toThrow('solo puede usarse como destino una vez');
+  });
 });
 
 describe('scheduled manual alerts', () => {

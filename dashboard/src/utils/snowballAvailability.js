@@ -14,6 +14,10 @@ function activeConnections(config, editingConnection) {
     .filter(connection => normalizeId(connection.id) !== editingId);
 }
 
+function connectionDestinationType(connection) {
+  return connection?.destinationType || 'lank_wallet';
+}
+
 export function hasActiveSnowballWallet(config, accountId) {
   const wallet = config?.wallets?.[normalizeId(accountId)];
   if (!wallet || wallet.active === false) return false;
@@ -55,5 +59,65 @@ export function buildSnowballAccountOptions({
         && hasActiveSnowballWallet(config, account.id)
       ))
       : [],
+  };
+}
+
+export function buildSnowballBankDestinationOptions({
+  bankOptions = [],
+  config = {},
+  editingConnection = null,
+} = {}) {
+  const connections = activeConnections(config, editingConnection);
+  const usedExternalClabes = new Set();
+
+  connections.forEach((connection) => {
+    if (connectionDestinationType(connection) !== 'external_bank') return;
+    const clabe = normalizeClabeValue(connection.destinationClabe);
+    if (clabe) usedExternalClabes.add(clabe);
+  });
+
+  return {
+    usedExternalClabes,
+    destinationBanks: bankOptions.filter(bank => !usedExternalClabes.has(normalizeClabeValue(bank.clabe))),
+  };
+}
+
+export function describeSnowballConnectionDeletion(config = {}, connection = {}) {
+  const active = activeConnections(config, connection);
+  const from = normalizeId(connection.fromAccountId);
+  const to = normalizeId(connection.toAccountId);
+  const destinationType = connectionDestinationType(connection);
+
+  if (connection.active === false) {
+    return {
+      willSplitChain: false,
+      message: 'Esta conexión está inactiva; eliminarla no cambia las bolas activas.',
+    };
+  }
+
+  if (destinationType === 'external_bank') {
+    return {
+      willSplitChain: false,
+      message: `Se eliminará el retiro externo desde la cuenta Lank #${from}. La cuenta quedará sin destino final.`,
+    };
+  }
+
+  const hasIncomingBefore = active.some(candidate => (
+    connectionDestinationType(candidate) === 'lank_wallet'
+    && normalizeId(candidate.toAccountId) === from
+  ));
+  const hasOutgoingAfter = active.some(candidate => normalizeId(candidate.fromAccountId) === to);
+  const willSplitChain = Boolean(hasIncomingBefore && hasOutgoingAfter);
+
+  if (willSplitChain) {
+    return {
+      willSplitChain: true,
+      message: `Eliminar la conexión #${from} -> #${to} separará la bola en dos cadenas activas independientes.`,
+    };
+  }
+
+  return {
+    willSplitChain: false,
+    message: `Se eliminará la conexión #${from} -> #${to}. La cadena se recalculará automáticamente.`,
   };
 }

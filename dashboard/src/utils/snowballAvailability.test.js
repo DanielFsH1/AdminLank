@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildSnowballAccountOptions } from './snowballAvailability';
+import {
+  buildSnowballAccountOptions,
+  buildSnowballBankDestinationOptions,
+  describeSnowballConnectionDeletion,
+} from './snowballAvailability';
 
 const accounts = [
   { id: '1', canonicalAlias: 'Daniel' },
@@ -127,5 +131,70 @@ describe('buildSnowballAccountOptions', () => {
 
     expect(ids(options.destinationAccounts)).not.toContain('3');
     expect(ids(options.destinationAccounts)).not.toContain('4');
+  });
+});
+
+describe('buildSnowballBankDestinationOptions', () => {
+  const bankOptions = [
+    { id: 'bank:one:debit:012345678901234567', bankId: 'one', clabe: '012345678901234567' },
+    { id: 'bank:two:debit:999999999999999999', bankId: 'two', clabe: '999999999999999999' },
+  ];
+
+  it('oculta CLABEs bancarias externas que ya son destino activo', () => {
+    const options = buildSnowballBankDestinationOptions({ bankOptions, config });
+
+    expect(options.destinationBanks.map(bank => bank.id)).toEqual(['bank:two:debit:999999999999999999']);
+    expect([...options.usedExternalClabes]).toEqual(['012345678901234567']);
+  });
+
+  it('permite conservar la CLABE bancaria externa al editar esa conexión', () => {
+    const options = buildSnowballBankDestinationOptions({
+      bankOptions,
+      config,
+      editingConnection: config.connections.three_to_bank,
+    });
+
+    expect(options.destinationBanks.map(bank => bank.id)).toEqual([
+      'bank:one:debit:012345678901234567',
+      'bank:two:debit:999999999999999999',
+    ]);
+  });
+});
+
+describe('describeSnowballConnectionDeletion', () => {
+  it('describe cuando borrar una conexión parte una bola en dos cadenas', () => {
+    const chainConfig = {
+      ...config,
+      wallets: {
+        ...config.wallets,
+        4: { accountId: '4', walletClabe: '646180444444444444', active: true },
+      },
+      connections: {
+        one_to_two: config.connections.one_to_two,
+        two_to_three: {
+          id: 'two_to_three',
+          fromAccountId: '2',
+          destinationType: 'lank_wallet',
+          toAccountId: '3',
+          destinationClabe: '646180333333333333',
+          active: true,
+        },
+        three_to_four: {
+          id: 'three_to_four',
+          fromAccountId: '3',
+          destinationType: 'lank_wallet',
+          toAccountId: '4',
+          destinationClabe: '646180444444444444',
+          active: true,
+        },
+      },
+    };
+
+    const impact = describeSnowballConnectionDeletion(chainConfig, chainConfig.connections.two_to_three);
+
+    expect(impact.willSplitChain).toBe(true);
+    expect(impact.message).toContain('separará la bola');
+    expect(impact.message).toContain('#2');
+    expect(impact.message).toContain('#3');
   });
 });

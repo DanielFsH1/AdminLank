@@ -68,6 +68,7 @@ export function validateSnowballConfig(config = {}) {
   const activeConnections = activeSnowballConnections(config);
   const outgoing = new Map();
   const incoming = new Map();
+  const externalDestinations = new Map();
   const graph = new Map();
 
   activeConnections.forEach((connection) => {
@@ -108,9 +109,14 @@ export function validateSnowballConfig(config = {}) {
       if (!normalizeSnowballId(connection.destinationBankId)) {
         throw new Error('Selecciona un banco externo registrado');
       }
-      if (!normalizeClabe(connection.destinationClabe)) {
+      const destinationClabe = normalizeClabe(connection.destinationClabe);
+      if (!destinationClabe) {
         throw new Error('El banco externo necesita CLABE');
       }
+      if (externalDestinations.has(destinationClabe)) {
+        throw new Error('La CLABE bancaria externa solo puede usarse como destino una vez');
+      }
+      externalDestinations.set(destinationClabe, connection.id);
     } else {
       throw new Error('Tipo de destino Snowball inválido');
     }

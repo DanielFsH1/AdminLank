@@ -2,7 +2,11 @@ import { useMemo, useState } from 'react';
 import { useCollection, useDocument } from '../hooks/useFirestore';
 import { saveSnowballConfig, normalizeClabe } from '../hooks/firestoreActions';
 import { getProfileImage } from '../config/services';
-import { buildSnowballAccountOptions } from '../utils/snowballAvailability';
+import {
+  buildSnowballAccountOptions,
+  buildSnowballBankDestinationOptions,
+  describeSnowballConnectionDeletion,
+} from '../utils/snowballAvailability';
 import { buildBankClabeOptions, resolveBankClabeOptionId } from '../utils/bankClabes';
 import { BankIcon, CheckCircleIcon, EditIcon, LinkIcon, PlusIcon, SaveIcon, ToggleOffIcon, ToggleOnIcon, TrashIcon, WarningIcon } from '../components/Icons';
 
@@ -274,6 +278,17 @@ export default function Snowball() {
       destinationType: connectionModal.destinationType || 'lank_wallet',
     });
   }, [accounts, config, connectionModal]);
+  const connectionBankOptions = useMemo(() => {
+    if (!connectionModal) {
+      return { destinationBanks: bankOptions, usedExternalClabes: new Set() };
+    }
+
+    return buildSnowballBankDestinationOptions({
+      bankOptions,
+      config,
+      editingConnection: connectionModal.id ? connectionModal : null,
+    });
+  }, [bankOptions, config, connectionModal]);
   const selectedBankOptionId = useMemo(() => {
     if (!connectionModal) return '';
     return resolveBankClabeOptionId({
@@ -391,9 +406,17 @@ export default function Snowball() {
   }
 
   function deleteConnection(connection) {
+    const impact = describeSnowballConnectionDeletion(config, connection);
+    if (typeof window !== 'undefined' && !window.confirm(`${impact.message}\n\n¿Eliminar esta conexión?`)) {
+      return;
+    }
+
     const nextConnections = { ...config.connections };
     delete nextConnections[connection.id];
-    persist({ ...config, connections: nextConnections }, `Conexión Snowball eliminada desde Lank #${connection.fromAccountId}`);
+    persist(
+      { ...config, connections: nextConnections },
+      `Conexión Snowball eliminada desde Lank #${connection.fromAccountId}. ${impact.message}`
+    );
   }
 
   return (
@@ -646,7 +669,7 @@ export default function Snowball() {
             <div className="edit-modal-field">
               <span className="edit-modal-label">Banco externo final</span>
               <BankOptionGrid
-                banks={bankOptions}
+                banks={connectionBankOptions.destinationBanks}
                 selectedId={selectedBankOptionId}
                 emptyText="No hay CLABEs bancarias disponibles para retiro."
                 collapseWhenSelected
