@@ -317,9 +317,15 @@ def load_snowball_config(db):
         doc = db.document('config/snowball').get()
         if doc.exists:
             data = doc.to_dict() or {}
+            wallets = data.get('wallets') or {}
+            connections = data.get('connections') or {}
+            if isinstance(wallets, list):
+                wallets = {str(w.get('accountId') or w.get('id') or idx): w for idx, w in enumerate(wallets) if isinstance(w, dict)}
+            if isinstance(connections, list):
+                connections = {str(c.get('id') or idx): c for idx, c in enumerate(connections) if isinstance(c, dict)}
             return {
-                'wallets': data.get('wallets') or {},
-                'connections': data.get('connections') or {},
+                'wallets': wallets if isinstance(wallets, dict) else {},
+                'connections': connections if isinstance(connections, dict) else {},
             }
     except Exception:
         pass
@@ -330,7 +336,11 @@ def load_known_bank_accounts(db):
     try:
         banks_doc = db.document('config/bank-accounts').get()
         if banks_doc.exists:
-            return banks_doc.to_dict().get('accounts', [])
+            accounts = (banks_doc.to_dict() or {}).get('accounts', [])
+            if isinstance(accounts, dict):
+                return [acc for acc in accounts.values() if isinstance(acc, dict)]
+            if isinstance(accounts, list):
+                return [acc for acc in accounts if isinstance(acc, dict)]
     except Exception:
         pass
     return []
@@ -425,18 +435,30 @@ def _normalize_clabe(value):
     return digits if digits and len(digits) == 18 else None
 
 
-def _event_destination_clabe(event):
+def _event_clabe_candidates(event):
+    """Return unique normalized 18-digit CLABE candidates in deterministic source order."""
+    candidates = []
     for candidate in event.get('clabes') or []:
         clabe = _normalize_clabe(candidate)
-        if clabe:
-            return clabe
-    return _normalize_clabe(event.get('accountNumber'))
+        if clabe and clabe not in candidates:
+            candidates.append(clabe)
+    account_clabe = _normalize_clabe(event.get('accountNumber'))
+    if account_clabe and account_clabe not in candidates:
+        candidates.append(account_clabe)
+    return candidates
+
+
+def _event_destination_clabe(event):
+    candidates = _event_clabe_candidates(event)
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def _match_known_bank_by_clabe(clabe, known_banks):
     if not clabe:
         return None
     for kb in known_banks or []:
+        if not isinstance(kb, dict):
+            continue
         kb_digits = _normalize_clabe(kb.get('clabe') or kb.get('accountNumber'))
         if kb_digits == clabe:
             return kb
@@ -444,17 +466,51 @@ def _match_known_bank_by_clabe(clabe, known_banks):
 
 
 def resolve_withdrawal_destination(event, db=None, snowball_config=None, known_banks=None):
-    """Classify withdrawal destination as internal Snowball, external bank, or unclassified."""
-    clabe = _event_destination_clabe(event)
+    """Classify withdrawal destination as internal Snowball, external bank, or unclassified.
+
+    Resolution is CLABE-first and deliberately ignores bank labels such as "STP" as an
+    identity source. Internal Snowball wallet CLABEs win over external bank mappings;
+    ambiguous or unknown CLABEs remain pending review and never synthesize a bank.
+    """
+    clabe_candidates = _event_clabe_candidates(event)
+    if len(clabe_candidates) > 1:
+        event.pop('destinationClabe', None)
+        event.pop('destinationAccountId', None)
+        event.pop('snowballConnectionId', None)
+        event.pop('destinationBankId', None)
+        event.pop('knownBankAccount', None)
+        event.update({
+            'movementType': 'unclassified_clabe',
+            'classificationStatus': 'pending_review',
+            'classificationReason': 'ambiguous_clabe_candidates',
+            'clabeCandidates': clabe_candidates,
+        })
+        return {
+            'movementType': 'unclassified_clabe',
+            'classificationStatus': 'pending_review',
+            'classificationReason': 'ambiguous_clabe_candidates',
+            'clabeCandidates': clabe_candidates,
+        }
+
+    clabe = clabe_candidates[0] if clabe_candidates else None
     if clabe:
         event['destinationClabe'] = clabe
 
     if not clabe:
         legacy_account_number = core.normalize_account_number(event.get('accountNumber'))
         if legacy_account_number:
+            event.pop('destinationClabe', None)
+            event.pop('destinationAccountId', None)
+            event.pop('snowballConnectionId', None)
+            event.pop('destinationBankId', None)
+            event.pop('knownBankAccount', None)
             event['movementType'] = 'external_bank'
             event['classificationStatus'] = 'legacy_account_number'
             return {'movementType': 'external_bank', 'classificationStatus': 'legacy_account_number'}
+        event.pop('destinationAccountId', None)
+        event.pop('snowballConnectionId', None)
+        event.pop('destinationBankId', None)
+        event.pop('knownBankAccount', None)
         event['movementType'] = 'unknown_destination'
         event['classificationStatus'] = 'missing_clabe'
         return {'movementType': 'unknown_destination', 'classificationStatus': 'missing_clabe'}
@@ -464,7 +520,11 @@ def resolve_withdrawal_destination(event, db=None, snowball_config=None, known_b
     snowball_config = snowball_config or {'wallets': {}, 'connections': {}}
 
     wallets = snowball_config.get('wallets') or {}
+    if isinstance(wallets, list):
+        wallets = {str(wallet.get('accountId') or wallet.get('id') or idx): wallet for idx, wallet in enumerate(wallets) if isinstance(wallet, dict)}
     for wallet_key, wallet in wallets.items():
+        if not isinstance(wallet, dict):
+            continue
         wallet_clabe = _normalize_clabe(wallet.get('walletClabe') or wallet.get('clabe'))
         if wallet.get('active') is False:
             continue
@@ -473,7 +533,12 @@ def resolve_withdrawal_destination(event, db=None, snowball_config=None, known_b
 
         from_account = str(event.get('accountId') or '').strip()
         connection_match = None
-        for connection_key, connection in (snowball_config.get('connections') or {}).items():
+        connections = snowball_config.get('connections') or {}
+        if isinstance(connections, list):
+            connections = {str(connection.get('id') or idx): connection for idx, connection in enumerate(connections) if isinstance(connection, dict)}
+        for connection_key, connection in connections.items():
+            if not isinstance(connection, dict):
+                continue
             if connection.get('active') is False:
                 continue
             if connection.get('destinationType') != 'lank_wallet':
@@ -486,23 +551,31 @@ def resolve_withdrawal_destination(event, db=None, snowball_config=None, known_b
             break
 
         destination_account_id = str(wallet.get('accountId') or wallet_key)
+        event.pop('destinationBankId', None)
+        event.pop('knownBankAccount', None)
+        event.pop('classificationReason', None)
         event.update({
             'movementType': 'snowball_internal',
             'classificationStatus': 'classified',
             'destinationAccountId': destination_account_id,
             'snowballConnectionId': connection_match.get('id') if connection_match else None,
         })
-        return {
+        result = {
             'movementType': 'snowball_internal',
             'classificationStatus': 'classified',
             'destinationAccountId': destination_account_id,
-            'snowballConnectionId': event.get('snowballConnectionId'),
         }
+        if event.get('snowballConnectionId'):
+            result['snowballConnectionId'] = event.get('snowballConnectionId')
+        return result
 
     if known_banks is None and db is not None:
         known_banks = load_known_bank_accounts(db)
     known_bank = _match_known_bank_by_clabe(clabe, known_banks or [])
     if known_bank:
+        event.pop('destinationAccountId', None)
+        event.pop('snowballConnectionId', None)
+        event.pop('classificationReason', None)
         event.update({
             'movementType': 'external_bank',
             'classificationStatus': 'classified',
@@ -516,6 +589,11 @@ def resolve_withdrawal_destination(event, db=None, snowball_config=None, known_b
             'destinationBankId': event.get('destinationBankId'),
         }
 
+    event.pop('destinationAccountId', None)
+    event.pop('snowballConnectionId', None)
+    event.pop('destinationBankId', None)
+    event.pop('knownBankAccount', None)
+    event.pop('classificationReason', None)
     event.update({
         'movementType': 'unclassified_clabe',
         'classificationStatus': 'pending_review',
@@ -1268,6 +1346,8 @@ def update_finance_from_analysis(db, ok_accounts):
                 'destinationClabe': evt.get('destinationClabe'),
                 'movementType': destination.get('movementType') or evt.get('movementType'),
                 'classificationStatus': destination.get('classificationStatus') or evt.get('classificationStatus'),
+                'classificationReason': destination.get('classificationReason') or evt.get('classificationReason'),
+                'clabeCandidates': destination.get('clabeCandidates') or evt.get('clabeCandidates'),
                 'snowballConnectionId': destination.get('snowballConnectionId') or evt.get('snowballConnectionId'),
                 'destinationAccountId': destination.get('destinationAccountId') or evt.get('destinationAccountId'),
                 'destinationBankId': destination.get('destinationBankId') or evt.get('destinationBankId'),
@@ -1308,6 +1388,8 @@ def update_finance_from_analysis(db, ok_accounts):
         base_payload = {
             'movementType': we.get('movementType') or 'unknown_destination',
             'classificationStatus': we.get('classificationStatus') or 'pending_review',
+            'classificationReason': we.get('classificationReason'),
+            'clabeCandidates': we.get('clabeCandidates'),
             'destinationClabe': we.get('destinationClabe') or we.get('accountNumber'),
             'snowballConnectionId': we.get('snowballConnectionId'),
             'destinationAccountId': we.get('destinationAccountId'),
@@ -1711,6 +1793,8 @@ def _build_finance_work_item(account, row, raw_email):
             'destinationClabe': event.get('destinationClabe'),
             'movementType': event.get('movementType'),
             'classificationStatus': event.get('classificationStatus'),
+            'classificationReason': event.get('classificationReason'),
+            'clabeCandidates': event.get('clabeCandidates'),
             'knownBankAccount': event.get('knownBankAccount'),
             'destinationAccountId': event.get('destinationAccountId'),
             'destinationBankId': event.get('destinationBankId'),
