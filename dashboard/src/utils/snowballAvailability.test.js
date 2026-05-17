@@ -149,10 +149,9 @@ describe('buildSnowballBankDestinationOptions', () => {
       'bank:two:debit:999999999999999999',
     ]);
     expect([...options.usedExternalClabes]).toEqual(['012345678901234567']);
-    expect([...options.usedExternalBankIds]).toEqual(['bank_1']);
   });
 
-  it('oculta todo el banco externo aunque tenga otra CLABE disponible', () => {
+  it('mantiene disponible otra CLABE del mismo banco externo', () => {
     const configSameBank = {
       ...config,
       connections: {
@@ -166,7 +165,10 @@ describe('buildSnowballBankDestinationOptions', () => {
 
     const options = buildSnowballBankDestinationOptions({ bankOptions, config: configSameBank });
 
-    expect(options.destinationBanks.map(bank => bank.id)).toEqual(['bank:two:debit:999999999999999999']);
+    expect(options.destinationBanks.map(bank => bank.id)).toEqual([
+      'bank:one:credit:111111111111111111',
+      'bank:two:debit:999999999999999999',
+    ]);
   });
 
   it('permite conservar la CLABE bancaria externa al editar esa conexión', () => {

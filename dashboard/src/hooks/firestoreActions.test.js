@@ -382,7 +382,7 @@ describe('validateSnowballConfig', () => {
     expect(() => validateSnowballConfig(config)).toThrow('solo puede usarse como destino una vez');
   });
 
-  it('rechaza usar el mismo banco externo como destino activo más de una vez', () => {
+  it('permite usar el mismo banco externo con CLABEs activas distintas', () => {
     const config = {
       wallets: {},
       connections: {
@@ -403,7 +403,7 @@ describe('validateSnowballConfig', () => {
       },
     };
 
-    expect(() => validateSnowballConfig(config)).toThrow('El banco externo solo puede usarse como destino una vez');
+    expect(() => validateSnowballConfig(config)).not.toThrow();
   });
 });
 
