@@ -114,13 +114,6 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
    if (!el) return;
    const activeBtn = el.querySelector('.vault-tab.active');
    if (activeBtn) activeBtn.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
-   const update = () => {
-     const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 4;
-     el.classList.toggle('at-end', atEnd);
-   };
-   update();
-   el.addEventListener('scroll', update, { passive: true });
-   return () => el.removeEventListener('scroll', update);
  }, [activeTab]);
 
  // ─── App Passwords (IMAP) ───
@@ -1369,7 +1362,7 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
       </div>
 
       {/* Tabs */}
-      <div className="vault-tabs scroll-fade-hint" ref={vaultTabsRef}>
+      <div className="vault-tabs" ref={vaultTabsRef}>
         <button className={`vault-tab ${activeTab === 'credentials' ? 'active' : ''}`} onClick={() => setActiveTab('credentials')}>
            Credenciales de Servicios
           {pendingAlertCount > 0 && <span className="vault-tab-badge">{pendingAlertCount}</span>}

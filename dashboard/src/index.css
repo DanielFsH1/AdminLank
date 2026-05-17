@@ -94,15 +94,6 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border-accent); border-radius: 8px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
-/* ═══ Scroll fade hint (mobile horizontal scrollable areas) ═══ */
-.scroll-fade-hint { position: relative; }
-.scroll-fade-hint::after {
-  content: ''; position: absolute; top: 0; right: 0; bottom: 0; width: 32px;
-  background: linear-gradient(to right, transparent, var(--bg-primary));
-  pointer-events: none; transition: opacity 0.3s; z-index: 2;
-}
-.scroll-fade-hint.at-end::after { opacity: 0; }
-
 /* ═══ Login ═══ */
 .login-container {
   height: 100vh; display: flex; align-items: center; justify-content: center;

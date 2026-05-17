@@ -143,17 +143,12 @@ function App() {
         if (document.querySelector('.vault-modal-overlay, .tools-modal-overlay, .edit-modal-overlay')) return;
 
         // No hacer swipe si el toque inicio dentro de un contenedor con scroll horizontal
-        // PERO permitir swipe si el contenedor está en el extremo correspondiente
         if (touchTarget) {
           let node = touchTarget;
           while (node && node !== el) {
             if (node.scrollWidth > node.clientWidth + 2) {
               const ov = getComputedStyle(node).overflowX;
-              if (ov === 'auto' || ov === 'scroll') {
-                const atStart = node.scrollLeft <= 2;
-                const atEnd = node.scrollLeft + node.clientWidth >= node.scrollWidth - 2;
-                if ((dx < 0 && !atEnd) || (dx > 0 && !atStart)) return;
-              }
+              if (ov === 'auto' || ov === 'scroll') return;
             }
             node = node.parentElement;
           }
