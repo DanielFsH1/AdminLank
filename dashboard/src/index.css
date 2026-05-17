@@ -26,6 +26,10 @@
   --shadow-lg: 0 10px 25px -3px rgba(0, 0, 0, 0.5);
   --shadow-glow: 0 0 20px rgba(50, 100, 200, 0.15);
   --overlay-bg: rgba(0,0,0,0.5);
+  --surface-divider: rgba(148, 163, 184, 0.16);
+  --surface-highlight: rgba(255, 255, 255, 0.045);
+  --surface-panel-shadow: inset 0 1px 0 var(--surface-highlight), 0 1px 2px rgba(0, 0, 0, 0.12);
+  --surface-nested-shadow: inset 0 0 0 1px var(--surface-divider), inset 0 1px 0 var(--surface-highlight);
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 16px;
@@ -69,6 +73,10 @@
   --shadow-lg: 0 10px 25px -3px rgba(0, 0, 0, 0.1);
   --shadow-glow: 0 0 20px rgba(50, 100, 200, 0.1);
   --overlay-bg: rgba(0,0,0,0.3);
+  --surface-divider: rgba(15, 23, 42, 0.09);
+  --surface-highlight: rgba(255, 255, 255, 0.8);
+  --surface-panel-shadow: inset 0 1px 0 var(--surface-highlight), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --surface-nested-shadow: inset 0 0 0 1px var(--surface-divider), inset 0 1px 0 rgba(255, 255, 255, 0.65);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -331,6 +339,107 @@ body {
   background: linear-gradient(180deg, rgba(51,65,85,0.98), rgba(30,41,59,0.98));
 }
 .theme-toggle:active { transform: scale(0.95); }
+
+/* Visual hierarchy separators */
+:where(
+  .stat-card,
+  .kpi-card,
+  .service-card,
+  .svc-overview-card,
+  .lank-card-v2,
+  .lank-card,
+  .alert-card,
+  .alert-card-v2,
+  .alerts-account-group,
+  .notif-account-section,
+  .finance-col,
+  .bank-summary-card,
+  .credit-account-card,
+  .snowball-section,
+  .snowball-selection-panel,
+  .analyze-card,
+  .analyze-kpi-card,
+  .status-stat-card,
+  .status-service-card,
+  .tools-section,
+  .tools-stat-card,
+  .tools-maint-card,
+  .tools-storage-summary,
+  .tools-storage-policy-card,
+  .tools-svc-card,
+  .vault-service-group,
+  .vault-credential-card,
+  .vault-card-payment,
+  .history-month-card,
+  .history-stat-card,
+  .note-card,
+  .sim-month-section,
+  .recharge-confirm-summary
+) {
+  box-shadow: var(--surface-panel-shadow);
+}
+
+:where(
+  .slot-item,
+  .accordion-service,
+  .accordion-extra,
+  .svc-stat-box,
+  .master-config-card,
+  .master-config-stat,
+  .real-account-card,
+  .withdrawal-row,
+  .ledger-entry,
+  .credit-date-item,
+  .credit-link-chip,
+  .credit-expand-toggle,
+  .credit-installment-row,
+  .credit-statement-row,
+  .bank-accordion-row,
+  .acct-withdrawal-row,
+  .history-detail-item,
+  .analyze-event-row,
+  .analyze-account-card,
+  .analyze-event-card,
+  .analyze-raw-email-item,
+  .notif-item,
+  .status-detail-item,
+  .status-detail-stat,
+  .status-detail-kv,
+  .tools-collection-item,
+  .tools-storage-stat-item,
+  .tools-storage-folder-item,
+  .tools-storage-subsection,
+  .vault-field,
+  .vault-linked-item,
+  .vault-history-item,
+  .sim-number-card,
+  .recharge-confirm-row,
+  .add-clabe-bank-option
+) {
+  box-shadow: var(--surface-nested-shadow);
+}
+
+:where(
+  .service-card-header,
+  .accordion-content,
+  .alerts-account-header,
+  .notif-account-header,
+  .status-service-details,
+  .status-detail-kv,
+  .tools-collection-all,
+  .tools-stat-path,
+  .vault-card-header,
+  .vault-card-actions,
+  .vault-payment-header,
+  .vault-linked-section,
+  .credit-installment-row,
+  .credit-statement-row,
+  .sim-number-list,
+  .sim-number-card:not(:last-child),
+  .recharge-confirm-divider
+) {
+  border-color: var(--surface-divider);
+}
 
 /* ═══ Stats ═══ */
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 28px; }
