@@ -148,9 +148,12 @@ function App() {
           let node = touchTarget;
           while (node && node !== el) {
             if (node.scrollWidth > node.clientWidth + 2) {
-              const atStart = node.scrollLeft <= 2;
-              const atEnd = node.scrollLeft + node.clientWidth >= node.scrollWidth - 2;
-              if ((dx < 0 && !atEnd) || (dx > 0 && !atStart)) return;
+              const ov = getComputedStyle(node).overflowX;
+              if (ov === 'auto' || ov === 'scroll') {
+                const atStart = node.scrollLeft <= 2;
+                const atEnd = node.scrollLeft + node.clientWidth >= node.scrollWidth - 2;
+                if ((dx < 0 && !atEnd) || (dx > 0 && !atStart)) return;
+              }
             }
             node = node.parentElement;
           }
