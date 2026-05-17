@@ -69,16 +69,23 @@ export function buildSnowballBankDestinationOptions({
 } = {}) {
   const connections = activeConnections(config, editingConnection);
   const usedExternalClabes = new Set();
+  const usedExternalBankIds = new Set();
 
   connections.forEach((connection) => {
     if (connectionDestinationType(connection) !== 'external_bank') return;
     const clabe = normalizeClabeValue(connection.destinationClabe);
     if (clabe) usedExternalClabes.add(clabe);
+    const bankId = normalizeId(connection.destinationBankId);
+    if (bankId) usedExternalBankIds.add(bankId);
   });
 
   return {
     usedExternalClabes,
-    destinationBanks: bankOptions.filter(bank => !usedExternalClabes.has(normalizeClabeValue(bank.clabe))),
+    usedExternalBankIds,
+    destinationBanks: bankOptions.filter(bank => (
+      !usedExternalClabes.has(normalizeClabeValue(bank.clabe))
+      && !usedExternalBankIds.has(normalizeId(bank.bankId))
+    )),
   };
 }
 

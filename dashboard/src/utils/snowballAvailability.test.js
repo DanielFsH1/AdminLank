@@ -137,14 +137,36 @@ describe('buildSnowballAccountOptions', () => {
 describe('buildSnowballBankDestinationOptions', () => {
   const bankOptions = [
     { id: 'bank:one:debit:012345678901234567', bankId: 'one', clabe: '012345678901234567' },
+    { id: 'bank:one:credit:111111111111111111', bankId: 'one', clabe: '111111111111111111' },
     { id: 'bank:two:debit:999999999999999999', bankId: 'two', clabe: '999999999999999999' },
   ];
 
   it('oculta CLABEs bancarias externas que ya son destino activo', () => {
     const options = buildSnowballBankDestinationOptions({ bankOptions, config });
 
-    expect(options.destinationBanks.map(bank => bank.id)).toEqual(['bank:two:debit:999999999999999999']);
+    expect(options.destinationBanks.map(bank => bank.id)).toEqual([
+      'bank:one:credit:111111111111111111',
+      'bank:two:debit:999999999999999999',
+    ]);
     expect([...options.usedExternalClabes]).toEqual(['012345678901234567']);
+    expect([...options.usedExternalBankIds]).toEqual(['bank_1']);
+  });
+
+  it('oculta todo el banco externo aunque tenga otra CLABE disponible', () => {
+    const configSameBank = {
+      ...config,
+      connections: {
+        ...config.connections,
+        three_to_bank: {
+          ...config.connections.three_to_bank,
+          destinationBankId: 'one',
+        },
+      },
+    };
+
+    const options = buildSnowballBankDestinationOptions({ bankOptions, config: configSameBank });
+
+    expect(options.destinationBanks.map(bank => bank.id)).toEqual(['bank:two:debit:999999999999999999']);
   });
 
   it('permite conservar la CLABE bancaria externa al editar esa conexión', () => {
@@ -156,6 +178,7 @@ describe('buildSnowballBankDestinationOptions', () => {
 
     expect(options.destinationBanks.map(bank => bank.id)).toEqual([
       'bank:one:debit:012345678901234567',
+      'bank:one:credit:111111111111111111',
       'bank:two:debit:999999999999999999',
     ]);
   });

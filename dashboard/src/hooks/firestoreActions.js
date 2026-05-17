@@ -69,6 +69,7 @@ export function validateSnowballConfig(config = {}) {
   const outgoing = new Map();
   const incoming = new Map();
   const externalDestinations = new Map();
+  const externalBankDestinations = new Map();
   const graph = new Map();
 
   activeConnections.forEach((connection) => {
@@ -106,9 +107,14 @@ export function validateSnowballConfig(config = {}) {
       incoming.set(to, connection.id);
       graph.set(from, to);
     } else if (destinationType === 'external_bank') {
-      if (!normalizeSnowballId(connection.destinationBankId)) {
+      const destinationBankId = normalizeSnowballId(connection.destinationBankId);
+      if (!destinationBankId) {
         throw new Error('Selecciona un banco externo registrado');
       }
+      if (externalBankDestinations.has(destinationBankId)) {
+        throw new Error('El banco externo solo puede usarse como destino una vez');
+      }
+      externalBankDestinations.set(destinationBankId, connection.id);
       const destinationClabe = normalizeClabe(connection.destinationClabe);
       if (!destinationClabe) {
         throw new Error('El banco externo necesita CLABE');
@@ -228,13 +234,6 @@ function buildVaultEmailDocId(type, { email, lankAccountId }) {
 
   const localPart = normalize(email).split('@')[0];
   return `tertiary_${localPart || Date.now()}`;
-}
-
-function buildVaultPaypalDocId(lankAccountId, email) {
-  const safeEmail = normalize(email)
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
-  return `paypal_${String(lankAccountId).trim()}_${safeEmail || Date.now()}`;
 }
 
 export async function syncVaultEmailPassword(targetEmail, encryptedPassword, secretsSnapshot = null) {
@@ -1237,10 +1236,6 @@ export async function deleteVaultEmailAccount(accountId) {
   }
   const data = snap.data();
 
-  if (data.type === 'lank_google' && data.lankAccountId) {
-    await assertNoLinkedPaypalAccounts(data.lankAccountId);
-  }
-
   await deleteDoc(ref);
 
   // Cascade: delete linked Lank account + SIM for lank_google
@@ -1373,162 +1368,6 @@ export async function updateVaultEmailAccount(accountId, updates, options = {}) 
       notes: payload.notes || '',
       type: existing.type || '',
       lankAccountId: payload.lankAccountId || existing.lankAccountId || null,
-    },
-  });
-}
-
-// --- CRUD de cuentas PayPal vinculadas a cuentas principales ---
-
-async function getLinkedPrincipalForPaypal(lankAccountId) {
-  const normalizedId = String(lankAccountId || '').trim();
-  if (!normalizedId) {
-    throw new Error('Selecciona una cuenta principal para vincular PayPal');
-  }
-
-  const principalRef = doc(db, 'secrets', `lank_google_${normalizedId}`);
-  const principalSnap = await firestoreGetDoc(principalRef);
-  if (!principalSnap.exists() || principalSnap.data()?.type !== 'lank_google') {
-    throw new Error('La cuenta principal vinculada no existe');
-  }
-
-  return { id: normalizedId, data: principalSnap.data() };
-}
-
-async function getLinkedPaypalAccounts(lankAccountId) {
-  const normalizedId = String(lankAccountId || '').trim();
-  if (!normalizedId) return [];
-
-  const snap = await getDocs(query(
-    collection(db, 'secrets'),
-    where('type', '==', 'paypal'),
-    where('lankAccountId', '==', normalizedId),
-  ));
-
-  return snap.docs
-    .map(docSnap => ({ id: docSnap.id, ...docSnap.data() }))
-    .filter(account => account.type === 'paypal' && String(account.lankAccountId || '').trim() === normalizedId);
-}
-
-async function assertNoLinkedPaypalAccounts(lankAccountId) {
-  const linkedPaypal = await getLinkedPaypalAccounts(lankAccountId);
-  if (linkedPaypal.length === 0) return;
-
-  const emails = linkedPaypal
-    .map(account => account.email || account.id)
-    .filter(Boolean)
-    .join(', ');
-
-  throw new Error(`No puedes eliminar esta cuenta principal porque tiene PayPal vinculado: ${emails}`);
-}
-
-export async function createVaultPaypalAccount(accountData) {
-  const now = nowISO();
-  const email = normalize(accountData.email);
-  if (!email) {
-    throw new Error('El email de PayPal es obligatorio');
-  }
-
-  const principal = await getLinkedPrincipalForPaypal(accountData.lankAccountId);
-  const docId = buildVaultPaypalDocId(principal.id, email);
-  const ref = doc(db, 'secrets', docId);
-  const existingDoc = await firestoreGetDoc(ref);
-  if (existingDoc.exists()) {
-    throw new Error('Ya existe una cuenta PayPal con ese email para esta cuenta principal');
-  }
-
-  const payload = {
-    type: 'paypal',
-    email,
-    password: accountData.password ? encrypt(accountData.password) : '',
-    notes: accountData.notes || '',
-    lankAccountId: principal.id,
-    principalEmail: principal.data.email || '',
-    principalAlias: principal.data.canonicalAlias || principal.data.fullName || '',
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  await setDoc(ref, payload);
-
-  logManualChange('create_vault_paypal_account', `Cuenta PayPal creada: ${email}`, {
-    collection: 'secrets',
-    documentId: docId,
-    after: {
-      type: 'paypal',
-      email,
-      lankAccountId: principal.id,
-      principalEmail: payload.principalEmail,
-      principalAlias: payload.principalAlias,
-      notes: payload.notes,
-    },
-  });
-
-  return docId;
-}
-
-export async function updateVaultPaypalAccount(accountId, updates) {
-  const ref = doc(db, 'secrets', accountId);
-  const existingSnap = await firestoreGetDoc(ref);
-  if (!existingSnap.exists() || existingSnap.data()?.type !== 'paypal') {
-    throw new Error('La cuenta PayPal no existe');
-  }
-
-  const existing = existingSnap.data();
-  const email = normalize(updates.email ?? existing.email);
-  if (!email) {
-    throw new Error('El email de PayPal es obligatorio');
-  }
-
-  const principal = await getLinkedPrincipalForPaypal(updates.lankAccountId ?? existing.lankAccountId);
-  const payload = {
-    email,
-    notes: updates.notes ?? existing.notes ?? '',
-    lankAccountId: principal.id,
-    principalEmail: principal.data.email || '',
-    principalAlias: principal.data.canonicalAlias || principal.data.fullName || '',
-    updatedAt: nowISO(),
-  };
-
-  if (typeof updates.password === 'string') {
-    payload.password = updates.password ? encrypt(updates.password) : '';
-  }
-
-  await updateDoc(ref, payload);
-
-  logManualChange('update_vault_paypal_account', `Cuenta PayPal actualizada: ${email}`, {
-    collection: 'secrets',
-    documentId: accountId,
-    before: {
-      email: existing.email || '',
-      lankAccountId: existing.lankAccountId || null,
-      notes: existing.notes || '',
-    },
-    after: {
-      email,
-      lankAccountId: principal.id,
-      notes: payload.notes,
-    },
-  });
-}
-
-export async function deleteVaultPaypalAccount(accountId) {
-  const ref = doc(db, 'secrets', accountId);
-  const snap = await firestoreGetDoc(ref);
-  if (!snap.exists() || snap.data()?.type !== 'paypal') {
-    throw new Error('La cuenta PayPal no existe');
-  }
-
-  const data = snap.data();
-
-  await deleteDoc(ref);
-
-  logManualChange('delete_vault_paypal_account', `Cuenta PayPal eliminada: ${data.email || accountId}`, {
-    collection: 'secrets',
-    documentId: accountId,
-    before: {
-      type: 'paypal',
-      email: data.email || '',
-      lankAccountId: data.lankAccountId || null,
     },
   });
 }
@@ -3025,8 +2864,6 @@ export async function deleteLankMasterAccount(accountId) {
     throw new Error(`La cuenta Lank #${numId} no existe`);
   }
   const before = snap.data();
-
-  await assertNoLinkedPaypalAccounts(String(numId));
 
   await deleteDoc(ref);
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useCollection, useDocument } from '../hooks/useFirestore';
 import { saveSnowballConfig, normalizeClabe } from '../hooks/firestoreActions';
 import { getProfileImage } from '../config/services';
@@ -8,7 +8,7 @@ import {
   describeSnowballConnectionDeletion,
 } from '../utils/snowballAvailability';
 import { buildBankClabeOptions, resolveBankClabeOptionId } from '../utils/bankClabes';
-import { BankIcon, CheckCircleIcon, EditIcon, LinkIcon, PlusIcon, SaveIcon, ToggleOffIcon, ToggleOnIcon, TrashIcon, WarningIcon } from '../components/Icons';
+import { BankIcon, CheckCircleIcon, CloseIcon, EditIcon, LinkIcon, PlusIcon, SaveIcon, ToggleOffIcon, ToggleOnIcon, TrashIcon, WarningIcon } from '../components/Icons';
 
 const EMPTY_CONFIG = { wallets: {}, connections: {} };
 
@@ -181,15 +181,16 @@ function buildChains(config, accountById, bankOptions, bankById) {
 
     while (current && !seen.has(current)) {
       seen.add(current);
+      const connection = byFrom.get(String(current));
       nodes.push({
         type: 'account',
         accountId: current,
         account: accountById.get(String(current)),
         label: accountLabel(accountById.get(String(current))),
         walletClabe: config.wallets?.[current]?.walletClabe || '',
+        connection,
       });
 
-      const connection = byFrom.get(String(current));
       if (!connection) break;
       if (connection.destinationType === 'external_bank') {
         const bankOptionId = resolveBankClabeOptionId({
@@ -204,6 +205,7 @@ function buildChains(config, accountById, bankOptions, bankById) {
           label: bank?.name || connection.destinationBankName || 'Banco externo',
           clabe: connection.destinationClabe,
           bank,
+          connection,
         };
         break;
       }
@@ -243,6 +245,8 @@ export default function Snowball() {
   const [connectionModal, setConnectionModal] = useState(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
+  const [selectedSnowballItem, setSelectedSnowballItem] = useState(null);
+  const chainDragRef = useRef(null);
 
   const accounts = useMemo(() => {
     return (registryDoc?.accounts || [])
@@ -419,6 +423,36 @@ export default function Snowball() {
     );
   }
 
+  function selectConnection(connection) {
+    if (!connection) return;
+    setSelectedSnowballItem({ type: 'connection', connection });
+  }
+
+  function handleChainMouseDown(event) {
+    if (event.target.closest('button')) return;
+    chainDragRef.current = {
+      target: event.currentTarget,
+      startX: event.clientX,
+      scrollLeft: event.currentTarget.scrollLeft,
+    };
+    event.currentTarget.classList.add('dragging');
+  }
+
+  function handleChainMouseMove(event) {
+    const drag = chainDragRef.current;
+    if (!drag || drag.target !== event.currentTarget) return;
+    const delta = event.clientX - drag.startX;
+    drag.target.scrollLeft = drag.scrollLeft - delta;
+  }
+
+  function stopChainDrag(event) {
+    if (chainDragRef.current?.target) {
+      chainDragRef.current.target.classList.remove('dragging');
+    }
+    chainDragRef.current = null;
+    event.currentTarget.classList.remove('dragging');
+  }
+
   return (
     <div className="snowball-page">
       {toast && (
@@ -468,28 +502,107 @@ export default function Snowball() {
         ) : (
           <div className="snowball-chain-list">
             {chains.map(chain => (
-              <div className="snowball-chain" key={chain.start}>
-                {chain.nodes.map((node, index) => (
-                  <div className="snowball-chain-part" key={`${chain.start}-${node.accountId}`}>
-                    {index > 0 && <div className="snowball-arrow">-&gt;</div>}
-                    <div className="snowball-node">
+              <div
+                className="snowball-chain"
+                key={chain.start}
+                onMouseDown={handleChainMouseDown}
+                onMouseMove={handleChainMouseMove}
+                onMouseUp={stopChainDrag}
+                onMouseLeave={stopChainDrag}
+              >
+                {chain.nodes.map((node, index) => {
+                  const previousConnection = index > 0 ? chain.nodes[index - 1]?.connection : null;
+                  const isSelected = selectedSnowballItem?.type === 'account'
+                    && String(selectedSnowballItem.accountId) === String(node.accountId);
+                  return (
+                    <div className="snowball-chain-part" key={`${chain.start}-${node.accountId}`}>
+                      {index > 0 && (
+                        <button
+                          type="button"
+                          className="snowball-arrow"
+                          onClick={() => selectConnection(previousConnection)}
+                          title="Seleccionar conexión"
+                        >
+                          -&gt;
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className={`snowball-node ${isSelected ? 'selected' : ''}`}
+                        onClick={() => setSelectedSnowballItem({ type: 'account', accountId: node.accountId, account: node.account })}
+                        onDoubleClick={() => setWalletModal({ accountId: node.accountId, ...(config.wallets?.[node.accountId] || { active: true }) })}
+                        title="Seleccionar cuenta"
+                      >
                       <AccountIdentity
                         account={node.account}
                         detail={node.walletClabe || 'CLABE interna pendiente'}
                       />
+                      </button>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 {chain.terminal && (
                   <div className="snowball-chain-part">
-                    <div className="snowball-arrow">-&gt;</div>
-                    <div className="snowball-node terminal">
+                    <button
+                      type="button"
+                      className="snowball-arrow"
+                      onClick={() => selectConnection(chain.terminal.connection)}
+                      title="Seleccionar conexión final"
+                    >
+                      -&gt;
+                    </button>
+                    <button
+                      type="button"
+                      className={`snowball-node terminal ${selectedSnowballItem?.type === 'bank' && selectedSnowballItem.connectionId === chain.terminal.connection?.id ? 'selected' : ''}`}
+                      onClick={() => setSelectedSnowballItem({ type: 'bank', connectionId: chain.terminal.connection?.id, terminal: chain.terminal })}
+                      onDoubleClick={() => setConnectionModal(chain.terminal.connection)}
+                      title="Seleccionar banco destino"
+                    >
                       <BankIdentity bank={chain.terminal.bank || { name: chain.terminal.label, clabe: chain.terminal.clabe }} />
-                    </div>
+                    </button>
                   </div>
                 )}
               </div>
             ))}
+          </div>
+        )}
+        {selectedSnowballItem && (
+          <div className="snowball-selection-panel">
+            <div>
+              <strong>
+                {selectedSnowballItem.type === 'connection'
+                  ? 'Conexión seleccionada'
+                  : selectedSnowballItem.type === 'bank'
+                    ? 'Destino bancario seleccionado'
+                    : 'Cuenta seleccionada'}
+              </strong>
+              <span>
+                {selectedSnowballItem.type === 'connection'
+                  ? `Lank #${selectedSnowballItem.connection.fromAccountId} -> ${selectedSnowballItem.connection.destinationType === 'external_bank' ? 'banco externo' : `Lank #${selectedSnowballItem.connection.toAccountId}`}`
+                  : selectedSnowballItem.type === 'bank'
+                    ? selectedSnowballItem.terminal.label
+                    : accountLabel(selectedSnowballItem.account)}
+              </span>
+            </div>
+            <div className="snowball-selection-actions">
+              {selectedSnowballItem.type === 'account' ? (
+                <button className="vault-action-btn edit" onClick={() => setWalletModal({ accountId: selectedSnowballItem.accountId, ...(config.wallets?.[selectedSnowballItem.accountId] || { active: true }) })}>
+                  <EditIcon size={14} /> Editar CLABE
+                </button>
+              ) : (
+                <>
+                  <button className="vault-action-btn edit" onClick={() => setConnectionModal(selectedSnowballItem.type === 'bank' ? selectedSnowballItem.terminal.connection : selectedSnowballItem.connection)}>
+                    <EditIcon size={14} /> Editar conexión
+                  </button>
+                  <button className="vault-action-btn delete" onClick={() => deleteConnection(selectedSnowballItem.type === 'bank' ? selectedSnowballItem.terminal.connection : selectedSnowballItem.connection)}>
+                    <TrashIcon size={14} /> Eliminar
+                  </button>
+                </>
+              )}
+              <button className="vault-action-btn view" onClick={() => setSelectedSnowballItem(null)}>
+                <CloseIcon size={14} /> Cerrar
+              </button>
+            </div>
           </div>
         )}
       </section>

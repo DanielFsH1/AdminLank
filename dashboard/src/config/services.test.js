@@ -4,6 +4,7 @@ import {
   buildServiceConfig,
   getDefaultSlotFields,
   getDefaultUserFields,
+  getBankMeta,
   normalizeServiceKey,
 } from './services';
 
@@ -35,5 +36,10 @@ describe('dynamic service helpers', () => {
 
     expect(slotFields.map(field => field.key)).toEqual(['memberAlias', 'profileName']);
     expect(userFields.map(field => field.key)).toContain('profileName');
+  });
+
+  it('resuelve metadatos de Plata aunque el banco venga como Banco Plata', () => {
+    expect(getBankMeta('Plata').logo).toBe('/assets/Plata.png');
+    expect(getBankMeta('Banco Plata').logo).toBe('/assets/Plata.png');
   });
 });

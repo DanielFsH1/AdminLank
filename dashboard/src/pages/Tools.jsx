@@ -2,13 +2,14 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 
 import { collection, getDocs, doc, getDoc, deleteDoc, addDoc } from 'firebase/firestore';
 
-import { db } from '../firebase';
+import { db, storage } from '../firebase';
 import { useDocument } from '../hooks/useFirestore';
 import { ACCESS_TYPES, buildServiceConfig, normalizeServiceKey } from '../config/services';
 import { setServiceCatalogEntryActive, upsertServiceCatalogEntry } from '../hooks/firestoreActions';
 import { authenticatedFetch, ensureAdminFunctionResponse } from '../utils/authenticatedFetch';
+import { uploadLogoFile } from '../utils/logoUploads';
 
-import { AnalyzeIcon, BankIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClockIcon, CloseIcon, ContainerIcon, CreditCardIcon, DollarIcon, DownloadIcon, EditIcon, EmailIcon, FileStorageIcon, HourglassIcon, KeyIcon, LightbulbIcon, LockIcon, LockKeyIcon, MailboxIcon, MoneyIcon, PackageIcon, PlusIcon, SaveIcon, ShieldCheckIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, TrendUpIcon, UsersIcon, WarningIcon, XCircleIcon } from '../components/Icons';
+import { AnalyzeIcon, BankIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClockIcon, CloseIcon, ContainerIcon, CreditCardIcon, DollarIcon, DownloadIcon, EditIcon, EmailIcon, FileStorageIcon, HourglassIcon, ImageIcon, KeyIcon, LightbulbIcon, LockIcon, LockKeyIcon, MailboxIcon, MoneyIcon, PackageIcon, PlusIcon, SaveIcon, ShieldCheckIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, TrendUpIcon, UploadIcon, UsersIcon, WarningIcon, XCircleIcon } from '../components/Icons';
 
 import CryptoJS from 'crypto-js';
 
@@ -206,6 +207,8 @@ export default function Tools() {
  const [serviceForm, setServiceForm] = useState(null);
  const [serviceSaving, setServiceSaving] = useState(false);
  const [serviceError, setServiceError] = useState('');
+ const [serviceLogoUploading, setServiceLogoUploading] = useState(false);
+ const serviceLogoInputRef = useRef(null);
 
  const serviceCatalog = servicesDoc?.services || {};
  const serviceEntries = Object.entries(serviceCatalog)
@@ -267,6 +270,24 @@ export default function Tools() {
      setServiceError(err.message || 'No se pudo guardar el servicio');
    } finally {
      setServiceSaving(false);
+   }
+ };
+
+ const handleUploadServiceLogo = async (file) => {
+   if (!file || !serviceForm) return;
+   setServiceLogoUploading(true);
+   setServiceError('');
+   try {
+     const keyOrName = serviceForm.serviceKey || serviceForm.name || file.name;
+     const logo = await uploadLogoFile(storage, file, {
+       folder: 'service-logos',
+       displayName: keyOrName,
+     });
+     updateServiceForm('logo', logo.url);
+   } catch (err) {
+     setServiceError(err.message || 'No se pudo subir el logo');
+   } finally {
+     setServiceLogoUploading(false);
    }
  };
 
@@ -1267,7 +1288,33 @@ export default function Tools() {
                 </div>
                 <div className="tools-svc-field">
                   <label>Logo</label>
-                  <input className="edit-modal-input" value={serviceForm.logo} onChange={e => updateServiceForm('logo', e.target.value)} placeholder="/assets/..." />
+                  <div className="tools-svc-logo-row">
+                    <input className="edit-modal-input" value={serviceForm.logo} onChange={e => updateServiceForm('logo', e.target.value)} placeholder="https://... o /assets/..." />
+                    <input
+                      ref={serviceLogoInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg,image/webp"
+                      style={{ display: 'none' }}
+                      onChange={e => {
+                        if (e.target.files?.[0]) handleUploadServiceLogo(e.target.files[0]);
+                        e.target.value = '';
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="tools-btn tools-btn-secondary"
+                      onClick={() => serviceLogoInputRef.current?.click()}
+                      disabled={serviceLogoUploading}
+                    >
+                      {serviceLogoUploading ? <><span className="spinner" /> Subiendo...</> : <><UploadIcon size={14} /> Subir</>}
+                    </button>
+                  </div>
+                  {serviceForm.logo && (
+                    <div className="tools-svc-logo-preview">
+                      <img src={serviceForm.logo} alt="" onError={e => { e.currentTarget.style.display = 'none'; }} />
+                      <span><ImageIcon size={12} /> Logo actual</span>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="tools-svc-field">

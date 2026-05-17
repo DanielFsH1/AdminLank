@@ -41,7 +41,6 @@ vi.mock('firebase/firestore', () => ({
 import {
   cancelScheduledManualAlert,
   confirmRecurringExpense,
-  createVaultPaypalAccount,
   deleteVaultEmailAccount,
   createSlotDeletionAlert,
   createScheduledManualAlert,
@@ -382,6 +381,30 @@ describe('validateSnowballConfig', () => {
 
     expect(() => validateSnowballConfig(config)).toThrow('solo puede usarse como destino una vez');
   });
+
+  it('rechaza usar el mismo banco externo como destino activo más de una vez', () => {
+    const config = {
+      wallets: {},
+      connections: {
+        a: {
+          fromAccountId: '1',
+          destinationType: 'external_bank',
+          destinationBankId: 'bank-1',
+          destinationClabe: '012345678901234567',
+          active: true,
+        },
+        b: {
+          fromAccountId: '2',
+          destinationType: 'external_bank',
+          destinationBankId: 'bank-1',
+          destinationClabe: '999999999999999999',
+          active: true,
+        },
+      },
+    };
+
+    expect(() => validateSnowballConfig(config)).toThrow('El banco externo solo puede usarse como destino una vez');
+  });
 });
 
 describe('scheduled manual alerts', () => {
@@ -501,7 +524,7 @@ describe('scheduled manual alerts', () => {
   });
 });
 
-describe('vault PayPal accounts', () => {
+describe('vault email accounts', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-05-09T12:00:00Z'));
@@ -512,96 +535,7 @@ describe('vault PayPal accounts', () => {
     vi.useRealTimers();
   });
 
-  it('rejects PayPal creation without a linked principal Lank account', async () => {
-    await expect(createVaultPaypalAccount({
-      email: 'paypal@example.com',
-      password: 'secret',
-    })).rejects.toThrow('Selecciona una cuenta principal para vincular PayPal');
-
-    expect(mockSetDoc).not.toHaveBeenCalled();
-  });
-
-  it('rejects PayPal creation when the linked principal does not exist', async () => {
-    mockGetDoc.mockResolvedValue({
-      exists: () => false,
-      data: () => null,
-    });
-
-    await expect(createVaultPaypalAccount({
-      lankAccountId: '12',
-      email: 'paypal@example.com',
-      password: 'secret',
-    })).rejects.toThrow('La cuenta principal vinculada no existe');
-
-    expect(mockGetDoc).toHaveBeenCalledWith(expect.objectContaining({ path: 'secrets/lank_google_12' }));
-    expect(mockSetDoc).not.toHaveBeenCalled();
-  });
-
-  it('creates PayPal credentials only when linked to an existing principal account', async () => {
-    mockGetDoc
-      .mockResolvedValueOnce(buildSnapshot({
-        type: 'lank_google',
-        lankAccountId: '12',
-        email: 'principal@gmail.com',
-        canonicalAlias: 'Cuenta Principal',
-        fullName: 'Cuenta Principal',
-      }))
-      .mockResolvedValueOnce({
-        exists: () => false,
-        data: () => null,
-      });
-
-    const docId = await createVaultPaypalAccount({
-      lankAccountId: '12',
-      email: 'paypal@example.com',
-      password: 'paypal-secret',
-      notes: 'Pagos',
-    });
-
-    expect(docId).toBe('paypal_12_paypal_example_com');
-    expect(mockSetDoc).toHaveBeenCalledWith(
-      expect.objectContaining({ path: 'secrets/paypal_12_paypal_example_com' }),
-      expect.objectContaining({
-        type: 'paypal',
-        email: 'paypal@example.com',
-        lankAccountId: '12',
-        principalEmail: 'principal@gmail.com',
-        principalAlias: 'Cuenta Principal',
-        notes: 'Pagos',
-        createdAt: '2026-05-09T12:00:00.000Z',
-        updatedAt: '2026-05-09T12:00:00.000Z',
-      }),
-    );
-    const payload = mockSetDoc.mock.calls[0][1];
-    expect(payload.password).toBeTruthy();
-    expect(payload.password).not.toBe('paypal-secret');
-  });
-
-  it('blocks deletion of a principal account while PayPal accounts are linked', async () => {
-    mockGetDoc.mockResolvedValue(buildSnapshot({
-      type: 'lank_google',
-      lankAccountId: '12',
-      email: 'principal@gmail.com',
-    }));
-    mockGetDocs.mockResolvedValue({
-      docs: [
-        {
-          id: 'paypal_12_paypal_example_com',
-          data: () => ({
-            type: 'paypal',
-            lankAccountId: '12',
-            email: 'paypal@example.com',
-          }),
-        },
-      ],
-    });
-
-    await expect(deleteVaultEmailAccount('lank_google_12')).rejects.toThrow('No puedes eliminar esta cuenta principal porque tiene PayPal vinculado: paypal@example.com');
-
-    expect(mockDeleteDoc).not.toHaveBeenCalled();
-  });
-
-  it('allows deletion of a principal account when no PayPal accounts are linked', async () => {
+  it('permite eliminar una cuenta principal sin bloqueos de credenciales retiradas', async () => {
     mockGetDoc
       .mockResolvedValueOnce(buildSnapshot({
         type: 'lank_google',
@@ -612,11 +546,11 @@ describe('vault PayPal accounts', () => {
         exists: () => false,
         data: () => null,
       });
-    mockGetDocs.mockResolvedValue({ docs: [] });
 
     await deleteVaultEmailAccount('lank_google_12');
 
     expect(mockDeleteDoc).toHaveBeenCalledWith(expect.objectContaining({ path: 'secrets/lank_google_12' }));
+    expect(mockGetDocs).not.toHaveBeenCalled();
   });
 });
 

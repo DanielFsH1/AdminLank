@@ -250,10 +250,32 @@ export function getCustomBankAccounts() {
   return _customBankAccounts;
 }
 
+function normalizeBankName(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/^banco\s+/, '')
+    .replace(/\s+(debito|credito)$/, '')
+    .trim();
+}
+
+function findBankMetaByLooseName(bankName, source) {
+  const normalized = normalizeBankName(bankName);
+  if (!normalized) return null;
+
+  const entry = Object.entries(source || {}).find(([name]) => normalizeBankName(name) === normalized);
+  return entry?.[1] || null;
+}
+
 // Obtener metadata de banco con fallback
 export function getBankMeta(bankName) {
   if (BANKS[bankName]) return BANKS[bankName];
   if (_customBankAccounts[bankName]) return _customBankAccounts[bankName];
+  const customMeta = findBankMetaByLooseName(bankName, _customBankAccounts);
+  if (customMeta) return customMeta;
+  const defaultMeta = findBankMetaByLooseName(bankName, BANKS);
+  if (defaultMeta) return defaultMeta;
   return { color: '#64748b', logo: '' };
 }
 

@@ -10,6 +10,23 @@ import { BankIcon, BarChartIcon, CalendarIcon, CheckCircleIcon, ClipboardIcon, C
 
 const MONTH_NAMES_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const MONTH_NAMES_EN = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+const NON_OPERATIONAL_BANK_LABELS = new Set(['stp', 'arcus']);
+const UNCLASSIFIED_DESTINATION_LABEL = 'Destino por clasificar';
+
+function normalizeBankLabel(value) {
+ return String(value || '')
+   .normalize('NFD')
+   .replace(/[\u0300-\u036f]/g, '')
+   .trim()
+   .toLowerCase();
+}
+
+function isOperationalBankLabel(value) {
+ const normalized = normalizeBankLabel(value);
+ return normalized
+   && normalized !== normalizeBankLabel(UNCLASSIFIED_DESTINATION_LABEL)
+   && !NON_OPERATIONAL_BANK_LABELS.has(normalized);
+}
 
 function getMonthKey(year, month) {
  // month: 0-11
@@ -212,6 +229,8 @@ export default function Finance() {
            derivedCredit.push({
              id: bank.id,
              bank: bank.name,
+             logoUrl: bank.logoUrl,
+             color: bank.color,
              ...bank.creditAccount,
             });
          }
@@ -828,7 +847,8 @@ export default function Finance() {
      const match = clabes.find(c => c.clabe === w.accountNumber);
      if (match) return match.bank;
    }
-   return w.bank || 'Desconocido';
+   if (!isOperationalBankLabel(w.bank)) return UNCLASSIFIED_DESTINATION_LABEL;
+   return w.bank || UNCLASSIFIED_DESTINATION_LABEL;
  };
 
  // Agrupar retiros por banco — resolver nombre vía knownBankAccount o CLABE
@@ -914,6 +934,8 @@ export default function Finance() {
           <div className="credit-accounts-grid">
             {creditAccounts.map(acct => {
               const bankMeta = getBankMeta(acct.bank);
+              const bankLogo = acct.logoUrl || bankMeta.logo;
+              const bankColor = acct.color || bankMeta.color;
               const balance = acct.currentBalance || 0;
               const hasFavor = balance < 0;
               const utilPct = acct.creditLimit > 0 ? Math.min(100, Math.max(0, Math.round((balance / acct.creditLimit) * 100))) : 0;
@@ -926,11 +948,11 @@ export default function Finance() {
               const linkedCardIds = getLinkedCreditCardIds(acct.id);
 
               return (
-                <div className="credit-account-card" key={acct.id} style={{ '--bank-color': bankMeta.color }}>
+                <div className="credit-account-card" key={acct.id} style={{ '--bank-color': bankColor }}>
                   {/* Header */}
                   <div className="credit-account-header">
                     <div className="credit-account-bank">
-                      {bankMeta.logo && <img src={bankMeta.logo} alt="" className="bank-logo-xl" onError={e => { e.target.style.display = 'none'; }} />}
+                      {bankLogo && <img src={bankLogo} alt="" className="bank-logo-xl" onError={e => { e.target.style.display = 'none'; }} />}
                       <div>
                         <div className="credit-account-name">{acct.bank}</div>
                         <div className="credit-account-sub">
@@ -1441,6 +1463,7 @@ export default function Finance() {
           }));
           const banksWithoutClabe = Object.keys(byBank)
             .filter(bankName => !clabes.some(clabeEntry => clabeEntry.bank === bankName))
+            .filter(isOperationalBankLabel)
             .map(bankName => ({ id: `withdrawals-${bankName}`, bankName, clabeEntry: null }));
           const rows = [...clabeRows, ...banksWithoutClabe];
 

@@ -1,0 +1,27 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.uid == '***REMOVED***';
+    }
+
+    function isLogoImage() {
+      return request.resource != null
+        && request.resource.size < 2 * 1024 * 1024
+        && request.resource.contentType.matches('image/(png|jpeg|jpg|webp)');
+    }
+
+    match /bank-logos/{fileName} {
+      allow read: if true;
+      allow write: if isAdmin() && isLogoImage();
+      allow delete: if isAdmin();
+    }
+
+    match /service-logos/{fileName} {
+      allow read: if true;
+      allow write: if isAdmin() && isLogoImage();
+      allow delete: if isAdmin();
+    }
+  }
+}
