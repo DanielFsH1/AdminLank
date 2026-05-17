@@ -109,7 +109,10 @@ export default function Alerts({ onNavigate, navData }) {
  const [createScheduledModal, setCreateScheduledModal] = useState(false);
  const [cancelScheduledModal, setCancelScheduledModal] = useState(null);
  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
- const [collapsedGroups, setCollapsedGroups] = useState(new Set()); // IDs de grupos colapsados
+ const [collapsedGroups, setCollapsedGroups] = useState(() => {
+   if (window.innerWidth <= 768) return new Set(['__all_collapsed__']);
+   return new Set();
+ });
 
  const showToast = useCallback((message, type = 'success') => {
  setToast({ visible: true, message, type });
@@ -781,11 +784,12 @@ export default function Alerts({ onNavigate, navData }) {
         <>
           {groupedAlerts.groups.map(group => {
             const highestPm = Object.values(PRIORITY_META).find(p => p.order === group.highestPriority) || PRIORITY_META.low;
-            const isCollapsed = collapsedGroups.has(String(group.accountId));
+            const isCollapsed = collapsedGroups.has(String(group.accountId)) || collapsedGroups.has('__all_collapsed__');
             const toggleCollapse = (e) => {
               e.stopPropagation();
               setCollapsedGroups(prev => {
                 const next = new Set(prev);
+                next.delete('__all_collapsed__');
                 const key = String(group.accountId);
                 next.has(key) ? next.delete(key) : next.add(key);
                 return next;

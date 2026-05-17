@@ -1087,7 +1087,12 @@ export default function Subscriptions({ onNavigate, navData }) {
               key={svcId}
               className={`svc-overview-card ${isActive ? 'selected' : ''} ${selectedService && !isActive ? 'dimmed' : ''}`}
               style={{ '--svc-color': m.color }}
-              onClick={() => { setSelectedService(isActive ? null : svcId); setHighlightRef(null); }}
+              onClick={() => {
+                const newSvc = isActive ? null : svcId;
+                setSelectedService(newSvc);
+                setHighlightRef(null);
+                if (newSvc) setTimeout(() => { if (detailRef.current) detailRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 100);
+              }}
             >
               <div className="svc-overview-top">
                 <img src={m.logo} alt={m.name} className="svc-logo" />

@@ -17,6 +17,18 @@ const CARRIER_CONFIG = {
   oxxocel: { label: 'OXXO Cel', color: '#E30613', rechargeDays: 170,  alertDays: 10 },
 };
 
+function formatPhone(phone) {
+  if (!phone) return '—';
+  const clean = phone.replace(/\D/g, '');
+  if (clean.length === 12 && clean.startsWith('52')) {
+    return `+52 ${clean.slice(2, 4)} ${clean.slice(4, 8)} ${clean.slice(8)}`;
+  }
+  if (clean.length === 10) {
+    return `${clean.slice(0, 2)} ${clean.slice(2, 6)} ${clean.slice(6)}`;
+  }
+  return phone;
+}
+
 function todayLocal() {
   const n = new Date();
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
@@ -123,7 +135,7 @@ function RechargeModal({ sim, initialDate, onConfirm, onClose }) {
               </div>
               <div className="recharge-confirm-row">
                 <span className="recharge-confirm-label">Teléfono</span>
-                <span className="recharge-confirm-value">{sim.phone}</span>
+                <span className="recharge-confirm-value">{formatPhone(sim.phone)}</span>
               </div>
               <div className="recharge-confirm-divider" />
               <div className="recharge-confirm-row">
@@ -578,8 +590,8 @@ export default function SimCards() {
                               )}
                             </div>
                             <div className="sim-number-details">
-                              <span className="sim-number-phone">
-                                <PhoneIcon size={11} /> {sim.phone}
+                              <span className="sim-number-phone sim-phone-highlight">
+                                <PhoneIcon size={13} /> {formatPhone(sim.phone)}
                               </span>
                               <span className="sim-number-dates">
                                 Últ: {formatDateShort(sim.lastRechargeDate)}
@@ -643,8 +655,8 @@ export default function SimCards() {
                       <span className="sim-number-alias">{sim.canonicalAlias || sim.fullName}</span>
                     </div>
                     <div className="sim-number-details">
-                      <span className="sim-number-phone">
-                        <PhoneIcon size={11} /> {sim.phone || '—'}
+                      <span className="sim-number-phone sim-phone-highlight">
+                        <PhoneIcon size={13} /> {formatPhone(sim.phone) || '—'}
                       </span>
                       <span className="sim-number-dates" style={{ color: 'var(--accent-warning)' }}>
                         Sin recarga registrada

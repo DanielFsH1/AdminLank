@@ -86,6 +86,15 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border-accent); border-radius: 8px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
+/* ═══ Scroll fade hint (mobile horizontal scrollable areas) ═══ */
+.scroll-fade-hint { position: relative; }
+.scroll-fade-hint::after {
+  content: ''; position: absolute; top: 0; right: 0; bottom: 0; width: 32px;
+  background: linear-gradient(to right, transparent, var(--bg-primary));
+  pointer-events: none; transition: opacity 0.3s; z-index: 2;
+}
+.scroll-fade-hint.at-end::after { opacity: 0; }
+
 /* ═══ Login ═══ */
 .login-container {
   height: 100vh; display: flex; align-items: center; justify-content: center;
@@ -1078,6 +1087,10 @@ body {
 .finance-withdrawal-toggle { cursor: default; }
 .finance-section { margin-bottom: 24px; }
 .finance-section-title { font-size: 16px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+.finance-section-title.collapsible { cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent; }
+.finance-section-title.collapsible:hover { color: var(--accent-primary); }
+.finance-section-chevron { transition: transform 0.2s; font-size: 12px; }
+.finance-section-chevron.open { transform: rotate(180deg); }
 /* Grid de 3 columnas para bancos */
 .bank-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .withdrawal-row {
@@ -1337,10 +1350,14 @@ body {
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .services-grid, .lank-cards-grid, .svc-overview-grid { grid-template-columns: 1fr; }
   .mobile-menu-btn { display: flex !important; }
-  .finance-kpis { grid-template-columns: repeat(2, 1fr); }
-  .finance-kpis-4, .finance-kpis-5 { grid-template-columns: repeat(2, 1fr); }
+  .finance-kpis { display: flex; gap: 10px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 4px; }
+  .finance-kpis-4, .finance-kpis-5 { display: flex; gap: 10px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 4px; }
+  .finance-kpis::-webkit-scrollbar, .finance-kpis-4::-webkit-scrollbar, .finance-kpis-5::-webkit-scrollbar { display: none; }
+  .finance-kpis > .stat-card, .finance-kpis-4 > .stat-card, .finance-kpis-5 > .stat-card { min-width: 130px; flex-shrink: 0; }
+  .svc-stats-row { display: flex; gap: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .svc-stats-row::-webkit-scrollbar { display: none; }
+  .svc-stats-row > * { min-width: 120px; flex-shrink: 0; }
   .bank-grid-3 { grid-template-columns: 1fr; }
-  .svc-stats-row { grid-template-columns: repeat(2, 1fr); }
 
   /* Header responsivo */
   .main-header { padding: 12px 16px; }
@@ -3140,7 +3157,9 @@ body {
 /* Responsive */
 @media (max-width: 768px) {
   .status-banner { flex-direction: column; gap: 12px; align-items: flex-start; }
-  .status-stats-row { grid-template-columns: repeat(2, 1fr); }
+  .status-stats-row { display: flex; gap: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .status-stats-row::-webkit-scrollbar { display: none; }
+  .status-stats-row > * { min-width: 120px; flex-shrink: 0; }
   .status-service-row { flex-direction: column; align-items: flex-start; gap: 8px; }
   .status-service-right { align-self: flex-end; }
   .status-detail-report { flex-direction: column; }
@@ -4785,7 +4804,12 @@ body {
   .vault-accounts-grid { grid-template-columns: 1fr; }
   .vault-cards-section { grid-template-columns: 1fr; }
   .vault-form-row { grid-template-columns: 1fr; }
-  .vault-tabs { flex-direction: column; }
+  .vault-tabs {
+    flex-wrap: nowrap; overflow-x: auto;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .vault-tabs::-webkit-scrollbar { display: none; }
+  .vault-tab { white-space: nowrap; flex-shrink: 0; }
 }
 
 /* ═══ FILL SLOT — LANK ACCOUNT LINKING ═══ */
@@ -5138,8 +5162,6 @@ body {
 @media (max-width: 480px) {
   /* Grids a 1 ó 2 columnas */
   .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-  .finance-kpis, .finance-kpis-4, .finance-kpis-5 { grid-template-columns: 1fr; }
-  .status-stats-row { grid-template-columns: 1fr; }
   .analyze-kpi-grid { grid-template-columns: 1fr; }
   .slot-grid { grid-template-columns: 1fr; }
 
@@ -5928,6 +5950,11 @@ code, pre, .clabe-digits, .alert-v2-highlight code {
   display: inline-flex; align-items: center; gap: 3px;
   font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 11px;
   letter-spacing: 0.3px;
+}
+.sim-phone-highlight {
+  font-size: 16px; font-weight: 700; letter-spacing: 0.5px;
+  font-variant-numeric: tabular-nums; color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
 }
 .sim-number-dates { font-size: 11px; }
 

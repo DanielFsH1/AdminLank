@@ -90,6 +90,7 @@ export default function Finance() {
  const [depositToast, setDepositToast] = useState({ visible: false, message: '', type: 'success' });
 
  const [ledgerFilter, setLedgerFilter] = useState('all'); // 'all' | 'expenses' | 'income' | 'payments'
+ const [expensesCollapsed, setExpensesCollapsed] = useState(window.innerWidth <= 768);
 
  // Pagos a crédito
  const [addCreditPaymentModal, setAddCreditPaymentModal] = useState(false);
@@ -1210,29 +1211,33 @@ export default function Finance() {
 
         {/* COLUMNA DERECHA: Gastos e Ingresos */}
         <div className="finance-col">
-          <div className="finance-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+          <div className="finance-section-title collapsible" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }} onClick={() => setExpensesCollapsed(c => !c)}>
             <span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`finance-section-chevron${expensesCollapsed ? '' : ' open'}`} style={{ marginRight: '6px' }}><polyline points="6 9 12 15 18 9"/></svg>
               <ReceiptIcon size={16} /> Gastos e Ingresos
               <span className="badge badge-info" style={{ marginLeft: '8px' }}>{entries.length}</span>
               {expenseEntries.filter(e => e.status === 'pending').length > 0 && (
                 <span className="badge badge-warning" style={{ marginLeft: '4px' }}>{expenseEntries.filter(e => e.status === 'pending').length} pendiente{expenseEntries.filter(e => e.status === 'pending').length !== 1 ? 's' : ''}</span>
               )}
             </span>
-            <div style={{ display: 'flex', gap: '6px' }}>
-              <button className="alert-action-btn edit" onClick={() => setAddExpenseModal(true)} style={{ fontSize: '12px' }}>
-                <PlusIcon size={14} /> Gasto
-              </button>
-              <button className="alert-action-btn edit" onClick={() => setAddDepositModal(true)} style={{ fontSize: '12px', background: 'rgba(16,185,129,0.1)', color: '#10b981' }}>
-                <PlusIcon size={14} /> Ingreso
-              </button>
-              {creditAccounts.length > 0 && (
-                <button className="alert-action-btn edit" onClick={() => setAddCreditPaymentModal(true)} style={{ fontSize: '12px', background: 'rgba(139,92,246,0.1)', color: '#8b5cf6' }}>
-                  <PlusIcon size={14} /> Pago Crédito
+            {!expensesCollapsed && (
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }} onClick={e => e.stopPropagation()}>
+                <button className="alert-action-btn edit" onClick={() => setAddExpenseModal(true)} style={{ fontSize: '12px' }}>
+                  <PlusIcon size={14} /> Gasto
                 </button>
-              )}
-            </div>
+                <button className="alert-action-btn edit" onClick={() => setAddDepositModal(true)} style={{ fontSize: '12px', background: 'rgba(16,185,129,0.1)', color: '#10b981' }}>
+                  <PlusIcon size={14} /> Ingreso
+                </button>
+                {creditAccounts.length > 0 && (
+                  <button className="alert-action-btn edit" onClick={() => setAddCreditPaymentModal(true)} style={{ fontSize: '12px', background: 'rgba(139,92,246,0.1)', color: '#8b5cf6' }}>
+                    <PlusIcon size={14} /> Pago Crédito
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
+          {!expensesCollapsed && (<>
           {/* Filtros */}
           <div className="alerts-tabs" style={{ marginBottom: '8px' }}>
             <button className={`alert-tab ${ledgerFilter === 'all' ? 'active' : ''}`} onClick={() => setLedgerFilter('all')}>
@@ -1444,6 +1449,7 @@ export default function Finance() {
               </div>
             );
           })()}
+          </>)}
         </div>
       </div>
 
