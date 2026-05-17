@@ -44,6 +44,7 @@ import {
   deleteVaultEmailAccount,
   createSlotDeletionAlert,
   createScheduledManualAlert,
+  saveSnowballConfig,
   validateSnowballConfig,
 } from './firestoreActions';
 
@@ -327,6 +328,11 @@ describe('confirmRecurringExpense', () => {
 });
 
 describe('validateSnowballConfig', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSetDoc.mockResolvedValue();
+  });
+
   it('rechaza que varias cuentas apunten a la misma cuenta Lank activa', () => {
     const config = {
       wallets: {
@@ -404,6 +410,35 @@ describe('validateSnowballConfig', () => {
     };
 
     expect(() => validateSnowballConfig(config)).not.toThrow();
+  });
+
+  it('reemplaza el documento Snowball al guardar para eliminar conexiones removidas', async () => {
+    const nextConfig = {
+      wallets: {
+        13: { accountId: '13', walletClabe: '646180131313131313', active: true },
+        14: { accountId: '14', walletClabe: '646180141414141414', active: true },
+        32: { accountId: '32', walletClabe: '646180323232323232', active: true },
+      },
+      connections: {
+        snowball_14_1778975719076: {
+          id: 'snowball_14_1778975719076',
+          fromAccountId: '14',
+          destinationType: 'lank_wallet',
+          toAccountId: '13',
+          destinationClabe: '646180131313131313',
+          active: true,
+        },
+      },
+    };
+
+    await saveSnowballConfig(nextConfig, 'Conexión Snowball eliminada desde Lank #32');
+
+    expect(mockSetDoc).toHaveBeenCalledTimes(1);
+    const [ref, payload, options] = mockSetDoc.mock.calls[0];
+    expect(ref.path).toBe('config/snowball');
+    expect(payload.connections).not.toHaveProperty('snowball_32_1779036167058');
+    expect(payload.connections).toHaveProperty('snowball_14_1778975719076');
+    expect(options).toBeUndefined();
   });
 });
 

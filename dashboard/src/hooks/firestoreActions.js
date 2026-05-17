@@ -146,7 +146,7 @@ export async function saveSnowballConfig(nextConfig, auditDescription = 'Configu
     updatedAt: nowISO(),
     updatedBy: 'dashboard',
   };
-  await setDoc(doc(db, 'config', 'snowball'), payload, { merge: true });
+  await setDoc(doc(db, 'config', 'snowball'), payload);
   logManualChange('snowball_config_update', auditDescription, {
     collection: 'config',
     documentId: 'snowball',
