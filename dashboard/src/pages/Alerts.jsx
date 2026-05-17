@@ -17,6 +17,7 @@ import { BellIcon, CalendarIcon, CelebrationIcon, ChatIcon, CheckCircleIcon, Cli
 import SearchBar from '../components/SearchBar';
 import { normalizeSearch, nMatch } from '../utils/normalize';
 import { getScheduledAlertGroups, getTomorrowDateKey, toDateValue } from '../utils/scheduledAlerts';
+import LoadingState from '../components/LoadingState';
 
 // Mapeo dinámico de serviceAccountRef → servicio interno para navegación
 function parseServiceKey(ref) {
@@ -663,7 +664,7 @@ export default function Alerts({ onNavigate, navData }) {
   );
  };
 
- if (loading || scheduledLoading) return <div className="empty-state"><div className="loading-spinner" /></div>;
+ if (loading || scheduledLoading) return <LoadingState variant="page" />;
 
  return (
  <>

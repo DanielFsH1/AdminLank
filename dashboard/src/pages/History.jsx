@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { orderBy, limit } from 'firebase/firestore';
 import { useCollection } from '../hooks/useFirestore';
 import { RefreshIcon, SearchIcon, ClockIcon, EditIcon, TrashIcon, CheckIcon, PlusIcon } from '../components/Icons';
+import LoadingState from '../components/LoadingState';
 
 // ─── Iconos locales (SVG inline, misma base S que Icons.jsx) ─────────────────
 
@@ -236,10 +237,7 @@ export default function History({ navData }) {
 
       {/* ── Timeline ── */}
       {loading ? (
-        <div className="history-loading">
-          <div className="loading-spinner" />
-          <span>Cargando historial...</span>
-        </div>
+        <LoadingState variant="section" label="Cargando historial..." className="history-loading" />
       ) : filtered.length === 0 ? (
         <div className="history-empty">
           <EmptyIcon color="var(--text-muted)" />

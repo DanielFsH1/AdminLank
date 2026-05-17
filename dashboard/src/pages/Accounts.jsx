@@ -9,6 +9,7 @@ import { BlockIcon, CalendarIcon, CashIcon, ClipboardIcon, CloseIcon, EditIcon, 
 import { normalizeSearch, nMatch } from '../utils/normalize';
 import SearchBar from '../components/SearchBar';
 import EntityHistory from '../components/EntityHistory';
+import LoadingState from '../components/LoadingState';
 
 // Cashback se lee directamente del campo `cashback` del documento del grupo en Firestore.
 
@@ -532,7 +533,7 @@ export default function Accounts({ navData, onNavigate }) {
    }
  };
 
- if (loading) return <div className="empty-state"><div className="loading-spinner" /></div>;
+ if (loading) return <LoadingState variant="page" />;
 
  return (
  <>

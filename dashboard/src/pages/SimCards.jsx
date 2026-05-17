@@ -7,6 +7,7 @@ import {
   BellIcon, CalendarIcon, CheckCircleIcon, ClockIcon,
   PlusIcon, WarningIcon,
 } from '../components/Icons';
+import LoadingState from '../components/LoadingState';
 
 const MONTH_NAMES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 const MONTH_NAMES_FULL = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -475,7 +476,7 @@ export default function SimCards() {
   };
 
   if (loading) {
-    return <div className="loading-container"><div className="loading-spinner"></div></div>;
+    return <LoadingState variant="page" />;
   }
 
   return (

@@ -12,6 +12,7 @@ import { normalizeSearch, nMatch } from '../utils/normalize';
 import { normalizeCardExpiryInput } from '../utils/cardExpiry';
 import SearchBar from '../components/SearchBar';
 import BankManager from '../components/BankManager';
+import LoadingState from '../components/LoadingState';
 import CryptoJS from 'crypto-js';
 
 const SERVICE_SENSITIVE = ['password', 'googlePassword'];
@@ -1241,8 +1242,7 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
    return (
      <div className="vault-pin-gate">
        <div className="vault-pin-card">
-         <div className="loading-spinner" />
-         <p style={{ color: 'var(--text-muted)', marginTop: '12px' }}>Verificando seguridad...</p>
+         <LoadingState variant="inline" label="Verificando seguridad..." />
        </div>
      </div>
    );
@@ -2015,10 +2015,7 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
       {activeTab === 'apppasswords' && (() => {
         if (imapLoading || imapCredentials === null) {
           return (
-            <div style={{ textAlign: 'center', padding: '40px 0' }}>
-              <div className="loading-spinner" />
-              <p style={{ color: 'var(--text-muted)', marginTop: '12px' }}>Cargando App Passwords...</p>
-            </div>
+            <LoadingState variant="section" label="Cargando App Passwords..." />
           );
         }
 

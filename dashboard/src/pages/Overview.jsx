@@ -4,6 +4,7 @@ import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { getServiceMeta, formatMXN, getPoolServiceKeys } from '../config/services';
 import { UsersIcon, CheckCircleIcon, KeyIcon, BellIcon, AtmIcon, ClipboardIcon, InboxIcon } from '../components/Icons';
+import LoadingState from '../components/LoadingState';
 
 export default function Overview({ onNavigate }) {
   const { data: accounts, loading: loadingAccounts } = useCollection('accounts', { realtime: true });
@@ -89,7 +90,7 @@ export default function Overview({ onNavigate }) {
   }, [poolServiceIds]);
 
   if (loadingAccounts) {
-    return <div className="loading-container"><div className="loading-spinner"></div></div>;
+    return <LoadingState variant="page" />;
   }
 
   const totalActiveUsers = Object.values(serviceStats).reduce((s, v) => s + v.totalUsers, 0);

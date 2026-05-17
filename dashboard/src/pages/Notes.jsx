@@ -7,6 +7,7 @@ import {
   PlusIcon, CheckCircleIcon, TrashIcon,
   CloseIcon, NotesIcon, ThumbtackIcon, EditIcon,
 } from '../components/Icons';
+import LoadingState from '../components/LoadingState';
 
 const NOTE_COLORS = [
   { id: 'default', label: 'Gris', bg: 'var(--note-default)' },
@@ -278,7 +279,7 @@ export default function Notes() {
 
   const pinnedCount = useMemo(() => notes.filter(n => n.pinned).length, [notes]);
 
-  if (loading) return <div className="empty-state"><div className="loading-spinner" /></div>;
+  if (loading) return <LoadingState variant="page" />;
 
   return (
     <div className="notes-page">
