@@ -360,12 +360,23 @@ def generate_missing_phone_alerts(db, services_config=None):
 def generate_sim_recharge_alerts(db):
     """
     Revisa config/sim-cards en Firestore. Para cada SIM cuyo
-    nextRechargeDate caiga dentro de los próximos 7 días (o ya haya pasado),
-    genera una alerta indicando que necesita recarga.
+    nextRechargeDate caiga dentro de la ventana de alerta del carrier
+    (o ya haya pasado), genera una alerta indicando que necesita recarga.
     Usa la estructura plana sims[] (post-migración).
     Retorna el número de alertas generadas.
     """
     from datetime import date, timedelta, timezone as tz
+
+    CARRIER_ALERT_DAYS = {
+        'telcel': 7,
+        'att': 7,
+        'oxxocel': 10,
+    }
+    CARRIER_LABELS = {
+        'telcel': 'Telcel',
+        'att': 'AT&T',
+        'oxxocel': 'OXXO Cel',
+    }
 
     print('[SIM Alerts] generate_sim_recharge_alerts() called')
 
@@ -402,6 +413,9 @@ def generate_sim_recharge_alerts(db):
         if not next_date_str:
             continue
 
+        carrier = sim.get('carrier', 'telcel')
+        alert_window = CARRIER_ALERT_DAYS.get(carrier, 7)
+        carrier_label = CARRIER_LABELS.get(carrier, carrier)
         phone = sim.get('phone', '')
         name = sim.get('canonicalAlias') or sim.get('fullName') or f'Cuenta #{lank_id}'
 
@@ -412,9 +426,9 @@ def generate_sim_recharge_alerts(db):
             continue
 
         days_until = (next_date - today).days
-        print(f'[SIM Alerts] SIM #{lank_id} ({name}): nextRecharge={next_date_str}, daysUntil={days_until}')
+        print(f'[SIM Alerts] SIM #{lank_id} ({name}, {carrier_label}): nextRecharge={next_date_str}, daysUntil={days_until}')
 
-        if days_until > 7:
+        if days_until > alert_window:
             continue
 
         month_key = next_date_str[:7]  # YYYY-MM
@@ -450,9 +464,9 @@ def generate_sim_recharge_alerts(db):
             'monthKey': month_key,
             'nextRechargeDate': next_date_str,
             'userAlias': name,
-            'title': f'Recargar SIM — {name} ({phone})',
+            'title': f'Recargar SIM {carrier_label} — {name} ({phone})',
             'description': (
-                f'Recarga pendiente {days_label} para {name} (Tel: {phone}). '
+                f'Recarga pendiente {days_label} para {name} (Tel: {phone}, {carrier_label}). '
                 f'Fecha límite: {next_date_str}. '
                 f'Recargar para evitar desactivación del número.'
             ),

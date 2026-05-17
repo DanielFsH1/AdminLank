@@ -2716,14 +2716,20 @@ export async function saveCreditStatement(accountId, statement, currentAccounts)
 // --- SIM Cards (Control de Recarga) ---
 
 /**
- * Calcula la próxima fecha de recarga: suma 11 meses y redondea al día 15.
+ * Calcula la próxima fecha de recarga según la compañía.
  * @param {string} rechargeDate - Fecha de recarga (YYYY-MM-DD)
- * @returns {string} YYYY-MM-DD con día 15
+ * @param {string} carrier - 'telcel' | 'att' | 'oxxocel'
+ * @returns {string} YYYY-MM-DD
  */
-function computeNextRechargeDate(rechargeDate) {
+export function computeNextRechargeDate(rechargeDate, carrier = 'telcel') {
   const d = new Date(rechargeDate + 'T12:00:00');
-  d.setMonth(d.getMonth() + 11);
-  d.setDate(15);
+  const CARRIER_DAYS = { att: 85, oxxocel: 170 };
+  if (CARRIER_DAYS[carrier]) {
+    d.setDate(d.getDate() + CARRIER_DAYS[carrier]);
+  } else {
+    d.setMonth(d.getMonth() + 11);
+    d.setDate(15);
+  }
   return d.toISOString().slice(0, 10);
 }
 
@@ -2756,7 +2762,7 @@ export async function saveSimCardConfig(configData) {
 
 /**
  * Marca la recarga individual de una SIM como realizada.
- * Suma 11 meses a la fecha de recarga y redondea al día 15.
+ * Calcula la siguiente fecha según el carrier de la SIM.
  * @param {Array} sims - Array de SIMs actual
  * @param {number} lankAccountId - ID de la cuenta Lank
  * @param {string} rechargeDate - Fecha de recarga (YYYY-MM-DD), default hoy
@@ -2766,7 +2772,9 @@ export async function markSimRechargeComplete(sims, lankAccountId, rechargeDate 
   const now = new Date();
   const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const date = rechargeDate || localToday;
-  const nextRecharge = computeNextRechargeDate(date);
+  const targetSim = sims.find(s => s.lankAccountId === lankAccountId);
+  const carrier = targetSim?.carrier || 'telcel';
+  const nextRecharge = computeNextRechargeDate(date, carrier);
 
   const updatedSims = sims.map(sim => {
     if (sim.lankAccountId !== lankAccountId) return sim;
@@ -2810,12 +2818,12 @@ export async function markSimRechargeComplete(sims, lankAccountId, rechargeDate 
 /**
  * Agrega una nueva SIM Card al sistema.
  * @param {Array} sims - Array de SIMs actual
- * @param {object} simInfo - { lankAccountId, phone, fullName, canonicalAlias, lastRechargeDate }
+ * @param {object} simInfo - { lankAccountId, phone, fullName, canonicalAlias, lastRechargeDate, carrier }
  * @returns {Array} SIMs actualizadas
  */
 export async function addSimCard(sims, simInfo) {
-  const { lankAccountId, phone, fullName, canonicalAlias, lastRechargeDate } = simInfo;
-  const nextRecharge = computeNextRechargeDate(lastRechargeDate);
+  const { lankAccountId, phone, fullName, canonicalAlias, lastRechargeDate, carrier = 'telcel' } = simInfo;
+  const nextRecharge = computeNextRechargeDate(lastRechargeDate, carrier);
 
   const newSim = {
     lankAccountId,
@@ -2824,6 +2832,7 @@ export async function addSimCard(sims, simInfo) {
     canonicalAlias: canonicalAlias || fullName,
     lastRechargeDate,
     nextRechargeDate: nextRecharge,
+    carrier,
   };
 
   const updatedSims = [...sims, newSim];

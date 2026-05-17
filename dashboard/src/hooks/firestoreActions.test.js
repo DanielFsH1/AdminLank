@@ -592,3 +592,109 @@ describe('slot deletion alerts', () => {
     expect(payload.createdAt).toBe('2026-05-05T12:00:00.000Z');
   });
 });
+
+describe('computeNextRechargeDate', () => {
+  let computeNextRechargeDate;
+
+  beforeEach(async () => {
+    ({ computeNextRechargeDate } = await import('./firestoreActions'));
+  });
+
+  it('Telcel: suma 11 meses y fija día 15', () => {
+    expect(computeNextRechargeDate('2026-04-20', 'telcel')).toBe('2027-03-15');
+    expect(computeNextRechargeDate('2026-01-10', 'telcel')).toBe('2026-12-15');
+  });
+
+  it('Telcel por defecto si no se pasa carrier', () => {
+    expect(computeNextRechargeDate('2026-04-20')).toBe('2027-03-15');
+  });
+
+  it('AT&T: suma 85 días', () => {
+    expect(computeNextRechargeDate('2026-04-20', 'att')).toBe('2026-07-14');
+    expect(computeNextRechargeDate('2026-01-01', 'att')).toBe('2026-03-27');
+  });
+
+  it('OXXO Cel: suma 170 días', () => {
+    expect(computeNextRechargeDate('2026-04-20', 'oxxocel')).toBe('2026-10-07');
+    expect(computeNextRechargeDate('2026-01-01', 'oxxocel')).toBe('2026-06-20');
+  });
+
+  it('carrier desconocido usa Telcel como fallback', () => {
+    expect(computeNextRechargeDate('2026-04-20', 'unknown')).toBe('2027-03-15');
+  });
+});
+
+describe('markSimRechargeComplete - multi-carrier', () => {
+  let markSimRechargeComplete;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockSetDoc.mockResolvedValue();
+    mockGetDocs.mockResolvedValue({ docs: [] });
+    ({ markSimRechargeComplete } = await import('./firestoreActions'));
+  });
+
+  it('usa ciclo AT&T (85 días) cuando el SIM es att', async () => {
+    const sims = [
+      { lankAccountId: 3, phone: '55 4550 3152', fullName: 'Israel', carrier: 'att', lastRechargeDate: '2026-04-20', nextRechargeDate: '2026-07-14' },
+    ];
+    const result = await markSimRechargeComplete(sims, 3, '2026-07-14');
+    expect(result[0].lastRechargeDate).toBe('2026-07-14');
+    expect(result[0].nextRechargeDate).toBe('2026-10-07');
+  });
+
+  it('usa ciclo OXXO Cel (170 días) cuando el SIM es oxxocel', async () => {
+    const sims = [
+      { lankAccountId: 10, phone: '56 3947 2383', fullName: 'Juan Hoyos', carrier: 'oxxocel', lastRechargeDate: null, nextRechargeDate: null },
+    ];
+    const result = await markSimRechargeComplete(sims, 10, '2026-05-15');
+    expect(result[0].lastRechargeDate).toBe('2026-05-15');
+    expect(result[0].nextRechargeDate).toBe('2026-11-01');
+  });
+
+  it('defaultea a Telcel si SIM no tiene carrier', async () => {
+    const sims = [
+      { lankAccountId: 1, phone: '55 1234 5678', fullName: 'Test', lastRechargeDate: '2026-01-10', nextRechargeDate: '2026-12-15' },
+    ];
+    const result = await markSimRechargeComplete(sims, 1, '2026-12-15');
+    expect(result[0].nextRechargeDate).toBe('2027-11-15');
+  });
+});
+
+describe('addSimCard - multi-carrier', () => {
+  let addSimCard;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockSetDoc.mockResolvedValue();
+    ({ addSimCard } = await import('./firestoreActions'));
+  });
+
+  it('agrega SIM con carrier att y calcula siguiente recarga correcta', async () => {
+    const result = await addSimCard([], {
+      lankAccountId: 3, phone: '55 4550 3152', fullName: 'Israel',
+      canonicalAlias: 'Israel', lastRechargeDate: '2026-04-20', carrier: 'att',
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0].carrier).toBe('att');
+    expect(result[0].nextRechargeDate).toBe('2026-07-14');
+  });
+
+  it('agrega SIM con carrier oxxocel', async () => {
+    const result = await addSimCard([], {
+      lankAccountId: 10, phone: '56 3947 2383', fullName: 'Juan Hoyos',
+      lastRechargeDate: '2026-05-01', carrier: 'oxxocel',
+    });
+    expect(result[0].carrier).toBe('oxxocel');
+    expect(result[0].nextRechargeDate).toBe('2026-10-18');
+  });
+
+  it('defaultea carrier a telcel si no se especifica', async () => {
+    const result = await addSimCard([], {
+      lankAccountId: 1, phone: '55 1111 2222', fullName: 'Test',
+      lastRechargeDate: '2026-01-10',
+    });
+    expect(result[0].carrier).toBe('telcel');
+    expect(result[0].nextRechargeDate).toBe('2026-12-15');
+  });
+});

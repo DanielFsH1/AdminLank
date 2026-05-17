@@ -11,21 +11,34 @@ import {
 const MONTH_NAMES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 const MONTH_NAMES_FULL = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
+const CARRIER_CONFIG = {
+  telcel:  { label: 'Telcel',   color: '#0033A0', rechargeDays: null, alertDays: 7 },
+  att:     { label: 'AT&T',     color: '#009FDB', rechargeDays: 85,   alertDays: 7 },
+  oxxocel: { label: 'OXXO Cel', color: '#E30613', rechargeDays: 170,  alertDays: 10 },
+};
+
 function todayLocal() {
   const n = new Date();
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
 }
 
-/**
- * Calcula la próxima fecha de recarga (espejo del back-end en firestoreActions.js).
- * Suma 11 meses y fija el día al 15.
- */
-function computeNextRechargeDate(rechargeDate) {
+function computeNextRechargeDate(rechargeDate, carrier = 'telcel') {
   if (!rechargeDate) return null;
   const d = new Date(rechargeDate + 'T12:00:00');
-  d.setMonth(d.getMonth() + 11);
-  d.setDate(15);
+  const cfg = CARRIER_CONFIG[carrier];
+  if (cfg && cfg.rechargeDays) {
+    d.setDate(d.getDate() + cfg.rechargeDays);
+  } else {
+    d.setMonth(d.getMonth() + 11);
+    d.setDate(15);
+  }
   return d.toISOString().slice(0, 10);
+}
+
+function getRechargeFormulaText(carrier = 'telcel') {
+  const cfg = CARRIER_CONFIG[carrier];
+  if (cfg && cfg.rechargeDays) return `+ ${cfg.rechargeDays} días`;
+  return '+ 11 meses → día 15';
 }
 
 /**
@@ -40,7 +53,9 @@ function RechargeModal({ sim, initialDate, onConfirm, onClose }) {
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
 
-  const nextDate = computeNextRechargeDate(rechargeDate);
+  const carrier = sim.carrier || 'telcel';
+  const carrierCfg = CARRIER_CONFIG[carrier] || CARRIER_CONFIG.telcel;
+  const nextDate = computeNextRechargeDate(rechargeDate, carrier);
   const nextDateFormatted = nextDate ? formatDateShort(nextDate) : '—';
   const currentDateFormatted = rechargeDate ? formatDateShort(rechargeDate) : '—';
 
@@ -147,7 +162,14 @@ function RechargeModal({ sim, initialDate, onConfirm, onClose }) {
           /* ── Paso 1: Selección de fecha ── */
           <>
             <div className="edit-modal-header">
-              <h3 className="edit-modal-title">Recarga — {sim.canonicalAlias || sim.fullName}</h3>
+              <h3 className="edit-modal-title">
+                Recarga — {sim.canonicalAlias || sim.fullName}
+                <span style={{
+                  display: 'inline-block', marginLeft: '8px', fontSize: '11px', fontWeight: 600,
+                  padding: '2px 8px', borderRadius: '10px', verticalAlign: 'middle',
+                  background: carrierCfg.color + '22', color: carrierCfg.color,
+                }}>{carrierCfg.label}</span>
+              </h3>
               <button className="edit-modal-close" onClick={onClose}><span style={{ fontSize: '18px', lineHeight: 1 }}>&times;</span></button>
             </div>
 
@@ -176,7 +198,7 @@ function RechargeModal({ sim, initialDate, onConfirm, onClose }) {
                     Se ubicará en <strong>{targetMonth} {targetYear}</strong>
                   </div>
                   <div className="recharge-preview-formula">
-                    {currentDateFormatted} + 11 meses → día 15
+                    {currentDateFormatted} {getRechargeFormulaText(carrier)}
                   </div>
                 </div>
               )}
@@ -296,6 +318,7 @@ export default function SimCards() {
   const [rechargeModal, setRechargeModal] = useState(null);
   const [selectedYear, setSelectedYear] = useState(null);
   const [lankRegistry, setLankRegistry] = useState([]);
+  const [addCarrier, setAddCarrier] = useState('telcel');
 
   const showToast = useCallback((msg, type = 'success') => {
     setToast({ message: msg, type });
@@ -306,9 +329,18 @@ export default function SimCards() {
     getDoc(doc(db, 'config', 'sim-cards')).then(snap => {
       if (snap.exists()) {
         const data = snap.data();
-        const flatSims = data.sims || migrateGroupsToFlat(data);
+        let flatSims = data.sims || migrateGroupsToFlat(data);
+        // Migrate: ensure all SIMs have a carrier field
+        let needsMigration = false;
+        flatSims = flatSims.map(sim => {
+          if (!sim.carrier) {
+            needsMigration = true;
+            return { ...sim, carrier: 'telcel' };
+          }
+          return sim;
+        });
         setSims(flatSims);
-        if (data.groups && !data.sims) {
+        if ((data.groups && !data.sims) || needsMigration) {
           saveSimCardConfig({ sims: flatSims }).catch(() => {});
         }
       } else {
@@ -431,6 +463,7 @@ export default function SimCards() {
         fullName: account.fullName,
         canonicalAlias: account.canonicalAlias,
         lastRechargeDate: addModal.lastRechargeDate,
+        carrier: addCarrier,
       });
       setSims(updated);
       showToast(`SIM de ${account.canonicalAlias} agregada`);
@@ -438,6 +471,7 @@ export default function SimCards() {
       showToast(`Error: ${err.message}`, 'error');
     }
     setAddModal(null);
+    setAddCarrier('telcel');
   };
 
   if (loading) {
@@ -536,6 +570,12 @@ export default function SimCards() {
                             <div className="sim-number-top">
                               <span className="sim-number-id">#{sim.lankAccountId}</span>
                               <span className="sim-number-alias">{sim.canonicalAlias || sim.fullName}</span>
+                              {sim.carrier && CARRIER_CONFIG[sim.carrier] && (
+                                <span className="sim-carrier-badge" style={{
+                                  background: CARRIER_CONFIG[sim.carrier].color + '22',
+                                  color: CARRIER_CONFIG[sim.carrier].color,
+                                }}>{CARRIER_CONFIG[sim.carrier].label}</span>
+                              )}
                             </div>
                             <div className="sim-number-details">
                               <span className="sim-number-phone">
@@ -653,7 +693,7 @@ export default function SimCards() {
       {addModal && (
         <EditModal
           open
-          onClose={() => setAddModal(null)}
+          onClose={() => { setAddModal(null); setAddCarrier('telcel'); }}
           onSave={handleAddSim}
           title="Agregar SIM Card"
           fields={[
@@ -663,13 +703,24 @@ export default function SimCards() {
               required: true,
             },
             {
+              key: 'carrier', label: 'Compañía', type: 'select',
+              options: Object.entries(CARRIER_CONFIG).map(([k, v]) => ({ value: k, label: v.label })),
+              required: true,
+            },
+            {
               key: 'lastRechargeDate', label: 'Fecha de última recarga', type: 'date',
               required: true,
-              hint: 'Se sumará 11 meses y se asignará al día 15 del mes resultante',
+              hint: `Fórmula: ${getRechargeFormulaText(addCarrier)}`,
             },
           ]}
-          values={addModal}
-          onChange={(key, val) => setAddModal(prev => ({ ...prev, [key]: key === 'lankAccountId' ? Number(val) : val }))}
+          values={{ ...addModal, carrier: addCarrier }}
+          onChange={(key, val) => {
+            if (key === 'carrier') {
+              setAddCarrier(val);
+            } else {
+              setAddModal(prev => ({ ...prev, [key]: key === 'lankAccountId' ? Number(val) : val }));
+            }
+          }}
           saveLabel={<><PlusIcon size={14} /> Agregar SIM</>}
         />
       )}
