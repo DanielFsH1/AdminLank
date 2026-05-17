@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
 import { useCollection } from '../hooks/useFirestore';
-import { BarChartIcon, KeyIcon, UsersIcon, BellIcon, MoneyIcon, AnalyzeIcon, LockIcon, ToolboxIcon, DoorIcon, NotepadIcon, LinkIcon } from './Icons';
+import { BarChartIcon, KeyIcon, UsersIcon, BellIcon, MoneyIcon, AnalyzeIcon, LockIcon, ToolboxIcon, DoorIcon, NotepadIcon, LinkIcon, MenuIcon } from './Icons';
 
 // SIM Card icon for sidebar
 const SimCardIcon = (props) => (
@@ -47,7 +47,7 @@ const SYSTEM_ITEMS = [
   { id: 'tools', icon: ToolboxIcon, label: 'Herramientas' },
 ];
 
-export default function Sidebar({ activeTab, onTabChange, mobileOpen, onClose }) {
+export default function Sidebar({ activeTab, onTabChange, mobileOpen, onClose, collapsed = false, onToggleCollapsed }) {
   const { data: alerts } = useCollection('alerts');
 
   const pendingCount = useMemo(() => {
@@ -63,15 +63,24 @@ export default function Sidebar({ activeTab, onTabChange, mobileOpen, onClose })
   return (
     <>
       <div className={`sidebar-overlay ${mobileOpen ? 'open' : ''}`} onClick={onClose} />
-      <aside className={`sidebar ${mobileOpen ? 'open' : ''}`}>
+      <aside className={`sidebar ${mobileOpen ? 'open' : ''} ${collapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-header">
           <div className="sidebar-brand">
             <img src="/assets/logo-icon.png" alt="AdminLank" className="sidebar-brand-logo" />
-            <div>
+            <div className="sidebar-brand-copy">
               <img src="/assets/logo-text.png" alt="AdminLank" className="sidebar-brand-text" />
               <span>v2.1 Firebase</span>
             </div>
           </div>
+          <button
+            type="button"
+            className="sidebar-toggle-btn"
+            onClick={onToggleCollapsed}
+            title={collapsed ? 'Expandir barra lateral' : 'Ocultar barra lateral'}
+            aria-label={collapsed ? 'Expandir barra lateral' : 'Ocultar barra lateral'}
+          >
+            <MenuIcon size={18} />
+          </button>
         </div>
 
         <nav className="sidebar-nav">
@@ -83,9 +92,10 @@ export default function Sidebar({ activeTab, onTabChange, mobileOpen, onClose })
                 key={item.id}
                 className={`nav-item ${activeTab === item.id ? 'active' : ''}`}
                 onClick={() => { onTabChange(item.id); onClose(); }}
+                title={collapsed ? item.label : undefined}
               >
                 <span className="nav-icon"><IconComp size={18} /></span>
-                {item.label}
+                <span className="nav-label">{item.label}</span>
                 {item.showBadge && pendingCount > 0 && (
                   <span className="nav-badge">{pendingCount}</span>
                 )}
@@ -100,9 +110,10 @@ export default function Sidebar({ activeTab, onTabChange, mobileOpen, onClose })
                 key={item.id}
                 className={`nav-item ${activeTab === item.id ? 'active' : ''}`}
                 onClick={() => { onTabChange(item.id); onClose(); }}
+                title={collapsed ? item.label : undefined}
               >
                 <span className="nav-icon"><IconComp size={18} /></span>
-                {item.label}
+                <span className="nav-label">{item.label}</span>
               </button>
             );
           })}

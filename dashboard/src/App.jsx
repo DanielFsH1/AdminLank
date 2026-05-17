@@ -4,6 +4,12 @@ import { onSnapshot, doc as firestoreDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { setDynamicServices } from './config/services';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
+import {
+  formatSidebarCollapsedValue,
+  getSidebarLayoutClass,
+  parseStoredSidebarCollapsed,
+  SIDEBAR_COLLAPSED_STORAGE_KEY,
+} from './utils/sidebarLayout';
 import Login from './components/Login';
 import Sidebar from './components/Sidebar';
 import Overview from './pages/Overview';
@@ -81,6 +87,9 @@ function App() {
   const [user, setUser] = useState(undefined);
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(() => (
+    parseStoredSidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY))
+  ));
   const [theme, setTheme] = useState(() => localStorage.getItem('adminlank-theme') || 'dark');
   const [navData, setNavData] = useState(null); // cross-linking data
   const [appToast, setAppToast] = useState(null);
@@ -183,7 +192,15 @@ function App() {
     localStorage.setItem('adminlank-theme', theme);
   }, [theme]);
 
+  useEffect(() => {
+    localStorage.setItem(
+      SIDEBAR_COLLAPSED_STORAGE_KEY,
+      formatSidebarCollapsedValue(desktopSidebarCollapsed)
+    );
+  }, [desktopSidebarCollapsed]);
+
   const toggleTheme = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
+  const toggleDesktopSidebar = () => setDesktopSidebarCollapsed(value => !value);
 
   // Cross-navigation handler (con animación)
   const handleNavigate = useCallback((tab, data) => {
@@ -226,12 +243,14 @@ function App() {
   const nextTab = tabIdx < TAB_ORDER.length - 1 ? TAB_ORDER[tabIdx + 1] : null;
 
   return (
-    <div className="app-layout">
+    <div className={getSidebarLayoutClass(desktopSidebarCollapsed)}>
       <Sidebar
         activeTab={activeTab}
         onTabChange={(tab) => changeTab(tab)}
         mobileOpen={mobileOpen}
         onClose={() => setMobileOpen(false)}
+        collapsed={desktopSidebarCollapsed}
+        onToggleCollapsed={toggleDesktopSidebar}
       />
 
       <div className="main-content">
