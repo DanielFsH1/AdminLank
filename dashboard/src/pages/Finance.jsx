@@ -7,6 +7,7 @@ import { confirmRecurringExpense, generateRecurringExpenses, logManualChange, ap
 import { buildBankClabeOptions } from '../utils/bankClabes';
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
 import { BankIcon, BarChartIcon, CalendarIcon, CheckCircleIcon, ClipboardIcon, ClockIcon, CloseIcon, CreditCardIcon, DepositIcon, EditIcon, ExpenseIcon, FolderIcon, HourglassIcon, KeyIcon, LinkIcon, MoneyIcon, PlusIcon, ReceiptIcon, RefreshIcon, SaveIcon, TrashIcon, TrendUpIcon, WarningIcon } from '../components/Icons';
+import LoadingState from '../components/LoadingState';
 
 const MONTH_NAMES_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const MONTH_NAMES_EN = ['january','february','march','april','may','june','july','august','september','october','november','december'];
@@ -803,7 +804,7 @@ export default function Finance() {
    }
  };
 
- if (loadingOverview || loadingLedger) return <div className="empty-state"><div className="loading-spinner" /></div>;
+ if (loadingOverview || loadingLedger) return <LoadingState variant="page" />;
  if (!overview) return (
     <div className="empty-state">
       <div className="empty-state-icon"><WarningIcon size={20} /></div>

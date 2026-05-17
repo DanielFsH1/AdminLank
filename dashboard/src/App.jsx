@@ -4,6 +4,7 @@ import { onSnapshot, doc as firestoreDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { setDynamicServices } from './config/services';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
+import { getPageTransitionClass } from './utils/pageChrome';
 import {
   formatSidebarCollapsedValue,
   getSidebarLayoutClass,
@@ -11,6 +12,7 @@ import {
   SIDEBAR_COLLAPSED_STORAGE_KEY,
 } from './utils/sidebarLayout';
 import Login from './components/Login';
+import LoadingState from './components/LoadingState';
 import Sidebar from './components/Sidebar';
 import Overview from './pages/Overview';
 import { MenuIcon, SunIcon, MoonIcon, WarningIcon, CheckCircleIcon } from './components/Icons';
@@ -80,7 +82,7 @@ const TAB_SUBTITLES = {
 };
 
 function PageFallback() {
-  return <div className="loading-container"><div className="loading-spinner"></div></div>;
+  return <LoadingState variant="page" />;
 }
 
 function App() {
@@ -219,7 +221,7 @@ function App() {
   }, []);
 
   if (user === undefined) {
-    return <div className="loading-container"><div className="loading-spinner"></div></div>;
+    return <LoadingState variant="page" className="app-loading-state" />;
   }
   if (!user) return <Login />;
 
@@ -300,14 +302,17 @@ function App() {
           </span>
         </div>
 
-        <div
-          className={`main-body ${slideDir ? `slide-${slideDir}` : ''}`}
-          ref={mainBodyRef}
-          onAnimationEnd={() => setSlideDir(null)}
-        >
-          <Suspense fallback={<PageFallback />}>
-            {renderPage()}
-          </Suspense>
+        <div className="main-body" ref={mainBodyRef}>
+          <div
+            className={getPageTransitionClass(slideDir)}
+            onAnimationEnd={event => {
+              if (event.currentTarget === event.target) setSlideDir(null);
+            }}
+          >
+            <Suspense fallback={<PageFallback />}>
+              {renderPage()}
+            </Suspense>
+          </div>
         </div>
 
         {/* Tab dots indicator — solo visible en móvil via CSS */}

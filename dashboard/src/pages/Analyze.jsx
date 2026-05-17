@@ -4,6 +4,7 @@ import { db } from '../firebase';
 import { useAdminbotState } from '../hooks/adminbotState';
 import { authenticatedFetch, ensureAdminFunctionResponse } from '../utils/authenticatedFetch';
 import { AnalyzeIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClipboardIcon, ClockIcon, CloudSunIcon, DoorIcon, EmailIcon, EmptyMailIcon, HourglassIcon, InboxIcon, LightningIcon, MoneyIcon, MoonIcon, PinIcon, RefreshIcon, SatelliteIcon, SearchIcon, SleepIcon, StopwatchIcon, TargetIcon, UsersIcon, WarningIcon, WrenchIcon, XCircleIcon } from '../components/Icons';
+import LoadingState from '../components/LoadingState';
 
 const CLOUD_FUNCTIONS_URL = '***REMOVED***';
 
@@ -363,10 +364,7 @@ export default function Analyze({ navData }) {
 
  if (loading) {
  return (
-      <div className="analyze-loading">
-        <div className="loading-spinner" />
-        <p>Cargando datos de análisis...</p>
-      </div>
+      <LoadingState variant="page" label="Cargando datos de análisis..." className="analyze-loading" />
  );
  }
 
