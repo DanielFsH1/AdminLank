@@ -5,29 +5,13 @@ import { db } from '../firebase';
 import { formatMXN, getBankMeta, getProfileImage, BANKS, setCustomBankAccounts } from '../config/services';
 import { confirmRecurringExpense, generateRecurringExpenses, logManualChange, applyCreditBalanceByBankId } from '../hooks/firestoreActions';
 import { buildBankClabeOptions } from '../utils/bankClabes';
+import { isOperationalExternalBankLabel, resolveWithdrawalDestinationLabel } from '../utils/financeWithdrawalDestination';
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
 import { BankIcon, BarChartIcon, CalendarIcon, CheckCircleIcon, ClipboardIcon, ClockIcon, CloseIcon, CreditCardIcon, DepositIcon, EditIcon, ExpenseIcon, FolderIcon, HourglassIcon, KeyIcon, LinkIcon, MoneyIcon, PlusIcon, ReceiptIcon, RefreshIcon, SaveIcon, TrashIcon, TrendUpIcon, WarningIcon } from '../components/Icons';
 import LoadingState from '../components/LoadingState';
 
 const MONTH_NAMES_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const MONTH_NAMES_EN = ['january','february','march','april','may','june','july','august','september','october','november','december'];
-const NON_OPERATIONAL_BANK_LABELS = new Set(['stp', 'arcus']);
-const UNCLASSIFIED_DESTINATION_LABEL = 'Destino por clasificar';
-
-function normalizeBankLabel(value) {
- return String(value || '')
-   .normalize('NFD')
-   .replace(/[\u0300-\u036f]/g, '')
-   .trim()
-   .toLowerCase();
-}
-
-function isOperationalBankLabel(value) {
- const normalized = normalizeBankLabel(value);
- return normalized
-   && normalized !== normalizeBankLabel(UNCLASSIFIED_DESTINATION_LABEL)
-   && !NON_OPERATIONAL_BANK_LABELS.has(normalized);
-}
 
 function getMonthKey(year, month) {
  // month: 0-11
@@ -64,6 +48,8 @@ function buildLegacyManualEntryIdentifier(entry) {
 export default function Finance() {
  const { data: overview, loading: loadingOverview, error: errorOverview } = useDocument('finance', 'overview', { realtime: true });
  const { data: ledger, loading: loadingLedger } = useDocument('finance', 'manual-ledger', { realtime: true });
+ const { data: snowballConfig } = useDocument('config', 'snowball', { realtime: true });
+ const { data: accountRegistry } = useDocument('config', 'account-registry', { realtime: true });
  const [withdrawals, setWithdrawals] = useState([]);
  const [wTab, setWTab] = useState('all');
  const [withdrawalsCollapsed, setWithdrawalsCollapsed] = useState(true); // colapsado por defecto en móvil
@@ -843,15 +829,11 @@ export default function Finance() {
  { label: 'Ganancia neta', value: netProfit, color: netProfit >= 0 ? '#10b981' : '#ef4444', icon: <TrendUpIcon size={16} />, isAmount: true, isNet: true },
  ];
 
- const resolveBankName = (w) => {
-   if (w.knownBankAccount?.bank) return w.knownBankAccount.bank;
-   if (w.accountNumber) {
-     const match = clabes.find(c => c.clabe === w.accountNumber);
-     if (match) return match.bank;
-   }
-   if (!isOperationalBankLabel(w.bank)) return UNCLASSIFIED_DESTINATION_LABEL;
-   return w.bank || UNCLASSIFIED_DESTINATION_LABEL;
- };
+ const resolveBankName = (w) => resolveWithdrawalDestinationLabel(w, {
+   bankClabes: clabes,
+   snowballConfig,
+   accounts: accountRegistry?.accounts || [],
+ });
 
  // Agrupar retiros por banco — resolver nombre vía knownBankAccount o CLABE
  const byBank = {};
@@ -1470,7 +1452,7 @@ export default function Finance() {
           }));
           const banksWithoutClabe = Object.keys(byBank)
             .filter(bankName => !clabes.some(clabeEntry => clabeEntry.bank === bankName))
-            .filter(isOperationalBankLabel)
+            .filter(isOperationalExternalBankLabel)
             .map(bankName => ({ id: `withdrawals-${bankName}`, bankName, clabeEntry: null }));
           const rows = [...clabeRows, ...banksWithoutClabe];
 

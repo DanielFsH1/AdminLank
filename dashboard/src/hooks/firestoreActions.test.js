@@ -413,6 +413,7 @@ describe('validateSnowballConfig', () => {
   });
 
   it('reemplaza el documento Snowball al guardar para eliminar conexiones removidas', async () => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(1);
     const nextConfig = {
       wallets: {
         13: { accountId: '13', walletClabe: '646180131313131313', active: true },
@@ -432,6 +433,8 @@ describe('validateSnowballConfig', () => {
     };
 
     await saveSnowballConfig(nextConfig, 'Conexión Snowball eliminada desde Lank #32');
+    await Promise.resolve();
+    randomSpy.mockRestore();
 
     expect(mockSetDoc).toHaveBeenCalledTimes(1);
     const [ref, payload, options] = mockSetDoc.mock.calls[0];
