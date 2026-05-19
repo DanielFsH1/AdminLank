@@ -6,6 +6,7 @@ import SearchBar from '../components/SearchBar';
 import {
   PlusIcon, CheckCircleIcon, TrashIcon,
   CloseIcon, NotesIcon, ThumbtackIcon, EditIcon,
+  SaveIcon,
 } from '../components/Icons';
 import LoadingState from '../components/LoadingState';
 
@@ -119,6 +120,7 @@ function NoteEditor({ note, onClose, onSaved }) {
                 <span className="note-color-label">Color</span>
                 {NOTE_COLORS.map(c => (
                   <button
+                    type="button"
                     key={c.id}
                     className={`note-color-dot ${color === c.id ? 'active' : ''}`}
                     style={{ background: c.bg }}
@@ -131,9 +133,11 @@ function NoteEditor({ note, onClose, onSaved }) {
             </div>
 
             <div className="edit-modal-footer">
-              <button className="btn-secondary" onClick={onClose} disabled={saving}>Cancelar</button>
-              <button className="btn-primary" onClick={handleSave} disabled={saving}>
-                {saving ? 'Guardando...' : 'Guardar'}
+              <button type="button" className="note-modal-btn secondary" onClick={onClose} disabled={saving}>
+                <CloseIcon size={15} /> Cancelar
+              </button>
+              <button type="button" className="note-modal-btn primary" onClick={handleSave} disabled={saving}>
+                {saving ? 'Guardando...' : <><SaveIcon size={15} /> Guardar</>}
               </button>
             </div>
           </>
@@ -177,9 +181,11 @@ function DeleteConfirm({ note, onClose, onDeleted }) {
           {error && <div className="edit-modal-error" style={{ marginTop: '12px' }}>{error}</div>}
         </div>
         <div className="edit-modal-footer">
-          <button className="btn-secondary" onClick={onClose} disabled={deleting}>Cancelar</button>
-          <button className="btn-danger" onClick={handleDelete} disabled={deleting}>
-            {deleting ? 'Eliminando...' : 'Eliminar'}
+          <button type="button" className="note-modal-btn secondary" onClick={onClose} disabled={deleting}>
+            <CloseIcon size={15} /> Cancelar
+          </button>
+          <button type="button" className="note-modal-btn danger" onClick={handleDelete} disabled={deleting}>
+            {deleting ? 'Eliminando...' : <><TrashIcon size={15} /> Eliminar</>}
           </button>
         </div>
       </div>
@@ -202,6 +208,7 @@ function NoteCard({ note, onEdit, onDelete, onTogglePin }) {
           <h4 className="note-card-title">{note.title || 'Sin título'}</h4>
           <div className="note-card-actions">
             <button
+              type="button"
               className={`note-action-btn ${note.pinned ? 'active' : ''}`}
               title={note.pinned ? 'Desfijar' : 'Fijar'}
               onClick={e => { e.stopPropagation(); onTogglePin(note); }}
@@ -209,6 +216,7 @@ function NoteCard({ note, onEdit, onDelete, onTogglePin }) {
               <ThumbtackIcon size={14} />
             </button>
             <button
+              type="button"
               className="note-action-btn"
               title="Editar"
               onClick={e => { e.stopPropagation(); onEdit(note); }}
@@ -216,6 +224,7 @@ function NoteCard({ note, onEdit, onDelete, onTogglePin }) {
               <EditIcon size={14} />
             </button>
             <button
+              type="button"
               className="note-action-btn danger"
               title="Eliminar"
               onClick={e => { e.stopPropagation(); onDelete(note); }}
@@ -288,7 +297,7 @@ export default function Notes() {
         <div className="section-title">
           <NotesIcon size={20} /> Bloc de Notas
         </div>
-        <button className="alert-tab active-tint" onClick={() => setEditorNote(null)}>
+        <button type="button" className="alert-tab active-tint" onClick={() => setEditorNote(null)}>
           <PlusIcon size={14} /> Nueva nota
         </button>
       </div>
@@ -302,6 +311,7 @@ export default function Notes() {
       >
         {/* Color filter chips */}
         <button
+          type="button"
           className={`alert-tab ${filterColor === 'all' ? 'active' : ''}`}
           onClick={() => setFilterColor('all')}
           style={{ fontSize: '12px', padding: '4px 10px' }}
@@ -310,6 +320,7 @@ export default function Notes() {
         </button>
         {NOTE_COLORS.map(c => (
           <button
+            type="button"
             key={c.id}
             className={`alert-tab ${filterColor === c.id ? 'active' : ''}`}
             onClick={() => setFilterColor(filterColor === c.id ? 'all' : c.id)}
@@ -333,7 +344,7 @@ export default function Notes() {
           <div className="empty-state-icon"><NotesIcon size={40} /></div>
           <p>{search || filterColor !== 'all' ? 'No se encontraron notas con esos filtros' : 'No hay notas todavía'}</p>
           {!search && filterColor === 'all' && (
-            <button className="alert-tab active-tint" onClick={() => setEditorNote(null)} style={{ marginTop: '8px' }}>
+            <button type="button" className="alert-tab active-tint" onClick={() => setEditorNote(null)} style={{ marginTop: '8px' }}>
               <PlusIcon size={14} /> Crear primera nota
             </button>
           )}

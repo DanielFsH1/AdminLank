@@ -463,7 +463,14 @@ export default function BankManager({ vaultCards = {} }) {
                           {debitCards.map(c => (
                             <span className="credit-link-chip" key={c.id}>
                               <CreditCardIcon size={12} /> {c.bank} ****{c.lastFour}
-                              <button onClick={() => handleUnlinkCard(c.id, `${c.bank} ****${c.lastFour}`)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 0 0 4px', color: 'inherit', opacity: 0.6 }}><CloseIcon size={10} /></button>
+                              <button
+                                type="button"
+                                className="vault-chip-remove-btn"
+                                onClick={() => handleUnlinkCard(c.id, `${c.bank} ****${c.lastFour}`)}
+                                title="Quitar tarjeta vinculada"
+                              >
+                                <CloseIcon size={10} />
+                              </button>
                             </span>
                           ))}
                         </div>
@@ -929,7 +936,14 @@ export default function BankManager({ vaultCards = {} }) {
             {creditCards.map(c => (
               <span className="credit-link-chip" key={c.id}>
                 <CreditCardIcon size={12} /> {c.bank} ****{c.lastFour}
-                <button onClick={() => handleUnlinkCard(c.id, `${c.bank} ****${c.lastFour}`)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 0 0 4px', color: 'inherit', opacity: 0.6 }}><CloseIcon size={10} /></button>
+                <button
+                  type="button"
+                  className="vault-chip-remove-btn"
+                  onClick={() => handleUnlinkCard(c.id, `${c.bank} ****${c.lastFour}`)}
+                  title="Quitar tarjeta vinculada"
+                >
+                  <CloseIcon size={10} />
+                </button>
               </span>
             ))}
           </div>

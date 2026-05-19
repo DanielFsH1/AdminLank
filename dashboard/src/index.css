@@ -223,6 +223,9 @@ body {
 .vault-action-btn,
 .crud-icon-btn,
 .edit-modal-btn,
+.note-modal-btn,
+.note-action-btn,
+.note-color-dot,
 .tools-btn,
 .alert-tab,
 .vault-tab,
@@ -240,7 +243,9 @@ body {
 .vault-credential-card,
 .user-select-card,
 .crud-add-service-btn,
-.searchbar-clear {
+.searchbar-clear,
+.history-refresh-btn,
+.vault-chip-remove-btn {
   transition:
     background-color var(--transition-fast),
     border-color var(--transition-fast),
@@ -255,6 +260,9 @@ body {
 .vault-action-btn,
 .crud-icon-btn,
 .edit-modal-btn,
+.note-modal-btn,
+.note-action-btn,
+.note-color-dot,
 .tools-btn,
 .alert-tab,
 .vault-tab,
@@ -267,7 +275,9 @@ body {
 .vault-create-card,
 .vault-service-header,
 .crud-add-service-btn,
-.searchbar-clear {
+.searchbar-clear,
+.history-refresh-btn,
+.vault-chip-remove-btn {
   will-change: transform;
 }
 
@@ -276,6 +286,9 @@ body {
 .vault-action-btn:focus-visible,
 .crud-icon-btn:focus-visible,
 .edit-modal-btn:focus-visible,
+.note-modal-btn:focus-visible,
+.note-action-btn:focus-visible,
+.note-color-dot:focus-visible,
 .tools-btn:focus-visible,
 .alert-tab:focus-visible,
 .vault-tab:focus-visible,
@@ -293,7 +306,9 @@ body {
 .vault-credential-card:focus-visible,
 .user-select-card:focus-visible,
 .crud-add-service-btn:focus-visible,
-.searchbar-clear:focus-visible {
+.searchbar-clear:focus-visible,
+.history-refresh-btn:focus-visible,
+.vault-chip-remove-btn:focus-visible {
   outline: none;
   box-shadow: var(--interactive-ring);
 }
@@ -3539,6 +3554,29 @@ body {
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
 }
+.vault-chip-remove-btn {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin-left: 2px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.72;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.vault-chip-remove-btn:hover {
+  opacity: 1;
+  color: var(--accent-danger);
+  background: rgba(239,68,68,0.12);
+  border-color: rgba(239,68,68,0.18);
+  transform: scale(1.05);
+}
 
 /* Expandable sections inside credit card */
 .credit-expand-toggle {
@@ -5389,12 +5427,17 @@ body {
   cursor: pointer;
 }
 .history-refresh-btn {
-  display: flex; align-items: center; gap: 5px;
-  padding: 8px 14px; background: var(--bg-hover); border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm); color: var(--text-secondary); font-size: 12px;
-  cursor: pointer; transition: background var(--transition-fast);
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px 14px; background: rgba(50,100,200,0.06); border: 1px solid rgba(50,100,200,0.22);
+  border-radius: var(--radius-sm); color: var(--accent-primary); font-size: 12px; font-weight: 600;
+  cursor: pointer; font-family: 'Inter', sans-serif;
 }
-.history-refresh-btn:hover { background: var(--bg-active); }
+.history-refresh-btn:hover {
+  background: rgba(50,100,200,0.14);
+  border-color: rgba(50,100,200,0.36);
+  transform: var(--interactive-lift-sm);
+  box-shadow: 0 2px 8px rgba(50,100,200,0.16);
+}
 
 /* ── Empty / Loading ── */
 .history-empty, .history-loading {
@@ -6342,19 +6385,34 @@ code, pre, .clabe-digits, .alert-v2-highlight code {
 }
 
 .note-card-actions {
-  display: flex; gap: 2px; opacity: 0; transition: opacity var(--transition-fast);
+  display: flex; gap: 4px; opacity: 0; transition: opacity var(--transition-fast);
   flex-shrink: 0;
 }
 .note-card:hover .note-card-actions { opacity: 1; }
 
 .note-action-btn {
-  background: none; border: none; cursor: pointer;
-  color: var(--text-muted); padding: 4px; border-radius: var(--radius-sm);
-  display: flex; transition: color var(--transition-fast), background var(--transition-fast);
+  width: 28px; height: 28px; padding: 0;
+  background: var(--bg-secondary); border: 1px solid var(--border-color); cursor: pointer;
+  color: var(--text-muted); border-radius: var(--radius-sm);
+  display: inline-flex; align-items: center; justify-content: center;
 }
-.note-action-btn:hover { color: var(--accent-primary); background: var(--bg-input); }
-.note-action-btn.active { color: var(--accent-primary); }
-.note-action-btn.danger:hover { color: var(--accent-danger); background: rgba(239,68,68,0.08); }
+.note-action-btn:hover {
+  color: var(--accent-primary);
+  background: rgba(50,100,200,0.10);
+  border-color: rgba(50,100,200,0.28);
+  transform: var(--interactive-lift-sm);
+  box-shadow: var(--shadow-sm);
+}
+.note-action-btn.active {
+  color: var(--accent-primary);
+  background: rgba(50,100,200,0.12);
+  border-color: rgba(50,100,200,0.24);
+}
+.note-action-btn.danger:hover {
+  color: var(--accent-danger);
+  background: rgba(239,68,68,0.10);
+  border-color: rgba(239,68,68,0.28);
+}
 
 .note-card-content {
   font-size: 13px; color: var(--text-secondary); line-height: 1.55;
@@ -6372,6 +6430,66 @@ code, pre, .clabe-digits, .alert-v2-highlight code {
 
 /* Note editor modal */
 .note-editor-modal .edit-modal-body { display: flex; flex-direction: column; gap: 12px; }
+
+.edit-modal-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  padding: 14px 20px 20px;
+  border-top: 1px solid var(--border-color);
+  background: linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,0.025));
+}
+
+.note-modal-btn {
+  min-height: 40px;
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: 'Inter', sans-serif;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.note-modal-btn:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+.note-modal-btn.primary {
+  background: linear-gradient(135deg, #2b5ea7, #3d73c4);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(50,100,200,0.18);
+}
+.note-modal-btn.primary:hover:not(:disabled) {
+  transform: var(--interactive-lift-sm);
+  box-shadow: 0 5px 16px rgba(50,100,200,0.32);
+}
+.note-modal-btn.secondary {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border-color: var(--border-color);
+}
+.note-modal-btn.secondary:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--border-accent);
+  background: var(--bg-card-hover);
+  transform: var(--interactive-lift-sm);
+  box-shadow: var(--shadow-sm);
+}
+.note-modal-btn.danger {
+  background: linear-gradient(135deg, #dc2626, #ef4444);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(239,68,68,0.16);
+}
+.note-modal-btn.danger:hover:not(:disabled) {
+  transform: var(--interactive-lift-sm);
+  box-shadow: 0 5px 16px rgba(239,68,68,0.30);
+}
 
 .note-editor-title {
   background: transparent; border: none; outline: none;
@@ -6399,13 +6517,20 @@ code, pre, .clabe-digits, .alert-v2-highlight code {
 
 .note-color-dot {
   width: 22px; height: 22px; border-radius: 50%;
-  border: 2px solid transparent; cursor: pointer;
-  transition: transform var(--transition-fast), border-color var(--transition-fast);
+  border: 2px solid rgba(255,255,255,0.28); cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.12);
 }
-.note-color-dot:hover { transform: scale(1.15); }
-.note-color-dot.active { border-color: var(--text-primary); box-shadow: 0 0 0 2px var(--bg-card); }
+.note-color-dot:hover {
+  transform: scale(1.12);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.12), 0 3px 8px rgba(0,0,0,0.16);
+}
+.note-color-dot.active {
+  border-color: var(--text-primary);
+  box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 4px rgba(50,100,200,0.22);
+}
 
 @media (max-width: 600px) {
   .notes-grid { grid-template-columns: 1fr; }
   .note-card-actions { opacity: 1; }
+  .edit-modal-footer { grid-template-columns: 1fr; }
 }
