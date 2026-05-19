@@ -3,10 +3,13 @@
  * Solo el admin (UID Ls1vtEv0rvY8DIyKKKmQY5SlOOQ2) puede escribir,
  * garantizado por las Firestore Security Rules.
  */
-import { doc, updateDoc, setDoc, deleteDoc, deleteField, arrayUnion, Timestamp, getDoc as firestoreGetDoc, collection, addDoc, query, orderBy, getDocs, writeBatch, where, runTransaction } from 'firebase/firestore';
+import { doc, updateDoc, setDoc, deleteDoc, deleteField, arrayUnion, Timestamp, getDoc as firestoreGetDoc, collection, addDoc, query, orderBy, getDocs, writeBatch, where, runTransaction, limit as firestoreLimit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { SERVICES, buildServiceConfig, getServiceMeta, normalizeServiceKey } from '../config/services';
 import { encrypt } from '../utils/crypto';
+
+const AUDIT_LOG_RETENTION_LIMIT = 1000;
+const AUDIT_LOG_CLEANUP_BATCH_SIZE = 100;
 
 // --- Helpers ---
 function nowISO() {
@@ -289,7 +292,7 @@ async function findVaultEmailByEmail(email, excludeId = null) {
 /**
  * Registra un cambio manual en la colección audit-log.
  * Se ejecuta de forma asíncrona (no bloquea la operación principal).
- * Auto-limpia entradas viejas si supera 100 registros.
+ * Auto-limpia entradas viejas si supera el límite de retención.
  *
  * @param {string} action - Acción realizada (ej: 'add_user', 'remove_user')
  * @param {string} description - Descripción legible del cambio
@@ -316,13 +319,17 @@ export async function logManualChange(action, description, opts = {}) {
     const colRef = collection(db, 'audit-log');
     await addDoc(colRef, entry);
 
-    // Auto-limpieza: si hay más de 100 entradas, eliminar las más viejas
+    // Auto-limpieza: si hay más entradas que el límite de retención, eliminar las más viejas.
     // Se hace ocasionalmente (1 de cada 10 llamadas) para no saturar
     if (Math.random() < 0.1) {
-      const q = query(colRef, orderBy('timestamp', 'desc'));
+      const q = query(
+        colRef,
+        orderBy('timestamp', 'desc'),
+        firestoreLimit(AUDIT_LOG_RETENTION_LIMIT + AUDIT_LOG_CLEANUP_BATCH_SIZE),
+      );
       const snap = await getDocs(q);
-      if (snap.size > 200) {
-        const toDelete = snap.docs.slice(200);
+      if (snap.size > AUDIT_LOG_RETENTION_LIMIT) {
+        const toDelete = snap.docs.slice(AUDIT_LOG_RETENTION_LIMIT);
         const batch = writeBatch(db);
         toDelete.forEach(d => batch.delete(d.ref));
         await batch.commit();

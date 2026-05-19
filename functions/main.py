@@ -2507,6 +2507,8 @@ def health_check(req: https_fn.Request) -> https_fn.Response:
 
 # ────────────────────── AUDIT LOG (Dashboard) ───────────────────────
 
+AUDIT_LOG_MAX_LIMIT = 1000
+
 
 @https_fn.on_request(
     cors=options.CorsOptions(cors_origins="*", cors_methods=["GET", "OPTIONS"]),
@@ -2520,8 +2522,8 @@ def get_audit_log(req: https_fn.Request) -> https_fn.Response:
     Filtra en memoria para evitar necesidad de índices compuestos en Firestore.
 
     Query params:
-        limit: int (default 50, max 200)
-        source: str (filtro por fuente: ai_analysis, ai_chat, manual, system)
+        limit: int (default 50, max 1000)
+        source: str (filtro por fuente: ai_analysis, ai_chat, manual, system, adminbot)
         actor: str (filtro por actor: admin, ai, system)
         action: str (filtro por acción: create_alert, remove_user, etc.)
     """
@@ -2533,17 +2535,22 @@ def get_audit_log(req: https_fn.Request) -> https_fn.Response:
 
     try:
         db = firestore.client()
-        limit = min(int(req.args.get('limit', 50)), 200)
+        limit = min(int(req.args.get('limit', 50)), AUDIT_LOG_MAX_LIMIT)
         source_filter = req.args.get('source', '').strip()
         actor_filter = req.args.get('actor', '').strip()
         action_filter = req.args.get('action', '').strip()
 
-        # Leer los últimos 100 docs sin filtros compuestos (evita error de índice)
+        # Leer sin filtros compuestos evita índices extra; si se filtra en memoria,
+        # se escanea hasta el máximo retenido para no ocultar coincidencias recientes.
+        scan_limit = AUDIT_LOG_MAX_LIMIT if (
+            source_filter or actor_filter or action_filter
+        ) else limit
+
         from google.cloud.firestore_v1 import Query as FsQuery
         docs = list(
             db.collection('audit-log')
             .order_by('timestamp', direction=FsQuery.DESCENDING)
-            .limit(200)
+            .limit(scan_limit)
             .stream()
         )
 

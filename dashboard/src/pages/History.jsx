@@ -224,6 +224,8 @@ export default function History({ navData }) {
           <option value={50}>50 registros</option>
           <option value={100}>100 registros</option>
           <option value={200}>200 registros</option>
+          <option value={500}>500 registros</option>
+          <option value={1000}>1000 registros</option>
         </select>
 
         <button

@@ -1,5 +1,7 @@
 import sys
 import types
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
 from pathlib import Path
 
 import pytest
@@ -426,6 +428,7 @@ class FakeDb:
 
 def test_save_notifications_keeps_raw_mail_trace_without_operational_parse_fields():
     db = FakeDb()
+    email_date = datetime.now(timezone.utc) - timedelta(days=1)
 
     main.save_notifications(
         db,
@@ -433,12 +436,12 @@ def test_save_notifications_keeps_raw_mail_trace_without_operational_parse_field
         "Silva Herrera",
         [{
             "uid": 201,
-            "date": "Sun, 10 May 2026 20:00:00 +0000",
+            "date": format_datetime(email_date),
             "subject": "Un usuario ha dejado tu grupo",
             "bodySnippet": "El usuario Kytzia1 ha dejado el grupo de YouTube.",
             "messageId": "<msg-201>",
         }],
-        analysis_timestamp="2026-05-10T20:05:00+00:00",
+        analysis_timestamp=(email_date + timedelta(minutes=5)).isoformat(),
     )
 
     item = db.documents["notifications/2"]["items"][0]

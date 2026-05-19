@@ -14,6 +14,8 @@ Fuentes de cambios:
 """
 from datetime import datetime, timezone
 
+AUDIT_LOG_RETENTION_LIMIT = 1000
+
 
 def _now_iso():
     return datetime.now(timezone.utc).isoformat()
@@ -98,8 +100,8 @@ def log_change(db, *,
 
     try:
         db.collection('audit-log').document(audit_id).set(entry)
-        # Limpieza automática: max 200 registros
-        _cleanup_old_entries(db, max_entries=200)
+        # Limpieza automática: max 1000 registros
+        _cleanup_old_entries(db, max_entries=AUDIT_LOG_RETENTION_LIMIT)
     except Exception as e:
         # El audit-log nunca debe romper el flujo principal
         print(f'[AUDIT] Error writing audit log: {e}')
@@ -107,7 +109,7 @@ def log_change(db, *,
     return audit_id
 
 
-def _cleanup_old_entries(db, max_entries=200):
+def _cleanup_old_entries(db, max_entries=AUDIT_LOG_RETENTION_LIMIT):
     """Elimina registros antiguos si hay mas del limite."""
     try:
         from google.cloud.firestore_v1 import Query
