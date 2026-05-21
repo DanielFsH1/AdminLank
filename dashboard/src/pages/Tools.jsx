@@ -9,7 +9,8 @@ import { setServiceCatalogEntryActive, upsertServiceCatalogEntry } from '../hook
 import { authenticatedFetch, ensureAdminFunctionResponse } from '../utils/authenticatedFetch';
 import { uploadLogoFile } from '../utils/logoUploads';
 
-import { AnalyzeIcon, BankIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClockIcon, CloseIcon, ContainerIcon, CreditCardIcon, DollarIcon, DownloadIcon, EditIcon, EmailIcon, FileStorageIcon, HourglassIcon, ImageIcon, KeyIcon, LightbulbIcon, LockIcon, LockKeyIcon, MailboxIcon, MoneyIcon, PackageIcon, PlusIcon, SaveIcon, ShieldCheckIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, TrendUpIcon, UploadIcon, UsersIcon, WarningIcon, XCircleIcon } from '../components/Icons';
+import { AnalyzeIcon, BankIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClockIcon, ContainerIcon, CreditCardIcon, DollarIcon, DownloadIcon, EditIcon, EmailIcon, FileStorageIcon, HourglassIcon, ImageIcon, KeyIcon, LightbulbIcon, LockIcon, LockKeyIcon, MailboxIcon, MoneyIcon, PackageIcon, PlusIcon, SaveIcon, ShieldCheckIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, TrendUpIcon, UploadIcon, UsersIcon, WarningIcon, XCircleIcon } from '../components/Icons';
+import { ModalActions, ModalShell } from '../components/Modal';
 
 import CryptoJS from 'crypto-js';
 
@@ -1223,14 +1224,14 @@ export default function Tools() {
       </div>
 
       {serviceModal && serviceForm && (
-        <div className="tools-modal-overlay" onClick={() => setServiceModal(null)}>
-          <div className="tools-modal tools-svc-modal" onClick={e => e.stopPropagation()}>
-            <div className="tools-svc-modal-header">
-              <h4><KeyIcon size={16} /> {serviceModal.mode === 'create' ? 'Nuevo servicio' : `Editar ${serviceForm.name}`}</h4>
-              <button className="crud-icon-btn" onClick={() => setServiceModal(null)} title="Cerrar">
-                <CloseIcon size={16} />
-              </button>
-            </div>
+        <ModalShell
+          open
+          onCancel={() => setServiceModal(null)}
+          title={serviceModal.mode === 'create' ? 'Nuevo servicio' : `Editar ${serviceForm.name}`}
+          icon={<KeyIcon size={16} />}
+          size="xl"
+          className="tools-svc-modal"
+        >
             <div className="tools-svc-modal-body">
               <div className="tools-svc-field-row">
                 <div className="tools-svc-field">
@@ -1334,37 +1335,33 @@ export default function Tools() {
               )}
               {serviceError && <div className="tools-result tools-result-error"><XCircleIcon size={16} /> {serviceError}</div>}
             </div>
-            <div className="tools-modal-actions" style={{ padding: '12px 20px', borderTop: '1px solid var(--border-color)' }}>
-              <button className="tools-btn tools-btn-secondary" onClick={() => setServiceModal(null)}>Cancelar</button>
-              <button className="tools-btn tools-btn-primary" onClick={handleSaveService} disabled={serviceSaving}>
-                <SaveIcon size={16} /> {serviceSaving ? 'Guardando...' : 'Guardar servicio'}
-              </button>
-            </div>
-          </div>
-        </div>
+            <ModalActions
+              onCancel={() => setServiceModal(null)}
+              primaryLabel={<><SaveIcon size={16} /> Guardar servicio</>}
+              onPrimary={handleSaveService}
+              loading={serviceSaving}
+            />
+        </ModalShell>
       )}
 
       {/* ─── Purge Confirm Modal ────────────────────────────────────────── */}
 
       {purgeConfirm && (
-        <div className="tools-modal-overlay" onClick={() => setPurgeConfirm(null)}>
-          <div className="tools-modal" onClick={e => e.stopPropagation()}>
-            <h4><WarningIcon size={16} /> Confirmar operación</h4>
+        <ModalShell open onCancel={() => setPurgeConfirm(null)} size="sm" title="Confirmar operación" icon={<WarningIcon size={16} />}>
+          <div className="tools-confirm-copy">
             <p>
               {purgeConfirm === 'notifications' && '¿Eliminar notificaciones con más de 7 días? Esta acción no se puede deshacer.'}
               {purgeConfirm === 'completed-alerts' && '¿Eliminar alertas completadas/descartadas con más de 30 días? Esta acción no se puede deshacer.'}
               {purgeConfirm === 'raw-emails' && '¿Eliminar el documento analysis/raw-emails?'}
             </p>
-            <div className="tools-modal-actions">
-              <button className="tools-btn tools-btn-secondary" onClick={() => setPurgeConfirm(null)}>
-                Cancelar
-              </button>
-              <button className="tools-btn tools-btn-danger" onClick={() => handlePurge(purgeConfirm)}>
-                Sí, eliminar
-              </button>
-            </div>
           </div>
-        </div>
+          <ModalActions
+            onCancel={() => setPurgeConfirm(null)}
+            primaryLabel="Sí, eliminar"
+            onPrimary={() => handlePurge(purgeConfirm)}
+            danger
+          />
+        </ModalShell>
       )}
 
       {/* ─── PIN Modal (misma estructura visual que la Bóveda) ─────── */}

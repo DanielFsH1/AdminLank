@@ -8,6 +8,7 @@ import {
   describeSnowballConnectionDeletion,
 } from '../utils/snowballAvailability';
 import { buildBankClabeOptions, resolveBankClabeOptionId } from '../utils/bankClabes';
+import { ModalActions, ModalShell } from '../components/Modal';
 import { BankIcon, CheckCircleIcon, CloseIcon, EditIcon, LinkIcon, PlusIcon, SaveIcon, ToggleOffIcon, ToggleOnIcon, TrashIcon, WarningIcon } from '../components/Icons';
 
 const EMPTY_CONFIG = { wallets: {}, connections: {} };
@@ -218,21 +219,15 @@ function buildChains(config, accountById, bankOptions, bankById) {
 
 function SnowballModal({ title, children, onClose, onSave, saving }) {
   return (
-    <div className="edit-modal-overlay" onMouseDown={onClose}>
-      <div className="edit-modal snowball-modal" onMouseDown={event => event.stopPropagation()}>
-        <div className="edit-modal-header">
-          <div className="edit-modal-title"><LinkIcon size={20} /> {title}</div>
-          <button className="edit-modal-close" onClick={onClose}>x</button>
-        </div>
-        <div className="edit-modal-body">{children}</div>
-        <div className="edit-modal-actions">
-          <button className="edit-modal-btn cancel" onClick={onClose}>Cancelar</button>
-          <button className="edit-modal-btn primary" onClick={onSave} disabled={saving}>
-            <SaveIcon size={16} /> Guardar
-          </button>
-        </div>
-      </div>
-    </div>
+    <ModalShell open onCancel={onClose} title={title} icon={<LinkIcon size={20} />} className="snowball-modal">
+      <div className="edit-modal-body">{children}</div>
+      <ModalActions
+        onCancel={onClose}
+        primaryLabel={<><SaveIcon size={16} /> Guardar</>}
+        onPrimary={onSave}
+        loading={saving}
+      />
+    </ModalShell>
   );
 }
 

@@ -11,12 +11,11 @@ const styles = readFileSync(resolve(repoRoot, 'dashboard/src/index.css'), 'utf8'
 
 describe('button visual polish', () => {
   it('uses designed note modal action buttons instead of browser-default buttons', () => {
-    expect(notesPage).toContain('note-modal-btn secondary');
-    expect(notesPage).toContain('note-modal-btn primary');
-    expect(notesPage).toContain('note-modal-btn danger');
-    expect(styles).toContain('.note-modal-btn');
-    expect(styles).toContain('.note-modal-btn.primary');
-    expect(styles).toContain('.note-modal-btn.danger');
+    expect(notesPage).toContain('ModalActions');
+    expect(notesPage).toContain('danger');
+    expect(styles).toContain('.modal-action-btn');
+    expect(styles).toContain('.modal-action-btn.primary');
+    expect(styles).toContain('.modal-action-btn.danger');
   });
 
   it('keeps note card icon actions as visible designed controls', () => {

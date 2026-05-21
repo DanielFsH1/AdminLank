@@ -6,8 +6,9 @@ import { getServiceMeta, getBankMeta } from '../config/services';
 import { encrypt, decrypt, encryptFields, decryptFields } from '../utils/crypto';
 import { completeAlert, createManualAlert, createRealAccount, createLinkedRealAccount, deleteRealAccount, createVaultCard, deleteVaultCard, DEFAULT_MASTER_CONFIG, addRecurringCharge, removeRecurringCharge, toggleRecurringCharge, updateRecurringCharge, createVaultEmailAccount, updateVaultEmailAccount, deleteVaultEmailAccount, createLankMasterAccount, syncVaultEmailPassword } from '../hooks/firestoreActions';
 import { ConfirmDialog, Toast } from '../components/EditModal';
+import { ModalActions, ModalShell } from '../components/Modal';
 import { seedGooglePasswords } from '../utils/seedGooglePasswords';
-import { BadgeIcon, BankIcon, CalendarIcon, CashIcon, CheckCircleIcon, ClipboardIcon, CloseIcon, CreditCardIcon, DotRed, EditIcon, EmailIcon, HashIcon, HourglassIcon, KeyIcon, LinkIcon, LockIcon, LockKeyIcon, NotesIcon, PhoneIcon, PlusIcon, ReceiptIcon, RefreshIcon, SaveIcon, SearchIcon, SeedlingIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, WarningIcon } from '../components/Icons';
+import { BadgeIcon, BankIcon, CalendarIcon, CashIcon, CheckCircleIcon, ClipboardIcon, CreditCardIcon, DotRed, EditIcon, EmailIcon, HashIcon, HourglassIcon, KeyIcon, LinkIcon, LockIcon, LockKeyIcon, NotesIcon, PhoneIcon, PlusIcon, ReceiptIcon, RefreshIcon, SaveIcon, SearchIcon, SeedlingIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, WarningIcon } from '../components/Icons';
 import { normalizeSearch, nMatch } from '../utils/normalize';
 import { normalizeCardExpiryInput } from '../utils/cardExpiry';
 import SearchBar from '../components/SearchBar';
@@ -73,7 +74,6 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
  const [expandedCards, setExpandedCards] = useState(new Set());
  const [highlightRef, setHighlightRef] = useState(null);
  const highlightTimerRef = useRef(null);
- const mouseDownOnOverlayRef = useRef(false);
 
  // Modal states
  const [editModal, setEditModal] = useState(null);
@@ -2173,15 +2173,7 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
 
       {/* ═══ MODAL: Editar App Password ═══ */}
       {editingAppPw && (
-        <div className="vault-modal-overlay"
-          onMouseDown={e => { mouseDownOnOverlayRef.current = e.target === e.currentTarget; }}
-          onMouseUp={e => { if (mouseDownOnOverlayRef.current && e.target === e.currentTarget) setEditingAppPw(null); mouseDownOnOverlayRef.current = false; }}
-        >
-          <div className="vault-modal">
-            <div className="vault-modal-header">
-              <h3><LockKeyIcon size={18} /> Editar App Password</h3>
-              <button className="vault-modal-close" onClick={() => setEditingAppPw(null)}><CloseIcon size={16} /></button>
-            </div>
+        <ModalShell open onCancel={() => setEditingAppPw(null)} title="Editar App Password" icon={<LockKeyIcon size={18} />} className="vault-modal">
             <div className="vault-modal-body">
               <div className="vault-form-group">
                 <label><EmailIcon size={16} /> Email</label>
@@ -2227,27 +2219,24 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
                 </select>
               </div>
             </div>
-            <div className="vault-modal-actions">
-              <button className="vault-modal-btn cancel" onClick={() => setEditingAppPw(null)}>Cancelar</button>
-              <button className="vault-modal-btn save" onClick={handleSaveAppPassword} disabled={appPwSaving}>
-                {appPwSaving ? <><HourglassIcon size={16} /> Guardando...</> : <><SaveIcon size={16} /> Guardar</>}
-              </button>
-            </div>
-          </div>
-        </div>
+            <ModalActions
+              onCancel={() => setEditingAppPw(null)}
+              primaryLabel={<><SaveIcon size={16} /> Guardar</>}
+              onPrimary={handleSaveAppPassword}
+              loading={appPwSaving}
+            />
+        </ModalShell>
       )}
 
       {/* ═══ MODAL: Editar Credencial ═══ */}
       {editModal && (
-        <div className="vault-modal-overlay"
-          onMouseDown={e => { mouseDownOnOverlayRef.current = e.target === e.currentTarget; }}
-          onClick={e => { if (mouseDownOnOverlayRef.current && e.target === e.currentTarget) setEditModal(null); mouseDownOnOverlayRef.current = false; }}
+        <ModalShell
+          open
+          onCancel={() => setEditModal(null)}
+          title={editModal.pendingAlert ? 'Cambiar contraseña' : 'Editar credencial'}
+          icon={editModal.pendingAlert ? <LockKeyIcon size={16} /> : <EditIcon size={16} />}
+          className="vault-modal"
         >
-          <div className="vault-modal">
-            <div className="vault-modal-header">
-              <h3>{editModal.pendingAlert ? <><LockKeyIcon size={16} /> Cambiar contraseña</> : <><EditIcon size={16} /> Editar credencial</>}</h3>
-              <button className="vault-modal-close" onClick={() => setEditModal(null)}><CloseIcon size={16} /></button>
-            </div>
             <div className="vault-modal-meta">
               <span><EmailIcon size={16} /> {editModal.acct.email}</span>
               <span><LinkIcon size={16} /> {editModal.acct.serviceAccountRef}</span>
@@ -2310,27 +2299,18 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
                 </div>
               )}
             </div>
-            <div className="vault-modal-actions">
-              <button className="vault-modal-btn cancel" onClick={() => setEditModal(null)}>Cancelar</button>
-              <button className={`vault-modal-btn ${editModal.pendingAlert ? 'urgent' : 'save'}`} onClick={confirmCredentialSave}>
-                {editModal.pendingAlert ? <><LockKeyIcon size={16} /> Cambiar y completar</> : <><SaveIcon size={16} /> Guardar</>}
-              </button>
-            </div>
-          </div>
-        </div>
+            <ModalActions
+              onCancel={() => setEditModal(null)}
+              primaryLabel={editModal.pendingAlert ? <><LockKeyIcon size={16} /> Cambiar y completar</> : <><SaveIcon size={16} /> Guardar</>}
+              onPrimary={confirmCredentialSave}
+              danger={!!editModal.pendingAlert}
+            />
+        </ModalShell>
       )}
 
       {/* ═══ MODAL: Editar Tarjeta ═══ */}
       {cardEditModal && (
-        <div className="vault-modal-overlay"
-          onMouseDown={e => { mouseDownOnOverlayRef.current = e.target === e.currentTarget; }}
-          onClick={e => { if (mouseDownOnOverlayRef.current && e.target === e.currentTarget) setCardEditModal(null); mouseDownOnOverlayRef.current = false; }}
-        >
-          <div className="vault-modal">
-            <div className="vault-modal-header">
-              <h3><CreditCardIcon size={16} /> Editar tarjeta</h3>
-              <button className="vault-modal-close" onClick={() => setCardEditModal(null)}><CloseIcon size={16} /></button>
-            </div>
+        <ModalShell open onCancel={() => setCardEditModal(null)} title="Editar tarjeta" icon={<CreditCardIcon size={16} />} className="vault-modal">
             <div className="vault-modal-meta"><span><CreditCardIcon size={16} /> {cardEditModal.cardLabel}</span></div>
             <div className="vault-modal-form">
               <div className="vault-form-group">
@@ -2386,25 +2366,23 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
                 <textarea value={cardEditValues.notes} onChange={e => setCardEditValues(p => ({ ...p, notes: e.target.value }))} placeholder="Notas..." rows={2} />
               </div>
             </div>
-            <div className="vault-modal-actions">
-              <button className="vault-modal-btn cancel" onClick={() => setCardEditModal(null)}>Cancelar</button>
-              <button className="vault-modal-btn save" onClick={confirmCardSave}><SaveIcon size={16} /> Guardar tarjeta</button>
-            </div>
-          </div>
-        </div>
+            <ModalActions
+              onCancel={() => setCardEditModal(null)}
+              primaryLabel={<><SaveIcon size={16} /> Guardar tarjeta</>}
+              onPrimary={confirmCardSave}
+            />
+        </ModalShell>
       )}
 
       {/* ═══ MODAL: Crear Cuenta Real / Tarjeta ═══ */}
       {createModal && (
-        <div className="vault-modal-overlay"
-          onMouseDown={e => { mouseDownOnOverlayRef.current = e.target === e.currentTarget; }}
-          onClick={e => { if (mouseDownOnOverlayRef.current && e.target === e.currentTarget) setCreateModal(null); mouseDownOnOverlayRef.current = false; }}
+        <ModalShell
+          open
+          onCancel={() => setCreateModal(null)}
+          title={createModal.mode === 'card' ? 'Nueva tarjeta de pago' : `Nueva cuenta real — ${getServiceMeta(createModal.serviceKey).name}`}
+          icon={<PlusIcon size={16} />}
+          className="vault-modal"
         >
-          <div className="vault-modal">
-            <div className="vault-modal-header">
-              <h3>{createModal.mode === 'card' ? ' Nueva tarjeta de pago' : <><PlusIcon size={16} /> Nueva cuenta real — {getServiceMeta(createModal.serviceKey).name}</>}</h3>
-              <button className="vault-modal-close" onClick={() => setCreateModal(null)}><CloseIcon size={16} /></button>
-            </div>
             <div className="vault-modal-form" style={{ paddingTop: '16px' }}>
               {createModal.mode === 'account' ? (
                 <>
@@ -2605,27 +2583,23 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
                 </>
               )}
             </div>
-            <div className="vault-modal-actions">
-              <button className="vault-modal-btn cancel" onClick={() => setCreateModal(null)}>Cancelar</button>
-              <button className="vault-modal-btn save" onClick={createModal.mode === 'card' ? handleCreateCard : handleCreateAccount}>
-                <PlusIcon size={16} /> Crear
-              </button>
-            </div>
-          </div>
-        </div>
+            <ModalActions
+              onCancel={() => setCreateModal(null)}
+              primaryLabel={<><PlusIcon size={16} /> Crear</>}
+              onPrimary={createModal.mode === 'card' ? handleCreateCard : handleCreateAccount}
+            />
+        </ModalShell>
       )}
 
       {/* ═══ MODAL: Agregar Cobro Recurrente ═══ */}
       {recurringModal && (
-        <div className="vault-modal-overlay"
-          onMouseDown={e => { mouseDownOnOverlayRef.current = e.target === e.currentTarget; }}
-          onClick={e => { if (mouseDownOnOverlayRef.current && e.target === e.currentTarget) setRecurringModal(null); mouseDownOnOverlayRef.current = false; }}
+        <ModalShell
+          open
+          onCancel={() => setRecurringModal(null)}
+          title={recurringModal.editChargeId ? 'Editar cobro recurrente' : 'Nuevo cobro recurrente'}
+          icon={<RefreshIcon size={16} />}
+          className="vault-modal"
         >
-          <div className="vault-modal" style={{ maxWidth: '480px' }}>
-            <div className="vault-modal-header">
-              <h3><RefreshIcon size={16} /> {recurringModal.editChargeId ? 'Editar cobro recurrente' : 'Nuevo cobro recurrente'}</h3>
-              <button className="vault-modal-close" onClick={() => setRecurringModal(null)}><CloseIcon size={16} /></button>
-            </div>
             <div className="vault-modal-meta">
               <span><CreditCardIcon size={16} /> {recurringModal.cardLabel}</span>
             </div>
@@ -2718,27 +2692,17 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
                 <CalendarIcon size={14} /> Cada mes, al llegar al día indicado, se genera un cobro pendiente en Finanzas que debes confirmar manualmente. Si no ingresas monto, lo podrás ingresar al confirmar. Al vincular, se actualiza la info en Suscripciones.
               </div>
             </div>
-            <div className="vault-modal-actions">
-              <button className="vault-modal-btn cancel" onClick={() => setRecurringModal(null)}>Cancelar</button>
-              <button className="vault-modal-btn save" onClick={handleSaveRecurring}>
-                {recurringModal.editChargeId ? <><SaveIcon size={16} /> Guardar cambios</> : <><PlusIcon size={16} /> Agregar cobro</>}
-              </button>
-            </div>
-          </div>
-        </div>
+            <ModalActions
+              onCancel={() => setRecurringModal(null)}
+              primaryLabel={recurringModal.editChargeId ? <><SaveIcon size={16} /> Guardar cambios</> : <><PlusIcon size={16} /> Agregar cobro</>}
+              onPrimary={handleSaveRecurring}
+            />
+        </ModalShell>
       )}
 
       {/* ═══ MODAL: Editar Cuenta de Correo ═══ */}
       {googleEditModal && (
-        <div className="vault-modal-overlay"
-          onMouseDown={e => { mouseDownOnOverlayRef.current = e.target === e.currentTarget; }}
-          onClick={e => { if (mouseDownOnOverlayRef.current && e.target === e.currentTarget) setGoogleEditModal(null); mouseDownOnOverlayRef.current = false; }}
-        >
-          <div className="vault-modal">
-            <div className="vault-modal-header">
-              <h3><EditIcon size={16} /> Editar cuenta de correo</h3>
-              <button className="vault-modal-close" onClick={() => setGoogleEditModal(null)}><CloseIcon size={16} /></button>
-            </div>
+        <ModalShell open onCancel={() => setGoogleEditModal(null)} title="Editar cuenta de correo" icon={<EditIcon size={16} />} className="vault-modal">
             <div className="vault-modal-meta">
               {googleEditModal.isPrincipal && <span><EmailIcon size={16} /> Lank #{googleEditModal.lankAccountId}</span>}
               {!googleEditModal.isPrincipal && <span style={{ color: '#f59e0b' }}>Secundaria</span>}
@@ -2815,27 +2779,23 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
                 </span>
               )}
             </div>
-            <div className="vault-modal-actions">
-              <button className="vault-modal-btn cancel" onClick={() => setGoogleEditModal(null)}>Cancelar</button>
-              <button className="vault-modal-btn save" onClick={handleSaveGoogleAccount}>
-                <SaveIcon size={16} /> Guardar
-              </button>
-            </div>
-          </div>
-        </div>
+            <ModalActions
+              onCancel={() => setGoogleEditModal(null)}
+              primaryLabel={<><SaveIcon size={16} /> Guardar</>}
+              onPrimary={handleSaveGoogleAccount}
+            />
+        </ModalShell>
       )}
 
       {/* ═══ MODAL: Crear Cuenta de Correo ═══ */}
       {googleCreateModal && (
-        <div className="vault-modal-overlay"
-          onMouseDown={e => { mouseDownOnOverlayRef.current = e.target === e.currentTarget; }}
-          onClick={e => { if (mouseDownOnOverlayRef.current && e.target === e.currentTarget) setGoogleCreateModal(null); mouseDownOnOverlayRef.current = false; }}
+        <ModalShell
+          open
+          onCancel={() => setGoogleCreateModal(null)}
+          title={googleCreateModal.type === 'lank_google' ? 'Nueva cuenta principal' : 'Nueva cuenta secundaria'}
+          icon={<PlusIcon size={16} />}
+          className="vault-modal"
         >
-          <div className="vault-modal">
-            <div className="vault-modal-header">
-              <h3><PlusIcon size={16} /> {googleCreateModal.type === 'lank_google' ? 'Nueva cuenta principal' : 'Nueva cuenta secundaria'}</h3>
-              <button className="vault-modal-close" onClick={() => setGoogleCreateModal(null)}><CloseIcon size={16} /></button>
-            </div>
             <div className="vault-modal-form">
               {googleCreateModal.type === 'lank_google' && (
                 <>
@@ -2881,14 +2841,12 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
                 </span>
               )}
             </div>
-            <div className="vault-modal-actions">
-              <button className="vault-modal-btn cancel" onClick={() => setGoogleCreateModal(null)}>Cancelar</button>
-              <button className="vault-modal-btn save" onClick={handleCreateGoogleAccount}>
-                <PlusIcon size={16} /> Crear cuenta
-              </button>
-            </div>
-          </div>
-        </div>
+            <ModalActions
+              onCancel={() => setGoogleCreateModal(null)}
+              primaryLabel={<><PlusIcon size={16} /> Crear cuenta</>}
+              onPrimary={handleCreateGoogleAccount}
+            />
+        </ModalShell>
       )}
 
       {/* Confirm dialog */}

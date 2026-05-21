@@ -2,10 +2,11 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useCollection } from '../hooks/useFirestore';
 import { createNote, updateNote, deleteNote, toggleNotePin } from '../hooks/firestoreActions';
 import { Toast } from '../components/EditModal';
+import { ModalActions, ModalShell } from '../components/Modal';
 import SearchBar from '../components/SearchBar';
 import {
   PlusIcon, CheckCircleIcon, TrashIcon,
-  CloseIcon, NotesIcon, ThumbtackIcon, EditIcon,
+  NotesIcon, ThumbtackIcon, EditIcon,
   SaveIcon,
 } from '../components/Icons';
 import LoadingState from '../components/LoadingState';
@@ -77,7 +78,6 @@ function NoteEditor({ note, onClose, onSaved }) {
   };
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Escape') onClose();
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
       e.preventDefault();
       handleSave();
@@ -85,8 +85,15 @@ function NoteEditor({ note, onClose, onSaved }) {
   };
 
   return (
-    <div className="edit-modal-overlay" onClick={onClose} onKeyDown={handleKeyDown}>
-      <div className="edit-modal note-editor-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '560px' }}>
+    <ModalShell
+      open
+      onCancel={onClose}
+      onKeyDown={handleKeyDown}
+      title={success ? null : (isNew ? 'Nueva nota' : 'Editar nota')}
+      icon={success ? null : <NotesIcon size={20} />}
+      size="lg"
+      className="note-editor-modal"
+    >
         {success ? (
           <div className="edit-modal-success">
             <span className="edit-modal-success-icon"><CheckCircleIcon size={48} /></span>
@@ -94,12 +101,6 @@ function NoteEditor({ note, onClose, onSaved }) {
           </div>
         ) : (
           <>
-            <div className="edit-modal-header">
-              <span className="edit-modal-icon"><NotesIcon size={20} /></span>
-              <h3 className="edit-modal-title">{isNew ? 'Nueva nota' : 'Editar nota'}</h3>
-              <button className="edit-modal-close" onClick={onClose}><CloseIcon size={18} /></button>
-            </div>
-
             <div className="edit-modal-body" style={{ padding: '16px 20px' }}>
               <input
                 ref={titleRef}
@@ -132,18 +133,16 @@ function NoteEditor({ note, onClose, onSaved }) {
               {error && <div className="edit-modal-error">{error}</div>}
             </div>
 
-            <div className="edit-modal-footer">
-              <button type="button" className="note-modal-btn secondary" onClick={onClose} disabled={saving}>
-                <CloseIcon size={15} /> Cancelar
-              </button>
-              <button type="button" className="note-modal-btn primary" onClick={handleSave} disabled={saving}>
-                {saving ? 'Guardando...' : <><SaveIcon size={15} /> Guardar</>}
-              </button>
-            </div>
+            <ModalActions
+              onCancel={onClose}
+              primaryLabel={<><SaveIcon size={15} /> Guardar</>}
+              onPrimary={handleSave}
+              loading={saving}
+              loadingLabel="Guardando..."
+            />
           </>
         )}
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -166,13 +165,7 @@ function DeleteConfirm({ note, onClose, onDeleted }) {
   };
 
   return (
-    <div className="edit-modal-overlay" onClick={onClose}>
-      <div className="edit-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
-        <div className="edit-modal-header">
-          <span className="edit-modal-icon"><TrashIcon size={20} /></span>
-          <h3 className="edit-modal-title">Eliminar nota</h3>
-          <button className="edit-modal-close" onClick={onClose}><CloseIcon size={18} /></button>
-        </div>
+    <ModalShell open onCancel={onClose} size="sm" title="Eliminar nota" icon={<TrashIcon size={20} />}>
         <div className="edit-modal-body" style={{ padding: '20px', textAlign: 'center' }}>
           <p style={{ marginBottom: '8px' }}>
             ¿Eliminar <strong>{note.title || 'esta nota'}</strong>?
@@ -180,16 +173,15 @@ function DeleteConfirm({ note, onClose, onDeleted }) {
           <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Esta acción no se puede deshacer.</p>
           {error && <div className="edit-modal-error" style={{ marginTop: '12px' }}>{error}</div>}
         </div>
-        <div className="edit-modal-footer">
-          <button type="button" className="note-modal-btn secondary" onClick={onClose} disabled={deleting}>
-            <CloseIcon size={15} /> Cancelar
-          </button>
-          <button type="button" className="note-modal-btn danger" onClick={handleDelete} disabled={deleting}>
-            {deleting ? 'Eliminando...' : <><TrashIcon size={15} /> Eliminar</>}
-          </button>
-        </div>
-      </div>
-    </div>
+        <ModalActions
+          onCancel={onClose}
+          primaryLabel={<><TrashIcon size={15} /> Eliminar</>}
+          onPrimary={handleDelete}
+          loading={deleting}
+          loadingLabel="Eliminando..."
+          danger
+        />
+    </ModalShell>
   );
 }
 

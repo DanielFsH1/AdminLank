@@ -14,6 +14,7 @@ import { createVaultCard } from '../hooks/firestoreActions';
 import { encrypt } from '../utils/crypto';
 import { normalizeCardExpiryInput } from '../utils/cardExpiry';
 import { ConfirmDialog, Toast } from './EditModal';
+import { ModalActions, ModalShell } from './Modal';
 import {
   BankIcon, PlusIcon, EditIcon, TrashIcon, CloseIcon, SaveIcon,
   CreditCardIcon, CalendarIcon, ReceiptIcon, NotesIcon,
@@ -50,7 +51,6 @@ export default function BankManager({ vaultCards = {} }) {
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
   const [saving, setSaving] = useState(false);
-  const mouseDownOnOverlayRef = useRef(false);
   const fileInputRef = useRef(null);
 
   const showToast = (message, type = 'success') => setToast({ visible: true, message, type });
@@ -383,15 +383,6 @@ export default function BankManager({ vaultCards = {} }) {
     setSaving(false);
   };
 
-  // ─── Modal overlay handler ───
-  const overlayProps = (onClose) => ({
-    onMouseDown: e => { mouseDownOnOverlayRef.current = e.target === e.currentTarget; },
-    onClick: e => {
-      if (mouseDownOnOverlayRef.current && e.target === e.currentTarget) onClose();
-      mouseDownOnOverlayRef.current = false;
-    },
-  });
-
   // ═══════════════════════════════════════════════════════════════
   // RENDER
   // ═══════════════════════════════════════════════════════════════
@@ -530,12 +521,13 @@ export default function BankManager({ vaultCards = {} }) {
 
       {/* Create/Edit Bank Modal */}
       {bankModal && (
-        <div className="vault-modal-overlay" {...overlayProps(() => setBankModal(null))}>
-          <div className="vault-modal" style={{ maxWidth: '480px' }}>
-            <div className="vault-modal-header">
-              <h3><BankIcon size={16} /> {bankModal === 'create' ? 'Nuevo banco' : `Editar ${bankModal.name}`}</h3>
-              <button className="vault-modal-close" onClick={() => setBankModal(null)}><CloseIcon size={16} /></button>
-            </div>
+        <ModalShell
+          open
+          onCancel={() => setBankModal(null)}
+          title={bankModal === 'create' ? 'Nuevo banco' : `Editar ${bankModal.name}`}
+          icon={<BankIcon size={16} />}
+          className="vault-modal"
+        >
             <div className="vault-modal-form">
               <div className="vault-form-group">
                 <label>Nombre del banco *</label>
@@ -566,24 +558,19 @@ export default function BankManager({ vaultCards = {} }) {
                 </>
               )}
             </div>
-            <div className="vault-modal-actions">
-              <button className="vault-modal-btn cancel" onClick={() => setBankModal(null)}>Cancelar</button>
-              <button className="vault-modal-btn save" onClick={handleSaveBank} disabled={saving || !bankValues.name?.trim()}>
-                {saving ? <><span className="spinner" /> Guardando...</> : <><SaveIcon size={14} /> {bankModal === 'create' ? 'Crear banco' : 'Guardar'}</>}
-              </button>
-            </div>
-          </div>
-        </div>
+            <ModalActions
+              onCancel={() => setBankModal(null)}
+              primaryLabel={<><SaveIcon size={14} /> {bankModal === 'create' ? 'Crear banco' : 'Guardar'}</>}
+              onPrimary={handleSaveBank}
+              loading={saving}
+              primaryDisabled={!bankValues.name?.trim()}
+            />
+        </ModalShell>
       )}
 
       {/* Edit Debit CLABE Modal */}
       {debitModal && (
-        <div className="vault-modal-overlay" {...overlayProps(() => setDebitModal(null))}>
-          <div className="vault-modal" style={{ maxWidth: '420px' }}>
-            <div className="vault-modal-header">
-              <h3><BankIcon size={16} /> Editar CLABE</h3>
-              <button className="vault-modal-close" onClick={() => setDebitModal(null)}><CloseIcon size={16} /></button>
-            </div>
+        <ModalShell open onCancel={() => setDebitModal(null)} title="Editar CLABE" icon={<BankIcon size={16} />} size="sm" className="vault-modal">
             <div className="vault-modal-form">
               <div className="vault-form-group">
                 <label>CLABE interbancaria</label>
@@ -594,24 +581,24 @@ export default function BankManager({ vaultCards = {} }) {
                 <input type="text" value={debitValues.note} onChange={e => setDebitValues(p => ({ ...p, note: e.target.value }))} placeholder="Opcional..." />
               </div>
             </div>
-            <div className="vault-modal-actions">
-              <button className="vault-modal-btn cancel" onClick={() => setDebitModal(null)}>Cancelar</button>
-              <button className="vault-modal-btn save" onClick={handleSaveDebit} disabled={saving}>
-                {saving ? <><span className="spinner" /> Guardando...</> : <><SaveIcon size={14} /> Guardar</>}
-              </button>
-            </div>
-          </div>
-        </div>
+            <ModalActions
+              onCancel={() => setDebitModal(null)}
+              primaryLabel={<><SaveIcon size={14} /> Guardar</>}
+              onPrimary={handleSaveDebit}
+              loading={saving}
+            />
+        </ModalShell>
       )}
 
       {/* Credit Account Modal */}
       {creditModal && (
-        <div className="vault-modal-overlay" {...overlayProps(() => setCreditModal(null))}>
-          <div className="vault-modal" style={{ maxWidth: '500px' }}>
-            <div className="vault-modal-header">
-              <h3><CreditCardIcon size={16} /> {creditModal.mode === 'create' ? 'Nueva cuenta de crédito' : 'Editar cuenta de crédito'}</h3>
-              <button className="vault-modal-close" onClick={() => setCreditModal(null)}><CloseIcon size={16} /></button>
-            </div>
+        <ModalShell
+          open
+          onCancel={() => setCreditModal(null)}
+          title={creditModal.mode === 'create' ? 'Nueva cuenta de crédito' : 'Editar cuenta de crédito'}
+          icon={<CreditCardIcon size={16} />}
+          className="vault-modal"
+        >
             <div className="vault-modal-form">
               <div className="vault-form-group">
                 <label>Límite de crédito *</label>
@@ -654,24 +641,19 @@ export default function BankManager({ vaultCards = {} }) {
                 </div>
               </div>
             </div>
-            <div className="vault-modal-actions">
-              <button className="vault-modal-btn cancel" onClick={() => setCreditModal(null)}>Cancelar</button>
-              <button className="vault-modal-btn save" onClick={handleSaveCredit} disabled={saving || !creditValues.creditLimit}>
-                {saving ? <><span className="spinner" /> Guardando...</> : <><SaveIcon size={14} /> {creditModal.mode === 'create' ? 'Crear' : 'Guardar'}</>}
-              </button>
-            </div>
-          </div>
-        </div>
+            <ModalActions
+              onCancel={() => setCreditModal(null)}
+              primaryLabel={<><SaveIcon size={14} /> {creditModal.mode === 'create' ? 'Crear' : 'Guardar'}</>}
+              onPrimary={handleSaveCredit}
+              loading={saving}
+              primaryDisabled={!creditValues.creditLimit}
+            />
+        </ModalShell>
       )}
 
       {/* MSI Modal */}
       {msiModal && (
-        <div className="vault-modal-overlay" {...overlayProps(() => setMsiModal(null))}>
-          <div className="vault-modal" style={{ maxWidth: '460px' }}>
-            <div className="vault-modal-header">
-              <h3><ReceiptIcon size={16} /> Agregar compra a meses</h3>
-              <button className="vault-modal-close" onClick={() => setMsiModal(null)}><CloseIcon size={16} /></button>
-            </div>
+        <ModalShell open onCancel={() => setMsiModal(null)} title="Agregar compra a meses" icon={<ReceiptIcon size={16} />} className="vault-modal">
             <div className="vault-modal-form">
               <div className="vault-form-group">
                 <label>Descripción *</label>
@@ -710,24 +692,19 @@ export default function BankManager({ vaultCards = {} }) {
                 </div>
               </div>
             </div>
-            <div className="vault-modal-actions">
-              <button className="vault-modal-btn cancel" onClick={() => setMsiModal(null)}>Cancelar</button>
-              <button className="vault-modal-btn save" onClick={handleSaveMsi} disabled={saving || !msiValues.description}>
-                {saving ? <><span className="spinner" /> Guardando...</> : <><SaveIcon size={14} /> Agregar MSI</>}
-              </button>
-            </div>
-          </div>
-        </div>
+            <ModalActions
+              onCancel={() => setMsiModal(null)}
+              primaryLabel={<><SaveIcon size={14} /> Agregar MSI</>}
+              onPrimary={handleSaveMsi}
+              loading={saving}
+              primaryDisabled={!msiValues.description}
+            />
+        </ModalShell>
       )}
 
       {/* Statement Modal */}
       {statementModal && (
-        <div className="vault-modal-overlay" {...overlayProps(() => setStatementModal(null))}>
-          <div className="vault-modal" style={{ maxWidth: '420px' }}>
-            <div className="vault-modal-header">
-              <h3><CalendarIcon size={16} /> Estado de cuenta</h3>
-              <button className="vault-modal-close" onClick={() => setStatementModal(null)}><CloseIcon size={16} /></button>
-            </div>
+        <ModalShell open onCancel={() => setStatementModal(null)} title="Estado de cuenta" icon={<CalendarIcon size={16} />} size="sm" className="vault-modal">
             <div className="vault-modal-form">
               <div className="vault-form-group">
                 <label>Mes (YYYY-MM) *</label>
@@ -748,24 +725,19 @@ export default function BankManager({ vaultCards = {} }) {
                 <input type="number" value={statementValues.interestCharged} onChange={e => setStatementValues(p => ({ ...p, interestCharged: e.target.value }))} placeholder="0" />
               </div>
             </div>
-            <div className="vault-modal-actions">
-              <button className="vault-modal-btn cancel" onClick={() => setStatementModal(null)}>Cancelar</button>
-              <button className="vault-modal-btn save" onClick={handleSaveStatement} disabled={saving || !statementValues.monthKey}>
-                {saving ? <><span className="spinner" /> Guardando...</> : <><SaveIcon size={14} /> Guardar</>}
-              </button>
-            </div>
-          </div>
-        </div>
+            <ModalActions
+              onCancel={() => setStatementModal(null)}
+              primaryLabel={<><SaveIcon size={14} /> Guardar</>}
+              onPrimary={handleSaveStatement}
+              loading={saving}
+              primaryDisabled={!statementValues.monthKey}
+            />
+        </ModalShell>
       )}
 
       {/* Logo Gallery Modal */}
       {logoModal && (
-        <div className="vault-modal-overlay" {...overlayProps(() => setLogoModal(null))}>
-          <div className="vault-modal" style={{ maxWidth: '560px' }}>
-            <div className="vault-modal-header">
-              <h3><ImageIcon size={16} /> Galería de logos</h3>
-              <button className="vault-modal-close" onClick={() => setLogoModal(null)}><CloseIcon size={16} /></button>
-            </div>
+        <ModalShell open onCancel={() => setLogoModal(null)} title="Galería de logos" icon={<ImageIcon size={16} />} size="lg" className="vault-modal">
             <div style={{ padding: '16px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '10px', marginBottom: '16px' }}>
                 {logoGallery.map(logo => (
@@ -801,18 +773,19 @@ export default function BankManager({ vaultCards = {} }) {
                 </button>
               </div>
             </div>
-          </div>
-        </div>
+            <ModalActions onCancel={() => setLogoModal(null)} />
+        </ModalShell>
       )}
 
       {/* Card Create Modal */}
       {cardCreateModal && (
-        <div className="vault-modal-overlay" {...overlayProps(() => setCardCreateModal(null))}>
-          <div className="vault-modal" style={{ maxWidth: '460px' }}>
-            <div className="vault-modal-header">
-              <h3><CreditCardIcon size={16} /> Nueva tarjeta ({cardCreateModal.accountType === 'credit' ? 'crédito' : 'débito'})</h3>
-              <button className="vault-modal-close" onClick={() => setCardCreateModal(null)}><CloseIcon size={16} /></button>
-            </div>
+        <ModalShell
+          open
+          onCancel={() => setCardCreateModal(null)}
+          title={`Nueva tarjeta (${cardCreateModal.accountType === 'credit' ? 'crédito' : 'débito'})`}
+          icon={<CreditCardIcon size={16} />}
+          className="vault-modal"
+        >
             <div className="vault-modal-form">
               <div className="vault-form-group">
                 <label>Banco</label>
@@ -851,14 +824,15 @@ export default function BankManager({ vaultCards = {} }) {
                 <input type="text" value={cardCreateValues.notes} onChange={e => setCardCreateValues(p => ({ ...p, notes: e.target.value }))} placeholder="Ej: tarjeta principal, respaldo..." />
               </div>
             </div>
-            <div className="vault-modal-actions">
-              <button className="vault-modal-btn cancel" onClick={() => setCardCreateModal(null)}>Cancelar</button>
-              <button className="vault-modal-btn save" onClick={handleCardCreate} disabled={saving || !cardCreateValues.number || cardCreateValues.number.replace(/\D/g, '').length < 4}>
-                {saving ? <><span className="spinner" /> Creando...</> : <><SaveIcon size={14} /> Crear tarjeta</>}
-              </button>
-            </div>
-          </div>
-        </div>
+            <ModalActions
+              onCancel={() => setCardCreateModal(null)}
+              primaryLabel={<><SaveIcon size={14} /> Crear tarjeta</>}
+              onPrimary={handleCardCreate}
+              loading={saving}
+              loadingLabel="Creando..."
+              primaryDisabled={!cardCreateValues.number || cardCreateValues.number.replace(/\D/g, '').length < 4}
+            />
+        </ModalShell>
       )}
 
       {/* Confirm + Toast */}

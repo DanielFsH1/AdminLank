@@ -10,7 +10,8 @@ import {
   updateGroupEnabledSlots, createManualAlert, completeAlert,
 } from '../hooks/firestoreActions';
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
-import { BlockIcon, CalendarIcon, CashIcon, ClockIcon, CloseIcon, CreditCardIcon, DotGray, DotGreen, EditIcon, EmailIcon, FolderIcon, KeyIcon, LinkIcon, LockKeyIcon, PlusIcon, PointUpIcon, RefreshIcon, SaveIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, WarningIcon } from '../components/Icons';
+import { ModalActions, ModalShell } from '../components/Modal';
+import { BlockIcon, CalendarIcon, CashIcon, ClockIcon, CreditCardIcon, DotGray, DotGreen, EditIcon, EmailIcon, FolderIcon, KeyIcon, LinkIcon, LockKeyIcon, PlusIcon, PointUpIcon, RefreshIcon, SaveIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, WarningIcon } from '../components/Icons';
 import { normalizeSearch, nMatch } from '../utils/normalize';
 import SearchBar from '../components/SearchBar';
 import EntityHistory from '../components/EntityHistory';
@@ -1584,13 +1585,7 @@ export default function Subscriptions({ onNavigate, navData }) {
 
       {/* Modal: Mover usuario a otra cuenta real */}
       {moveSlotModal && (
-        <div className="edit-modal-overlay" onClick={() => setMoveSlotModal(null)}>
-          <div className="edit-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '520px' }}>
-            <div className="edit-modal-header">
-              <span className="edit-modal-icon"><RefreshIcon size={16} /></span>
-              <h3 className="edit-modal-title">Mover usuario entre cuentas</h3>
-              <button className="edit-modal-close" onClick={() => setMoveSlotModal(null)}><CloseIcon size={16} /></button>
-            </div>
+        <ModalShell open onCancel={() => setMoveSlotModal(null)} title="Mover usuario entre cuentas" icon={<RefreshIcon size={16} />} className="edit-modal">
             <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '16px', padding: '0 20px' }}>
               <strong style={{ color: 'var(--text-primary)' }}>{moveSlotModal.slot.memberAlias}</strong>
               <span> — actualmente en <strong>{moveSlotModal.accountLabel}</strong></span>
@@ -1638,8 +1633,8 @@ export default function Subscriptions({ onNavigate, navData }) {
                 <WarningIcon size={16} /> Al mover, se liberará el cupo en la cuenta de origen y se ocupará uno en la cuenta destino. El grupo Lank se actualiza automáticamente.
               </div>
             </div>
-          </div>
-        </div>
+            <ModalActions onCancel={() => setMoveSlotModal(null)} />
+        </ModalShell>
       )}
 
       <ConfirmDialog

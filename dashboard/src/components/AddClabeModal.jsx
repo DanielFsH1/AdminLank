@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { storage } from '../firebase';
 import { BANKS } from '../config/services';
-import { CheckCircleIcon, WarningIcon, CloseIcon, CheckIcon, BankIcon, PlusIcon, UploadIcon } from './Icons';
+import { CheckCircleIcon, WarningIcon, CheckIcon, BankIcon, PlusIcon, UploadIcon } from './Icons';
+import { ModalActions, ModalShell } from './Modal';
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2 MB
 const ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/jpg'];
@@ -132,16 +133,15 @@ export default function AddClabeModal({ open, onClose, onSave, customBankAccount
     }
   }
 
-  function handleKeyDown(e) {
-    if (e.key === 'Escape') {
-      if (confirmStep) setConfirmStep(false);
-      else onClose();
-    }
-  }
-
   return (
-    <div className="edit-modal-overlay" onClick={onClose} onKeyDown={handleKeyDown}>
-      <div className="edit-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+    <ModalShell
+      open={open}
+      onCancel={onClose}
+      size="md"
+      className="edit-modal"
+      title={success ? null : (confirmStep ? 'Confirmar CLABE' : 'Agregar cuenta CLABE')}
+      icon={success ? null : (confirmStep ? <WarningIcon size={20} /> : <BankIcon size={16} />)}
+    >
         {success ? (
           <div className="edit-modal-success">
             <span className="edit-modal-success-icon"><CheckCircleIcon size={48} /></span>
@@ -183,24 +183,18 @@ export default function AddClabeModal({ open, onClose, onSave, customBankAccount
               )}
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <button className="edit-modal-btn primary" onClick={handleConfirmSave} disabled={saving}>
-                {saving ? (<><span className="spinner" /> Guardando...</>) : (<><CheckIcon size={16} /> Sí, confirmar</>)}
-              </button>
-              <button className="edit-modal-btn cancel" onClick={() => setConfirmStep(false)} disabled={saving}>
-                ← Volver a editar
-              </button>
-            </div>
+            <ModalActions
+              onCancel={onClose}
+              secondaryLabel="Volver a editar"
+              onSecondary={() => setConfirmStep(false)}
+              primaryLabel={<><CheckIcon size={16} /> Sí, confirmar</>}
+              onPrimary={handleConfirmSave}
+              loading={saving}
+            />
             {error && <div className="edit-modal-error" style={{ marginTop: '12px' }}><WarningIcon size={14} /> {error}</div>}
           </div>
         ) : (
           <>
-            <div className="edit-modal-header">
-              <span className="edit-modal-icon"><BankIcon size={16} /></span>
-              <h3 className="edit-modal-title">Agregar cuenta CLABE</h3>
-              <button className="edit-modal-close" onClick={onClose}><CloseIcon size={18} /></button>
-            </div>
-
             <div className="edit-modal-body">
               {/* Bank selection mode toggle */}
               <div className="add-clabe-mode-toggle">
@@ -345,18 +339,14 @@ export default function AddClabeModal({ open, onClose, onSave, customBankAccount
 
             {error && <div className="edit-modal-error"><WarningIcon size={14} /> {error}</div>}
 
-            <div className="edit-modal-actions">
-              <button className="edit-modal-btn primary" onClick={handleRequestSave}>
-                <BankIcon size={16} /> Agregar CLABE
-              </button>
-              <button className="edit-modal-btn cancel" onClick={onClose}>
-                Cancelar
-              </button>
-            </div>
+            <ModalActions
+              onCancel={onClose}
+              primaryLabel={<><BankIcon size={16} /> Agregar CLABE</>}
+              onPrimary={handleRequestSave}
+            />
           </>
         )}
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 

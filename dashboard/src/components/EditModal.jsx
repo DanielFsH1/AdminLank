@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { CheckCircleIcon, WarningIcon, CloseIcon, CheckIcon, XCircleIcon } from './Icons';
+import { CheckCircleIcon, WarningIcon, CheckIcon, XCircleIcon } from './Icons';
+import { ModalActions, ModalShell } from './Modal';
 
 const EMPTY_INITIAL_VALUES = {};
 
@@ -94,16 +95,15 @@ export default function EditModal({
     }
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Escape') {
-      if (confirmStep) setConfirmStep(false);
-      else onClose();
-    }
-  };
-
   return (
-    <div className="edit-modal-overlay" onClick={onClose} onKeyDown={handleKeyDown}>
-      <div className="edit-modal" onClick={e => e.stopPropagation()}>
+    <ModalShell
+      open={open}
+      onCancel={onClose}
+      title={success ? null : (confirmStep ? 'Confirmar cambios' : title)}
+      icon={success ? null : (confirmStep ? <WarningIcon size={20} /> : icon)}
+      className="edit-modal"
+      bodyClassName={success ? '' : undefined}
+    >
         {success ? (
           <div className="edit-modal-success">
             <span className="edit-modal-success-icon"><CheckCircleIcon size={48} /></span>
@@ -130,33 +130,20 @@ export default function EditModal({
                 </div>
               ))}
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <button
-                className={`edit-modal-btn ${danger ? 'danger' : 'primary'}`}
-                onClick={handleConfirmSave}
-                disabled={saving}
-              >
-                {saving ? (
-                  <><span className="spinner" /> Guardando...</>
-                ) : (
-                  <><CheckIcon size={16} /> Sí, confirmar</>
-                )}
-              </button>
-              <button className="edit-modal-btn cancel" onClick={() => setConfirmStep(false)} disabled={saving}>
-                ← Volver a editar
-              </button>
-            </div>
+            <ModalActions
+              onCancel={onClose}
+              secondaryLabel="Volver a editar"
+              onSecondary={() => setConfirmStep(false)}
+              primaryLabel={<><CheckIcon size={16} /> Sí, confirmar</>}
+              onPrimary={handleConfirmSave}
+              loading={saving}
+              danger={danger}
+            />
             {error && <div className="edit-modal-error" style={{ marginTop: '12px' }}><WarningIcon size={14} /> {error}</div>}
           </div>
         ) : (
           /* ── Formulario de edición ── */
           <>
-            <div className="edit-modal-header">
-              {icon && <span className="edit-modal-icon">{icon}</span>}
-              <h3 className="edit-modal-title">{title}</h3>
-              <button className="edit-modal-close" onClick={onClose}><CloseIcon size={18} /></button>
-            </div>
-
             {children && <div className="edit-modal-extra">{children}</div>}
 
             <div className="edit-modal-body">
@@ -215,21 +202,15 @@ export default function EditModal({
 
             {error && <div className="edit-modal-error"><WarningIcon size={14} /> {error}</div>}
 
-            <div className="edit-modal-actions">
-              <button
-                className={`edit-modal-btn ${danger ? 'danger' : 'primary'}`}
-                onClick={handleRequestSave}
-              >
-                {saveLabel}
-              </button>
-              <button className="edit-modal-btn cancel" onClick={onClose}>
-                Cancelar
-              </button>
-            </div>
+            <ModalActions
+              onCancel={onClose}
+              primaryLabel={saveLabel}
+              onPrimary={handleRequestSave}
+              danger={danger}
+            />
           </>
         )}
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -273,8 +254,7 @@ export function ConfirmDialog({ open, onClose, onConfirm, title, message, confir
   };
 
   return (
-    <div className="edit-modal-overlay" onClick={onClose}>
-      <div className="edit-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '420px' }}>
+    <ModalShell open={open} onCancel={onClose} size="sm" className="edit-modal">
         {success ? (
           <div className="edit-modal-success">
             <span className="edit-modal-success-icon"><CheckCircleIcon size={48} /></span>
@@ -286,22 +266,17 @@ export function ConfirmDialog({ open, onClose, onConfirm, title, message, confir
             <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '10px' }}>{title}</h3>
             <p style={{ fontSize: '14px', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '24px' }}>{message}</p>
             {error && <div className="edit-modal-error" style={{ marginBottom: '12px' }}><WarningIcon size={14} /> {error}</div>}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <button
-                className={`edit-modal-btn ${danger ? 'danger' : 'primary'}`}
-                onClick={handleConfirm}
-                disabled={loading}
-              >
-                {loading ? <><span className="spinner" /> Procesando...</> : confirmLabel}
-              </button>
-              <button className="edit-modal-btn cancel" onClick={onClose} disabled={loading}>
-                Cancelar
-              </button>
-            </div>
+            <ModalActions
+              onCancel={onClose}
+              primaryLabel={confirmLabel}
+              onPrimary={handleConfirm}
+              loading={loading}
+              loadingLabel="Procesando..."
+              danger={danger}
+            />
           </div>
         )}
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 

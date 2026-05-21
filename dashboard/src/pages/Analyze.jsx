@@ -5,6 +5,7 @@ import { useAdminbotState } from '../hooks/adminbotState';
 import { authenticatedFetch, ensureAdminFunctionResponse } from '../utils/authenticatedFetch';
 import { AnalyzeIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClipboardIcon, ClockIcon, CloudSunIcon, DoorIcon, EmailIcon, EmptyMailIcon, HourglassIcon, InboxIcon, LightningIcon, MoneyIcon, MoonIcon, PinIcon, RefreshIcon, SatelliteIcon, SearchIcon, SleepIcon, StopwatchIcon, TargetIcon, UsersIcon, WarningIcon, WrenchIcon, XCircleIcon } from '../components/Icons';
 import LoadingState from '../components/LoadingState';
+import { ModalActions, ModalShell } from '../components/Modal';
 
 const CLOUD_FUNCTIONS_URL = '***REMOVED***';
 
@@ -867,10 +868,13 @@ export default function Analyze({ navData }) {
 
       {/* Schedule configuration modal */}
       {scheduleModal && (
-        <div className="schedule-modal-overlay" onClick={() => setScheduleModal(false)}>
-          <div className="schedule-modal" onClick={e => e.stopPropagation()}>
-            <div className="schedule-modal-icon"></div>
-            <h3 className="schedule-modal-title">Configurar análisis programado</h3>
+        <ModalShell
+          open
+          onCancel={() => setScheduleModal(false)}
+          title="Configurar análisis programado"
+          icon={<ClockIcon size={20} />}
+          className="schedule-modal"
+        >
 
             {/* Frequency selector */}
             <div className="schedule-modal-section">
@@ -1145,27 +1149,22 @@ export default function Analyze({ navData }) {
             </div>
 
             {/* Actions */}
-            <div className="schedule-modal-actions">
-              {modalStartMode === 'now' ? (
-                <>
-                  <button className="schedule-modal-btn primary" onClick={() => handleScheduleConfirm(true)}>
-                    <SearchIcon size={16} /> Activar y analizar ahora
-                  </button>
-                  <button className="schedule-modal-btn secondary" onClick={() => handleScheduleConfirm(false)}>
-                    <HourglassIcon size={16} /> Activar sin analizar
-                  </button>
-                </>
-              ) : (
-                <button className="schedule-modal-btn primary" onClick={() => handleScheduleConfirm(false)}>
-                   Activar programación
-                </button>
-              )}
-              <button className="schedule-modal-btn cancel" onClick={() => setScheduleModal(false)}>
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
+            {modalStartMode === 'now' ? (
+              <ModalActions
+                onCancel={() => setScheduleModal(false)}
+                secondaryLabel={<><HourglassIcon size={16} /> Activar sin analizar</>}
+                onSecondary={() => handleScheduleConfirm(false)}
+                primaryLabel={<><SearchIcon size={16} /> Activar y analizar ahora</>}
+                onPrimary={() => handleScheduleConfirm(true)}
+              />
+            ) : (
+              <ModalActions
+                onCancel={() => setScheduleModal(false)}
+                primaryLabel="Activar programación"
+                onPrimary={() => handleScheduleConfirm(false)}
+              />
+            )}
+        </ModalShell>
       )}
  </>
  );

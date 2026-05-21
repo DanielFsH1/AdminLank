@@ -140,7 +140,7 @@ function App() {
       const dy = endY - startY;
       if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2) {
         // No hacer swipe si hay un modal abierto (PIN gate de Bóveda NO bloquea)
-        if (document.querySelector('.vault-modal-overlay, .tools-modal-overlay, .edit-modal-overlay')) return;
+        if (document.querySelector('.modal-shell-overlay')) return;
 
         // No hacer swipe si el toque inicio dentro de un contenedor con scroll horizontal
         if (touchTarget) {

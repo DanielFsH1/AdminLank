@@ -3,6 +3,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { markSimRechargeComplete, addSimCard, saveSimCardConfig } from '../hooks/firestoreActions';
 import EditModal, { Toast } from '../components/EditModal';
+import { ModalActions, ModalShell } from '../components/Modal';
 import {
   BellIcon, CalendarIcon, CheckCircleIcon, ClockIcon,
   PlusIcon, WarningIcon,
@@ -105,16 +106,24 @@ function RechargeModal({ sim, initialDate, onConfirm, onClose }) {
     }
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Escape') {
-      if (step === 'confirm') setStep('date');
-      else onClose();
-    }
-  };
-
   return (
-    <div className="edit-modal-overlay" onClick={onClose} onKeyDown={handleKeyDown}>
-      <div className="edit-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '460px' }}>
+    <ModalShell
+      open
+      onCancel={onClose}
+      size="md"
+      className="edit-modal"
+      title={done ? null : (step === 'confirm' ? 'Confirmar recarga' : (
+        <>
+          Recarga — {sim.canonicalAlias || sim.fullName}
+          <span style={{
+            display: 'inline-block', marginLeft: '8px', fontSize: '11px', fontWeight: 600,
+            padding: '2px 8px', borderRadius: '10px', verticalAlign: 'middle',
+            background: carrierCfg.color + '22', color: carrierCfg.color,
+          }}>{carrierCfg.label}</span>
+        </>
+      ))}
+      icon={done ? null : (step === 'confirm' ? <CheckCircleIcon size={20} /> : <CalendarIcon size={18} />)}
+    >
         {done ? (
           <div className="edit-modal-success">
             <span className="edit-modal-success-icon"><CheckCircleIcon size={48} /></span>
@@ -153,39 +162,19 @@ function RechargeModal({ sim, initialDate, onConfirm, onClose }) {
               </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '20px' }}>
-              <button
-                className="edit-modal-btn primary"
-                onClick={handleFinalConfirm}
-                disabled={saving}
-              >
-                {saving ? (
-                  <><span className="spinner" /> Guardando...</>
-                ) : (
-                  <><CheckCircleIcon size={16} /> Sí, confirmar recarga</>
-                )}
-              </button>
-              <button className="edit-modal-btn cancel" onClick={() => setStep('date')} disabled={saving}>
-                ← Volver a editar
-              </button>
-            </div>
+            <ModalActions
+              onCancel={onClose}
+              secondaryLabel="Volver a editar"
+              onSecondary={() => setStep('date')}
+              primaryLabel={<><CheckCircleIcon size={16} /> Sí, confirmar recarga</>}
+              onPrimary={handleFinalConfirm}
+              loading={saving}
+            />
             {error && <div className="edit-modal-error" style={{ marginTop: '12px' }}><WarningIcon size={14} /> {error}</div>}
           </div>
         ) : (
           /* ── Paso 1: Selección de fecha ── */
           <>
-            <div className="edit-modal-header">
-              <h3 className="edit-modal-title">
-                Recarga — {sim.canonicalAlias || sim.fullName}
-                <span style={{
-                  display: 'inline-block', marginLeft: '8px', fontSize: '11px', fontWeight: 600,
-                  padding: '2px 8px', borderRadius: '10px', verticalAlign: 'middle',
-                  background: carrierCfg.color + '22', color: carrierCfg.color,
-                }}>{carrierCfg.label}</span>
-              </h3>
-              <button className="edit-modal-close" onClick={onClose}><span style={{ fontSize: '18px', lineHeight: 1 }}>&times;</span></button>
-            </div>
-
             <div className="edit-modal-body">
               <div className="edit-modal-field">
                 <label className="edit-modal-label">Fecha de recarga<span className="edit-modal-required">*</span></label>
@@ -219,18 +208,14 @@ function RechargeModal({ sim, initialDate, onConfirm, onClose }) {
 
             {error && <div className="edit-modal-error"><WarningIcon size={14} /> {error}</div>}
 
-            <div className="edit-modal-actions">
-              <button className="edit-modal-btn primary" onClick={handleRequestConfirm}>
-                <CheckCircleIcon size={14} /> Confirmar recarga
-              </button>
-              <button className="edit-modal-btn cancel" onClick={onClose}>
-                Cancelar
-              </button>
-            </div>
+            <ModalActions
+              onCancel={onClose}
+              primaryLabel={<><CheckCircleIcon size={14} /> Confirmar recarga</>}
+              onPrimary={handleRequestConfirm}
+            />
           </>
         )}
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 
