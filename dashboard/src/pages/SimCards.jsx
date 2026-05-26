@@ -639,6 +639,12 @@ export default function SimCards() {
                     <div className="sim-number-top">
                       <span className="sim-number-id">#{sim.lankAccountId}</span>
                       <span className="sim-number-alias">{sim.canonicalAlias || sim.fullName}</span>
+                      {sim.carrier && CARRIER_CONFIG[sim.carrier] && (
+                        <span className="sim-carrier-badge" style={{
+                          background: CARRIER_CONFIG[sim.carrier].color + '22',
+                          color: CARRIER_CONFIG[sim.carrier].color,
+                        }}>{CARRIER_CONFIG[sim.carrier].label}</span>
+                      )}
                     </div>
                     <div className="sim-number-details">
                       <span className="sim-number-phone sim-phone-highlight">
