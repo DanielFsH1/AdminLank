@@ -1,7 +1,8 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { signOut } from 'firebase/auth';
-import { auth } from '../firebase';
-import { useCollection } from '../hooks/useFirestore';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../firebase';
+import { useCollection, useDocument } from '../hooks/useFirestore';
 import { BarChartIcon, KeyIcon, UsersIcon, BellIcon, MoneyIcon, AnalyzeIcon, LockIcon, ToolboxIcon, DoorIcon, NotepadIcon, LinkIcon, MenuIcon } from './Icons';
 
 // SIM Card icon for sidebar
@@ -32,11 +33,11 @@ const NAV_ITEMS = [
   { id: 'overview', icon: BarChartIcon, label: 'Resumen' },
   { id: 'subscriptions', icon: KeyIcon, label: 'Suscripciones' },
   { id: 'accounts', icon: UsersIcon, label: 'Cuentas Lank' },
-  { id: 'alerts', icon: BellIcon, label: 'Alertas', showBadge: true },
-  { id: 'finance', icon: MoneyIcon, label: 'Finanzas' },
+  { id: 'alerts', icon: BellIcon, label: 'Alertas', badgeKey: 'alerts' },
+  { id: 'finance', icon: MoneyIcon, label: 'Finanzas', badgeKey: 'finance' },
   { id: 'snowball', icon: LinkIcon, label: 'Bola de Nieve' },
   { id: 'vault', icon: LockIcon, label: 'Bóveda' },
-  { id: 'sim-cards', icon: SimCardIcon, label: 'SIM Cards' },
+  { id: 'sim-cards', icon: SimCardIcon, label: 'SIM Cards', badgeKey: 'simCards' },
   { id: 'analyze', icon: AnalyzeIcon, label: 'Analizar' },
 ];
 
@@ -49,10 +50,45 @@ const SYSTEM_ITEMS = [
 
 export default function Sidebar({ activeTab, onTabChange, mobileOpen, onClose, collapsed = false, onToggleCollapsed }) {
   const { data: alerts } = useCollection('alerts');
+  const { data: ledger } = useDocument('finance', 'manual-ledger', { realtime: true });
+  const [simOverdueCount, setSimOverdueCount] = useState(0);
 
   const pendingCount = useMemo(() => {
     return alerts.filter(a => a.status === 'pending').length;
   }, [alerts]);
+
+  const financePendingCount = useMemo(() => {
+    const entries = ledger?.entries || [];
+    const now = new Date();
+    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    return entries.filter(e => {
+      if (e.status !== 'pending') return false;
+      if (e.type === 'deposit' || e.type === 'credit_payment') return false;
+      const eMonth = (e.effectiveAt || '').slice(0, 7);
+      return eMonth === monthKey;
+    }).length;
+  }, [ledger]);
+
+  useEffect(() => {
+    getDoc(doc(db, 'config', 'sim-cards')).then(snap => {
+      if (!snap.exists()) return;
+      const sims = snap.data().sims || [];
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const count = sims.filter(s => {
+        if (!s.nextRechargeDate) return false;
+        const d = new Date(s.nextRechargeDate + 'T12:00:00');
+        return d <= today;
+      }).length;
+      setSimOverdueCount(count);
+    }).catch(() => {});
+  }, []);
+
+  const badgeCounts = useMemo(() => ({
+    alerts: pendingCount,
+    finance: financePendingCount,
+    simCards: simOverdueCount,
+  }), [pendingCount, financePendingCount, simOverdueCount]);
 
   const handleLogout = async () => {
     if (window.confirm('¿Cerrar sesión?')) {
@@ -96,8 +132,8 @@ export default function Sidebar({ activeTab, onTabChange, mobileOpen, onClose, c
               >
                 <span className="nav-icon"><IconComp size={18} /></span>
                 <span className="nav-label">{item.label}</span>
-                {item.showBadge && pendingCount > 0 && (
-                  <span className="nav-badge">{pendingCount}</span>
+                {item.badgeKey && badgeCounts[item.badgeKey] > 0 && (
+                  <span className="nav-badge">{badgeCounts[item.badgeKey]}</span>
                 )}
               </button>
             );
