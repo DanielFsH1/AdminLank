@@ -13,6 +13,11 @@ import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
 import { ModalActions, ModalShell } from '../components/Modal';
 import { BlockIcon, CalendarIcon, CashIcon, ClockIcon, CreditCardIcon, DotGray, DotGreen, EditIcon, EmailIcon, FolderIcon, KeyIcon, LinkIcon, LockKeyIcon, PlusIcon, PointUpIcon, RefreshIcon, SaveIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, WarningIcon } from '../components/Icons';
 import { normalizeSearch, nMatch } from '../utils/normalize';
+import {
+  buildAssignableLankAccountsForSlot,
+  getGroupUserAlias,
+  isGroupUserAssignedToRealAccount,
+} from '../utils/subscriptionAssignments';
 import SearchBar from '../components/SearchBar';
 import EntityHistory from '../components/EntityHistory';
 
@@ -308,17 +313,18 @@ export default function Subscriptions({ onNavigate, navData }) {
  const fillLankAccounts = useMemo(() => {
  if (!editSlotModal || editSlotModal.slot.status !== 'free') return [];
  const svc = editSlotModal.serviceKey;
- return (groupDetails[svc] || [])
-      .filter(g => g.groupStatus === 'active' && (g.users || []).length > 0)
-      .sort((a, b) => (a.accountId || 0) - (b.accountId || 0));
- }, [editSlotModal, groupDetails]);
+ return buildAssignableLankAccountsForSlot({
+      groups: groupDetails[svc] || [],
+      realAccounts: poolDetails[svc] || [],
+ });
+ }, [editSlotModal, groupDetails, poolDetails]);
 
  // Usuarios de la cuenta Lank seleccionada
  const fillLankUsers = useMemo(() => {
  if (!fillLankAccountId || !fillLankAccounts.length) return [];
  const acct = fillLankAccounts.find(a => String(a.accountId) === String(fillLankAccountId) || a.id === fillLankAccountId);
  if (!acct) return [];
- return (acct.users || []).map(u => typeof u === 'string' ? { userAlias: u } : u);
+ return acct.users || [];
  }, [fillLankAccountId, fillLankAccounts]);
 
  // Valores iniciales del modal (auto-llenados si hay Lank user seleccionado)
@@ -334,10 +340,10 @@ export default function Subscriptions({ onNavigate, navData }) {
  // Auto-llenar desde usuario Lank seleccionado
  if (editSlotModal.slot.status === 'free' && fillLankUserAlias) {
       const selectedUser = fillLankUsers.find(u =>
-        (u.userAlias || '').toLowerCase() === fillLankUserAlias.toLowerCase()
+        getGroupUserAlias(u).toLowerCase() === fillLankUserAlias.toLowerCase()
       );
       if (selectedUser) {
-        vals.memberAlias = selectedUser.userAlias || '';
+        vals.memberAlias = getGroupUserAlias(selectedUser);
         if (selectedUser.userEmail || selectedUser.email) {
           vals.memberEmail = selectedUser.userEmail || selectedUser.email || '';
         }
@@ -515,6 +521,16 @@ export default function Subscriptions({ onNavigate, navData }) {
  if (!editSlotModal) return;
  const { serviceKey, accountRef, slotIndex, allSlots, slot } = editSlotModal;
 
+ if (slot.status === 'free' && fillLankAccountId && fillLankUserAlias) {
+      const selectedUser = fillLankUsers.find(u =>
+        getGroupUserAlias(u).toLowerCase() === fillLankUserAlias.toLowerCase()
+      );
+      if (!selectedUser || isGroupUserAssignedToRealAccount(selectedUser) || existingSlotInfo) {
+        showToast('Ese usuario ya tiene un cupo real asignado. Usa "Mover usuario entre cuentas" para cambiarlo de cuenta real.', 'error');
+        return;
+      }
+ }
+
  // Construir slot actualizado
  const updatedSlot = { ...slot };
  const editableKeys = getEditableFieldsForService(serviceKey).map(f => f.key);
@@ -539,24 +555,6 @@ export default function Subscriptions({ onNavigate, navData }) {
 
  await updateSlot(serviceKey, accountRef, slotIndex, updatedSlot, allSlots);
 
- // Si el usuario ya tenía un cupo en otra cuenta, liberarlo (migración)
- if (existingSlotInfo) {
-      try {
-        const clearedSlot = {
-          slotNumber: existingSlotInfo.slot.slotNumber || existingSlotInfo.slotIndex + 1,
-          status: 'free',
-          memberAlias: '',
-          memberEmail: '',
-          profileName: '',
-          projectName: '',
-          assignedFrom: null,
-        };
-        await updateSlot(serviceKey, existingSlotInfo.accountRef, existingSlotInfo.slotIndex, clearedSlot, existingSlotInfo.allSlots);
-      } catch (err) {
-        console.error('Error liberando cupo anterior:', err);
-      }
- }
-
  // Sincronizar datos al grupo Lank
  if (fillLankAccountId && fillLankUserAlias) {
       // Caso: llenando cupo libre desde un usuario Lank
@@ -565,7 +563,7 @@ export default function Subscriptions({ onNavigate, navData }) {
         if (lankAcct) {
           const users = lankAcct.users || [];
           const userIdx = users.findIndex(u => {
-            const alias = typeof u === 'string' ? u : (u.userAlias || '');
+            const alias = getGroupUserAlias(u);
             return alias.toLowerCase() === fillLankUserAlias.toLowerCase();
           });
           if (userIdx !== -1) {
@@ -588,7 +586,7 @@ export default function Subscriptions({ onNavigate, navData }) {
           const users = lankAcct.users || [];
           const memberAlias = updatedSlot.memberAlias || slot.memberAlias;
           const userIdx = users.findIndex(u => {
-            const alias = typeof u === 'string' ? u : (u.userAlias || '');
+            const alias = getGroupUserAlias(u);
             return alias.toLowerCase() === memberAlias.toLowerCase();
           });
           if (userIdx !== -1) {
@@ -648,7 +646,7 @@ export default function Subscriptions({ onNavigate, navData }) {
         if (lankAcct) {
           const users = lankAcct.users || [];
           const userIdx = users.findIndex(u => {
-            const alias = typeof u === 'string' ? u : (u.userAlias || '');
+            const alias = getGroupUserAlias(u);
             return alias.toLowerCase() === oldSlot.memberAlias.toLowerCase();
           });
           if (userIdx !== -1) {
@@ -1429,9 +1427,6 @@ export default function Subscriptions({ onNavigate, navData }) {
           editSlotModal?.slot?.status === 'free'
             ? (fillLankAccountId && fillLankUserAlias
                 ? `Se asignará este cupo a "${fillLankUserAlias}" de la cuenta Lank #${fillLankAccounts.find(a => a.id === fillLankAccountId)?.accountId || fillLankAccountId}.`
-                  + (existingSlotInfo
-                    ? ` Se liberará automáticamente su cupo actual en ${existingSlotInfo.accountLabel} (cupo #${existingSlotInfo.slotIndex + 1}).`
-                    : '')
                   + ' Se actualizará la referencia en el grupo Lank automáticamente.'
                 : 'Se asignará este cupo al usuario indicado. Asegúrate de que la información sea correcta.')
             : 'Se actualizará la información de este cupo en Firestore.'
@@ -1448,7 +1443,7 @@ export default function Subscriptions({ onNavigate, navData }) {
             {editSlotModal.slot.status === 'free' && fillLankAccounts.length > 0 && (
               <div className="fill-lank-section">
                 <div className="fill-lank-header">
-                  <span></span> Vincular a cuenta Lank <span className="fill-lank-optional">(opcional)</span>
+                  <span></span> Vincular a cuenta Lank <span className="fill-lank-optional">(solo usuarios sin cupo real)</span>
                 </div>
                 <div className="fill-lank-selectors">
                   <div className="fill-lank-field">
@@ -1464,7 +1459,7 @@ export default function Subscriptions({ onNavigate, navData }) {
                       <option value="">— Sin vincular —</option>
                       {fillLankAccounts.map(a => (
                         <option key={a.id} value={a.id}>
-                          #{a.accountId} — {a.accountAlias || a.fullName} ({(a.users || []).length} usuario{(a.users || []).length !== 1 ? 's' : ''})
+                          #{a.accountId} — {a.accountAlias || a.fullName} ({(a.users || []).length} disponible{(a.users || []).length !== 1 ? 's' : ''})
                         </option>
                       ))}
                     </select>
@@ -1480,11 +1475,10 @@ export default function Subscriptions({ onNavigate, navData }) {
                       >
                         <option value="">— Seleccionar usuario —</option>
                         {fillLankUsers.map((u, i) => {
-                          const alias = u.userAlias || '';
-                          const hasRef = u.serviceAccountRef;
+                          const alias = getGroupUserAlias(u);
                           return (
                             <option key={i} value={alias}>
-                              {alias}{hasRef ? ` (ya en ${hasRef})` : ''}
+                              {alias}
                             </option>
                           );
                         })}
@@ -1503,7 +1497,7 @@ export default function Subscriptions({ onNavigate, navData }) {
                             )}
                           </div>
                           <div className="fill-lank-migrate-info">
-                            <RefreshIcon size={16} /> Al confirmar, se <strong>migrará</strong> al usuario: se liberará el cupo anterior y se asignará aquí.
+                            <RefreshIcon size={16} /> Para cambiarlo de cuenta real, usa <strong>Mover usuario entre cuentas</strong> desde su cupo actual.
                           </div>
                         </>
                       ) : (
@@ -1516,6 +1510,15 @@ export default function Subscriptions({ onNavigate, navData }) {
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+            )}
+
+            {editSlotModal.slot.status === 'free' && fillLankAccounts.length === 0 && (
+              <div className="fill-lank-section">
+                <div className="fill-lank-warning">
+                  <span><WarningIcon size={16} /></span>
+                  No hay usuarios de grupos activos disponibles para vincular. Los usuarios que ya tienen cuenta real asignada no aparecen aquí; para cambiarlos, usa <strong>Mover usuario entre cuentas</strong>.
                 </div>
               </div>
             )}
