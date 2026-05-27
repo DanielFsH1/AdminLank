@@ -7,6 +7,7 @@ import { updateGroupUser, removeGroupUser, addGroupUser, createLankGroup, delete
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
 import { BlockIcon, CalendarIcon, CashIcon, ClipboardIcon, CloseIcon, EditIcon, EmailIcon, FolderIcon, LinkIcon, PhoneIcon, PlusIcon, SaveIcon, SearchIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, UsersIcon, WarningIcon } from '../components/Icons';
 import { normalizeSearch, nMatch } from '../utils/normalize';
+import { getMissingUserDataFields } from '../utils/userDataCompleteness';
 import SearchBar from '../components/SearchBar';
 import EntityHistory from '../components/EntityHistory';
 import LoadingState from '../components/LoadingState';
@@ -805,10 +806,16 @@ export default function Accounts({ navData, onNavigate }) {
                                 const hasRef = !!user.serviceAccountRef;
                                 const hasPendingAction = user.userAlias &&
                                   pendingUserAliases.has(user.userAlias.toLowerCase());
+                                const linkedPoolMatch = findUserSlotInPool(svc.id, user);
+                                const missingUserData = getMissingUserDataFields({
+                                  user,
+                                  userFields: getUserEditableFields(svc.id),
+                                  linkedSlot: linkedPoolMatch?.slot,
+                                });
                                 const isSearchHit = searchQ && searchQ.length >= 2 && isUserMatch(user, searchQ);
                                 return (
                                   <div
-                                    className={`accordion-slot occupied ${slot.disabled ? 'disabled' : ''} ${hasRef ? 'clickable-user' : ''} ${hasPendingAction ? 'pending-action-slot' : ''} ${isSearchHit ? 'search-match-slot' : ''}`}
+                                    className={`accordion-slot occupied ${slot.disabled ? 'disabled' : ''} ${hasRef ? 'clickable-user' : ''} ${hasPendingAction ? 'pending-action-slot' : ''} ${!hasPendingAction && missingUserData.length > 0 ? 'data-missing-slot' : ''} ${isSearchHit ? 'search-match-slot' : ''}`}
                                     key={si}
                                     data-lank-user={user.userAlias ? `${svc.id}-${user.userAlias.toLowerCase()}` : ''}
                                     title={hasRef ? `Clic para ir a la cuenta real ${user.serviceAccountRef}` : ''}
@@ -838,6 +845,11 @@ export default function Accounts({ navData, onNavigate }) {
                                         <span className="goto-real-hint">
                                           → {user.serviceAccountRef}
                                         </span>
+                                      )}
+                                      {missingUserData.length > 0 && (
+                                        <div className="slot-missing-info">
+                                          <WarningIcon size={16} /> Datos pendientes: falta {missingUserData.join(', ')}
+                                        </div>
                                       )}
 
                                       <div className="alert-actions slot-actions-compact" style={{ marginTop: '6px' }}>

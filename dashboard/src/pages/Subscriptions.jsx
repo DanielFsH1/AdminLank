@@ -18,6 +18,7 @@ import {
   getGroupUserAlias,
   isGroupUserAssignedToRealAccount,
 } from '../utils/subscriptionAssignments';
+import { getMissingUserDataFields } from '../utils/userDataCompleteness';
 import SearchBar from '../components/SearchBar';
 import EntityHistory from '../components/EntityHistory';
 
@@ -929,6 +930,7 @@ export default function Subscriptions({ onNavigate, navData }) {
  if (deletionAlert) slotColorClass = 'slot-pending-deletion';
  else if (verifyAlert) slotColorClass = 'slot-access-verify';
  else if (hasPendingAction) slotColorClass = 'pending-action-slot';
+ else if (missing.length > 0) slotColorClass = 'data-missing-slot';
 
  return (
       <div
@@ -1297,15 +1299,9 @@ export default function Subscriptions({ onNavigate, navData }) {
                         const userAlias = typeof user === 'string' ? user : user?.userAlias || null;
                         const isOccupied = !!userAlias;
 
-                        // Calcular campos faltantes dinámicamente desde userFields
-                        const missingFields = [];
-                        if (isOccupied) {
-                          svcUserFields.forEach(field => {
-                            if (field.key === 'userAlias') return; // ya validado por isOccupied
-                            const val = typeof user === 'object' ? user?.[field.key] : null;
-                            if (!val) missingFields.push(field.label);
-                          });
-                        }
+                        const missingFields = isOccupied
+                          ? getMissingUserDataFields({ user, userFields: svcUserFields })
+                          : [];
 
                         // Extraer valores dinámicos para mostrar en el slot
                         const displayValues = {};
@@ -1320,7 +1316,7 @@ export default function Subscriptions({ onNavigate, navData }) {
                         return (
                           <div
                             key={idx}
-                            className={`slot-item ${isOccupied ? 'occupied' : 'free'} ${slotDisabled ? 'disabled' : ''}`}
+                            className={`slot-item ${isOccupied ? 'occupied' : 'free'} ${slotDisabled ? 'disabled' : ''} ${missingFields.length > 0 ? 'data-missing-slot' : ''}`}
                           >
                             <div className="slot-info">
                               <div className="slot-number">Cupo #{idx + 1}</div>
@@ -1340,7 +1336,7 @@ export default function Subscriptions({ onNavigate, navData }) {
                               )}
                               {isOccupied && missingFields.length > 0 && (
                                 <div className="slot-missing-info">
-                                   Falta: {missingFields.join(', ')}
+                                  <WarningIcon size={16} /> Datos pendientes: falta {missingFields.join(', ')}
                                 </div>
                               )}
 
