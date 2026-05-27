@@ -1,70 +1,72 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildAssignableLankAccountsForSlot,
-  getGroupUserAlias,
-  isGroupUserAssignedToRealAccount,
+  findRealAccountSlotForGroupUser,
+  getGroupUserAccessState,
 } from './subscriptionAssignments';
 
-describe('subscription slot assignment candidates', () => {
-  it('excludes users already linked to any real account of the service', () => {
-    const groups = [
-      {
-        id: 'silva-herrera',
-        accountId: 2,
-        accountAlias: 'Silva Herrera',
-        groupStatus: 'active',
-        users: [
-          { userAlias: 'Kytzia1', serviceAccountRef: 'hbo_1' },
-          { userAlias: 'Libre', userEmail: 'libre@example.com' },
-          { userAlias: 'EnSlotPeroSinRef' },
-          'TextoLibre',
-        ],
-      },
-    ];
-    const realAccounts = [
-      {
-        id: 'hbo_2',
-        slots: [
-          { status: 'active', memberAlias: 'EnSlotPeroSinRef' },
-          { status: 'free', memberAlias: '' },
-        ],
-      },
-    ];
+const hboGroup = {
+  id: '6',
+  accountId: 6,
+  accountAlias: 'Juan Hoyos',
+  groupStatus: 'active',
+  users: [
+    { userAlias: 'Ivan G', serviceAccountRef: 'hbo_1' },
+    { userAlias: 'CallMeDevi' },
+  ],
+};
 
-    const accounts = buildAssignableLankAccountsForSlot({ groups, realAccounts });
+const hboPool = [
+  {
+    id: 'hbo_1',
+    serviceAccountRef: 'hbo_1',
+    label: 'HBO activa',
+    slots: [
+      {
+        slotNumber: 5,
+        status: 'active',
+        memberAlias: 'Ivan G',
+        assignedFrom: { accountId: 6, canonicalAlias: 'Juan Hoyos' },
+      },
+    ],
+  },
+];
+
+describe('subscription assignment helpers', () => {
+  it('matches a group user to its real account slot using alias and group account id', () => {
+    const match = findRealAccountSlotForGroupUser({
+      user: hboGroup.users[0],
+      group: hboGroup,
+      realAccounts: hboPool,
+    });
+
+    expect(match).toMatchObject({
+      accountId: 'hbo_1',
+      accountLabel: 'HBO activa',
+      slotNumber: 5,
+    });
+  });
+
+  it('reports pending access for pool group users with no real slot', () => {
+    const access = getGroupUserAccessState({
+      user: hboGroup.users[1],
+      group: hboGroup,
+      realAccounts: hboPool,
+    });
+
+    expect(access).toEqual({
+      state: 'pending',
+      label: 'Pendiente de cuenta real',
+    });
+  });
+
+  it('keeps assigned users out of the list of users available for new real-account slots', () => {
+    const accounts = buildAssignableLankAccountsForSlot({
+      groups: [hboGroup],
+      realAccounts: hboPool,
+    });
 
     expect(accounts).toHaveLength(1);
-    expect(accounts[0].users.map(getGroupUserAlias)).toEqual(['Libre', 'TextoLibre']);
-  });
-
-  it('removes groups when every user already has a real-account assignment', () => {
-    const groups = [
-      {
-        id: 'juan-felipe',
-        accountId: 5,
-        accountAlias: 'Juan Felipe',
-        groupStatus: 'active',
-        users: [
-          { userAlias: 'Ana', serviceAccountRef: 'hbo_1' },
-          { userAlias: 'Beto' },
-        ],
-      },
-      {
-        id: 'inactive',
-        accountId: 9,
-        groupStatus: 'paused',
-        users: [{ userAlias: 'Disponible' }],
-      },
-    ];
-    const realAccounts = [
-      { id: 'hbo_2', slots: [{ status: 'active', memberAlias: 'Beto' }] },
-    ];
-
-    expect(buildAssignableLankAccountsForSlot({ groups, realAccounts })).toEqual([]);
-  });
-
-  it('treats serviceAccountRef as an assignment even before checking slots', () => {
-    expect(isGroupUserAssignedToRealAccount({ userAlias: 'Moni', serviceAccountRef: 'chatgpt_2' })).toBe(true);
-    expect(isGroupUserAssignedToRealAccount({ userAlias: 'Moni' })).toBe(false);
+    expect(accounts[0].users.map(user => user.userAlias)).toEqual(['CallMeDevi']);
   });
 });

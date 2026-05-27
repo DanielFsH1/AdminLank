@@ -15,6 +15,7 @@ import { BlockIcon, CalendarIcon, CashIcon, ClockIcon, CreditCardIcon, DotGray, 
 import { normalizeSearch, nMatch } from '../utils/normalize';
 import {
   buildAssignableLankAccountsForSlot,
+  getGroupUserAccessState,
   getGroupUserAlias,
   isGroupUserAssignedToRealAccount,
 } from '../utils/subscriptionAssignments';
@@ -123,11 +124,6 @@ export default function Subscriptions({ onNavigate, navData }) {
 
  const poolServiceIds = useMemo(
    () => activeServiceIds.filter(key => (masterConfig[key] || getServiceMeta(key)).usesPool !== false),
-   [activeServiceIds, masterConfig],
- );
-
- const nonPoolServiceIds = useMemo(
-   () => activeServiceIds.filter(key => (masterConfig[key] || getServiceMeta(key)).usesPool === false),
    [activeServiceIds, masterConfig],
  );
 
@@ -428,52 +424,42 @@ export default function Subscriptions({ onNavigate, navData }) {
       });
  });
 
- // Buscar en grupos de servicios sin pool (como Microsoft 365)
- nonPoolServiceIds.forEach(npSvc => {
-   (groupDetails[npSvc] || []).forEach(group => {
+ // Buscar también en grupos Lank de todos los servicios.
+ // En servicios con pool esto es clave: puede haber usuarios dentro del grupo
+ // que aún no tienen cuenta real asignada y, por tanto, no aparecen en slots.
+ Object.entries(groupDetails).forEach(([svcId, groups]) => {
+   (groups || []).forEach(group => {
       let groupMatches = false;
       if (nMatch(group.accountAlias, q)) groupMatches = true;
       if (nMatch(group.fullName, q)) groupMatches = true;
       if (String(group.accountId || '').includes(q)) groupMatches = true;
       (group.users || []).forEach((u, idx) => {
-        const alias = typeof u === 'string' ? u : (u?.userAlias || '');
-        const email = typeof u === 'object' ? (u?.invitationEmail || u?.email || '') : '';
-        if (nMatch(alias, q) || nMatch(email, q)) {
+        const alias = getGroupUserAlias(u);
+        const fields = [alias];
+        if (typeof u === 'object' && u) {
+          fields.push(
+            u.userEmail,
+            u.email,
+            u.invitationEmail,
+            u.phone,
+            u.memberPhone,
+            u.profileName,
+            u.projectName,
+            u.serviceAccountRef,
+            u.serviceAccountLabel,
+            u.serviceLabel,
+          );
+        }
+        if (fields.some(f => nMatch(f, q))) {
           groupMatches = true;
-          matchedSlots.add(`${npSvc}:${group.id}:${idx}`);
+          matchedSlots.add(`${svcId}:${group.id}:${idx}`);
         }
       });
       if (groupMatches) {
-        if (!results[npSvc]) results[npSvc] = new Set();
-        results[npSvc].add(group.id);
+        if (!results[svcId]) results[svcId] = new Set();
+        results[svcId].add(group.id);
       }
    });
- });
-
- Object.entries(groupDetails).forEach(([svcId, groups]) => {
-      if (!getServiceMeta(svcId).usesPool) return;
-      groups.forEach(group => {
-        (group.users || []).forEach(u => {
-          if (typeof u === 'string') {
-            if (nMatch(u, q)) {
-              if (!results[svcId]) results[svcId] = new Set();
-            }
-            return;
-          }
-          const fields = [u.userAlias, u.userEmail, u.email, u.phone, u.memberPhone, u.profileName, u.serviceAccountRef];
-          const projName = typeof u.projectName === 'string' ? u.projectName : '';
-          fields.push(projName);
-          if (fields.some(f => nMatch(f, q))) {
-            if (u.serviceAccountRef && poolDetails[svcId]) {
-              const realAcct = poolDetails[svcId].find(pa => pa.serviceAccountRef === u.serviceAccountRef || pa.id === u.serviceAccountRef);
-              if (realAcct) {
-                if (!results[svcId]) results[svcId] = new Set();
-                results[svcId].add(realAcct.id);
-              }
-            }
-          }
-        });
-      });
  });
 
  const totalMatches = Object.values(results).reduce((s, set) => s + set.size, 0);
@@ -486,7 +472,7 @@ export default function Subscriptions({ onNavigate, navData }) {
  } else {
       setSearchResults({ matches: {}, slots: new Set(), total: 0 });
  }
- }, [searchQuery, poolDetails, groupDetails, selectedService, nonPoolServiceIds]);
+ }, [searchQuery, poolDetails, groupDetails, selectedService]);
 
  const clearSearch = () => {
  setSearchQuery('');
@@ -906,6 +892,207 @@ export default function Subscriptions({ onNavigate, navData }) {
    }
  };
 
+ const renderLankGroupDetails = (serviceKey, { attachRef = false } = {}) => {
+   const groups = groupDetails[serviceKey] || [];
+   const m = getServiceMeta(serviceKey);
+   const isPoolService = m.usesPool !== false;
+   const realAccounts = poolDetails[serviceKey] || [];
+   const filteredGroups = groups
+     .filter(g => g.groupStatus === 'active')
+     .filter(g => {
+       if (!searchResults || !searchQuery) return true;
+       const svcMatches = searchResults.matches[serviceKey];
+       return svcMatches && svcMatches.has(g.id);
+     })
+     .sort((a, b) => (a.accountId || 0) - (b.accountId || 0));
+
+   return (
+     <div ref={attachRef ? detailRef : undefined} style={{ marginTop: isPoolService ? '20px' : '12px' }}>
+       <div className="section-header">
+         <div className="section-title" style={{ gap: '10px' }}>
+           <img src={m.logo} className="svc-logo-sm" alt="" />
+           {isPoolService ? `${m.name} — Grupos Lank y usuarios` : `${m.name} — Grupos de cuentas Lank`}
+         </div>
+         <span className="badge badge-info">
+           {filteredGroups.length} grupo{filteredGroups.length !== 1 ? 's' : ''}
+         </span>
+       </div>
+
+       {filteredGroups.length === 0 && (
+         <div className="empty-state" style={{ marginTop: '12px' }}>
+           <p>No se encontraron grupos Lank activos para este servicio</p>
+         </div>
+       )}
+
+       {filteredGroups.map(group => {
+         const users = group.users || [];
+         const disabledSlots = group.disabledSlots || [];
+         const maxSlots = Math.max(getMaxSlots(serviceKey, 'lankGroup'), users.length);
+         const svcUserFields = getUserFields(serviceKey);
+
+         return (
+           <div className="real-account-card" key={group.id}>
+             <div className="real-account-header" style={{ borderLeft: `4px solid ${m.color}` }}>
+               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                 <img
+                   src={getProfileImage(group.accountId)}
+                   className="lank-avatar"
+                   alt=""
+                   onError={e => { e.target.style.display = 'none'; }}
+                 />
+                 <div>
+                   <div className="real-account-title">
+                     #{group.accountId} — {group.accountAlias || group.fullName}
+                   </div>
+                   <div className="real-account-meta">
+                     <span>{group.fullName}</span>
+                     {group.groupStatus === 'active' && <span className="badge badge-success" style={{ fontSize: '10px' }}>Activo</span>}
+                   </div>
+                 </div>
+               </div>
+               <div style={{ display: 'flex', gap: '6px' }}>
+                 <span className="badge badge-success"><DotGreen /> {users.length}</span>
+                 <span className="badge badge-muted"><DotGray /> {maxSlots - users.length}</span>
+               </div>
+             </div>
+             <div className="real-account-body">
+               <div className="slot-grid">
+                 {Array.from({ length: maxSlots }).map((_, idx) => {
+                   const user = users[idx];
+                   const slotDisabled = disabledSlots.includes(idx);
+                   const userAlias = getGroupUserAlias(user) || null;
+                   const isOccupied = !!userAlias;
+                   const accessState = isPoolService && isOccupied
+                     ? getGroupUserAccessState({ user, group, realAccounts })
+                     : null;
+                   const accessBadgeClass = accessState?.state === 'assigned' ? 'badge-success' : 'badge-warning';
+                   const isSearchMatch = searchResults && searchResults.slots.has(`${serviceKey}:${group.id}:${idx}`);
+
+                   // Calcular campos faltantes dinámicamente desde userFields
+                   const missingFields = [];
+                   if (isOccupied) {
+                     svcUserFields.forEach(field => {
+                       if (field.key === 'userAlias') return; // ya validado por isOccupied
+                       const val = typeof user === 'object' ? user?.[field.key] : null;
+                       if (!val) missingFields.push(field.label);
+                     });
+                   }
+
+                   // Extraer valores dinámicos para mostrar en el slot
+                   const displayValues = {};
+                   if (typeof user === 'object' && user) {
+                     svcUserFields.forEach(field => {
+                       if (field.key !== 'userAlias' && user[field.key]) {
+                         displayValues[field.key] = { value: user[field.key], label: field.label, type: field.type };
+                       }
+                     });
+                   }
+
+                   return (
+                     <div
+                       key={idx}
+                       className={`slot-item ${isOccupied ? 'occupied' : 'free'} ${slotDisabled ? 'disabled' : ''} ${isSearchMatch ? 'search-match-slot' : ''}`}
+                     >
+                       <div className="slot-info">
+                         <div className="slot-number">Cupo #{idx + 1}</div>
+                         <div className="slot-user" style={{ color: slotDisabled ? 'var(--text-muted)' : isOccupied ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                           {slotDisabled ? 'Deshabilitado' : userAlias || 'Disponible'}
+                         </div>
+                         {Object.entries(displayValues).map(([key, { value, label, type }]) => (
+                           <div key={key} className={type === 'email' ? 'slot-detail' : 'slot-from'}>
+                             {type === 'email' ? <EmailIcon size={16} /> : <CalendarIcon size={16} />}
+                             {' '}{type === 'select-day' ? `${label}: día ${value} de cada mes` : value}
+                           </div>
+                         ))}
+                         {isPoolService && accessState && (
+                           <div className="slot-from">
+                             <span className={`badge ${accessBadgeClass}`} style={{ fontSize: '10px' }}>
+                               {accessState.state === 'assigned' ? 'Cuenta real' : 'Pendiente'}
+                             </span>
+                             {' '}{accessState.label}
+                             {accessState.match && (
+                               <button
+                                 className="crud-icon-btn"
+                                 style={{ marginLeft: '6px' }}
+                                 onClick={() => setHighlightRef(accessState.match.accountId)}
+                                 title="Resaltar cuenta real"
+                               >
+                                 <LinkIcon size={12} />
+                               </button>
+                             )}
+                           </div>
+                         )}
+                         {!isPoolService && isOccupied && (
+                           <div className="slot-from">
+                             ← {group.accountAlias} (#{group.accountId})
+                           </div>
+                         )}
+                         {isOccupied && missingFields.length > 0 && (
+                           <div className="slot-missing-info">
+                              Falta: {missingFields.join(', ')}
+                           </div>
+                         )}
+
+                         <div className="alert-actions slot-actions-compact" style={{ marginTop: '6px' }}>
+                           <button
+                             className="alert-action-btn edit"
+                             onClick={() => setGroupEditModal({
+                               serviceKey,
+                               groupId: group.id,
+                               userIndex: idx,
+                               user: typeof user === 'object' ? user : { userAlias: user },
+                               allUsers: users,
+                               accountLabel: `${group.accountAlias || group.fullName} (#${group.accountId})`,
+                               accountId: group.accountId,
+                             })}
+                             title={isOccupied ? 'Editar información del usuario' : 'Llenar cupo manualmente'}
+                             disabled={slotDisabled}
+                           >
+                              <EditIcon size={16} /> {isOccupied ? 'Editar' : 'Llenar'}
+                           </button>
+                           {!isOccupied && (
+                             <button
+                               className="alert-action-btn assign"
+                               onClick={() => handleToggleGroupSlot(serviceKey, group, idx)}
+                               title={slotDisabled ? 'Habilitar este cupo' : 'Deshabilitar este cupo'}
+                             >
+                               {slotDisabled ? <ToggleOffIcon size={16} /> : <ToggleOnIcon size={16} />} {slotDisabled ? 'Habilitar' : 'Deshabilitar'}
+                             </button>
+                           )}
+                           {isOccupied && !slotDisabled && (
+                             <div className="slot-secondary-actions">
+                               <button
+                                 className="crud-icon-btn danger"
+                                 onClick={() => setGroupBajaConfirm({
+                                   serviceKey,
+                                   groupId: group.id,
+                                   userIndex: idx,
+                                   userAlias,
+                                   allUsers: users,
+                                   accountLabel: `${group.accountAlias || group.fullName} (#${group.accountId})`,
+                                   accountId: group.accountId,
+                                 })}
+                                 title="Dar de baja a este usuario"
+                               >
+                                 <BlockIcon size={14} />
+                               </button>
+                             </div>
+                           )}
+                         </div>
+                       </div>
+                     </div>
+                   );
+                 })}
+               </div>
+               <EntityHistory history={group.userHistory} label="Historial de usuarios" searchKey={`${group.accountAlias || group.accountId}`} onNavigate={onNavigate} />
+             </div>
+           </div>
+         );
+       })}
+     </div>
+   );
+ };
+
  // ─── Render slot con botones de edición ───
  const renderSlot = (slot, idx, acct, serviceKey) => {
  const isDisabled = slot.enabled === false || slot.status === 'disabled';
@@ -1236,171 +1423,14 @@ export default function Subscriptions({ onNavigate, navData }) {
         </div>
       )}
 
+      {/* ═══ DETALLE: Grupos Lank de servicios con pool ═══ */}
+      {selectedService && getServiceMeta(selectedService).usesPool !== false && groupDetails[selectedService] && (
+        renderLankGroupDetails(selectedService)
+      )}
+
       {/* ═══ DETALLE: Servicios sin pool (grupos Lank) ═══ */}
       {selectedService && getServiceMeta(selectedService).usesPool === false && (
-        <div ref={detailRef} style={{ marginTop: '12px' }}>
-          <div className="section-header">
-            <div className="section-title" style={{ gap: '10px' }}>
-              <img src={selectedMeta.logo} className="svc-logo-sm" alt="" />
-              {selectedMeta.name} — Grupos de cuentas Lank
-            </div>
-            <span className="badge badge-info">
-              {(groupDetails[selectedService] || []).length} grupo{(groupDetails[selectedService] || []).length !== 1 ? 's' : ''}
-            </span>
-          </div>
-
-          {(groupDetails[selectedService] || [])
-            .filter(g => g.groupStatus === 'active')
-            .filter(g => {
-              if (!searchResults || !searchQuery) return true;
-              const svcMatches = searchResults.matches[selectedService];
-              return svcMatches && svcMatches.has(g.id);
-            })
-            .sort((a, b) => (a.accountId || 0) - (b.accountId || 0))
-            .map(group => {
-              const users = group.users || [];
-              const disabledSlots = group.disabledSlots || [];
-              const maxSlots = getMaxSlots(selectedService, 'lankGroup');
-              const m = getServiceMeta(selectedService);
-              const svcUserFields = getUserFields(selectedService);
-
-              return (
-                <div className="real-account-card" key={group.id}>
-                  <div className="real-account-header" style={{ borderLeft: `4px solid ${m.color}` }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <img
-                        src={getProfileImage(group.accountId)}
-                        className="lank-avatar"
-                        alt=""
-                        onError={e => { e.target.style.display = 'none'; }}
-                      />
-                      <div>
-                        <div className="real-account-title">
-                          #{group.accountId} — {group.accountAlias || group.fullName}
-                        </div>
-                        <div className="real-account-meta">
-                          <span> {group.fullName}</span>
-                          {group.groupStatus === 'active' && <span className="badge badge-success" style={{ fontSize: '10px' }}>Activo</span>}
-                        </div>
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <span className="badge badge-success"><DotGreen /> {users.length}</span>
-                      <span className="badge badge-muted"><DotGray /> {maxSlots - users.length}</span>
-                    </div>
-                  </div>
-                  <div className="real-account-body">
-                    <div className="slot-grid">
-                      {Array.from({ length: maxSlots }).map((_, idx) => {
-                        const user = users[idx];
-                        const slotDisabled = disabledSlots.includes(idx);
-                        const userAlias = typeof user === 'string' ? user : user?.userAlias || null;
-                        const isOccupied = !!userAlias;
-
-                        // Calcular campos faltantes dinámicamente desde userFields
-                        const missingFields = [];
-                        if (isOccupied) {
-                          svcUserFields.forEach(field => {
-                            if (field.key === 'userAlias') return; // ya validado por isOccupied
-                            const val = typeof user === 'object' ? user?.[field.key] : null;
-                            if (!val) missingFields.push(field.label);
-                          });
-                        }
-
-                        // Extraer valores dinámicos para mostrar en el slot
-                        const displayValues = {};
-                        if (typeof user === 'object' && user) {
-                          svcUserFields.forEach(field => {
-                            if (field.key !== 'userAlias' && user[field.key]) {
-                              displayValues[field.key] = { value: user[field.key], label: field.label, type: field.type };
-                            }
-                          });
-                        }
-
-                        return (
-                          <div
-                            key={idx}
-                            className={`slot-item ${isOccupied ? 'occupied' : 'free'} ${slotDisabled ? 'disabled' : ''}`}
-                          >
-                            <div className="slot-info">
-                              <div className="slot-number">Cupo #{idx + 1}</div>
-                              <div className="slot-user" style={{ color: slotDisabled ? 'var(--text-muted)' : isOccupied ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                                {slotDisabled ? 'Deshabilitado' : userAlias || 'Disponible'}
-                              </div>
-                              {Object.entries(displayValues).map(([key, { value, label, type }]) => (
-                                <div key={key} className={type === 'email' ? 'slot-detail' : 'slot-from'}>
-                                  {type === 'email' ? <EmailIcon size={16} /> : <CalendarIcon size={16} />}
-                                  {' '}{type === 'select-day' ? `${label}: día ${value} de cada mes` : value}
-                                </div>
-                              ))}
-                              {isOccupied && (
-                                <div className="slot-from">
-                                  ← {group.accountAlias} (#{group.accountId})
-                                </div>
-                              )}
-                              {isOccupied && missingFields.length > 0 && (
-                                <div className="slot-missing-info">
-                                   Falta: {missingFields.join(', ')}
-                                </div>
-                              )}
-
-                              <div className="alert-actions slot-actions-compact" style={{ marginTop: '6px' }}>
-                                <button
-                                  className="alert-action-btn edit"
-                                  onClick={() => setGroupEditModal({
-                                    serviceKey: selectedService,
-                                    groupId: group.id,
-                                    userIndex: idx,
-                                    user: typeof user === 'object' ? user : { userAlias: user },
-                                    allUsers: users,
-                                    accountLabel: `${group.accountAlias || group.fullName} (#${group.accountId})`,
-                                    accountId: group.accountId,
-                                  })}
-                                  title={isOccupied ? 'Editar información del usuario' : 'Llenar cupo manualmente'}
-                                  disabled={slotDisabled}
-                                >
-                                   <EditIcon size={16} /> {isOccupied ? 'Editar' : 'Llenar'}
-                                </button>
-                                {!isOccupied && (
-                                  <button
-                                    className="alert-action-btn assign"
-                                    onClick={() => handleToggleGroupSlot(selectedService, group, idx)}
-                                    title={slotDisabled ? 'Habilitar este cupo' : 'Deshabilitar este cupo'}
-                                  >
-                                    {slotDisabled ? <ToggleOffIcon size={16} /> : <ToggleOnIcon size={16} />} {slotDisabled ? 'Habilitar' : 'Deshabilitar'}
-                                  </button>
-                                )}
-                                {isOccupied && !slotDisabled && (
-                                  <div className="slot-secondary-actions">
-                                    <button
-                                      className="crud-icon-btn danger"
-                                      onClick={() => setGroupBajaConfirm({
-                                        serviceKey: selectedService,
-                                        groupId: group.id,
-                                        userIndex: idx,
-                                        userAlias,
-                                        allUsers: users,
-                                        accountLabel: `${group.accountAlias || group.fullName} (#${group.accountId})`,
-                                        accountId: group.accountId,
-                                      })}
-                                      title="Dar de baja a este usuario"
-                                    >
-                                      <BlockIcon size={14} />
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <EntityHistory history={group.userHistory} label="Historial de usuarios" searchKey={`${group.accountAlias || group.accountId}`} onNavigate={onNavigate} />
-                  </div>
-                </div>
-              );
-            })}
-        </div>
+        renderLankGroupDetails(selectedService, { attachRef: true })
       )}
 
       {!selectedService && (

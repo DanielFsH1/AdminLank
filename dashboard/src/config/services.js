@@ -45,7 +45,7 @@ export const SERVICES = {
     ],
   },
   hbo: {
-    name: 'HBO Max Platino', color: '#b535f6', logo: '/assets/HBO Max.jpg', maxSlots: 3,
+    name: 'HBO Max Platino', color: '#b535f6', logo: '/assets/HBO Max.jpg', maxSlots: 5,
     usesPool: true, accessType: 'profile_project', displayOrder: 4,
     nameAliases: ['HBO Max Platino'],
     slotFields: [
