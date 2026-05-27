@@ -219,6 +219,20 @@ export function getServicesMap() {
   return _dynamicServices || SERVICES;
 }
 
+const NON_SERVICE_CONFIG_KEYS = new Set(['id', 'updatedAt']);
+
+export function normalizeServicesConfigDocument(data = {}) {
+  const rawServices = data?.services && typeof data.services === 'object'
+    ? data.services
+    : data;
+
+  return Object.fromEntries(
+    Object.entries(rawServices || {}).filter(([key, value]) => (
+      !NON_SERVICE_CONFIG_KEYS.has(key) && value && typeof value === 'object' && !Array.isArray(value)
+    )),
+  );
+}
+
 // ─── Utilidades de servicio ─────────────────────────────────────────────────
 
 // Ruta a la imagen de perfil de una cuenta Lank

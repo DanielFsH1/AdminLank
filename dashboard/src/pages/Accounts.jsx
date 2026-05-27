@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useDocument } from '../hooks/useFirestore';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
-import { getServiceMeta, getProfileImage, getUserFields } from '../config/services';
+import { getServiceMeta, getProfileImage, getUserFields, normalizeServicesConfigDocument } from '../config/services';
 import { updateGroupUser, removeGroupUser, addGroupUser, createLankGroup, deleteLankGroup, DEFAULT_MASTER_CONFIG, updateGroupEnabledSlots, updateLankGroupStatus, updateSlot, createManualAlert, updateLankMasterAccount } from '../hooks/firestoreActions';
 import EditModal, { ConfirmDialog, Toast } from '../components/EditModal';
 import { BlockIcon, CalendarIcon, CashIcon, ClipboardIcon, CloseIcon, EditIcon, EmailIcon, FolderIcon, LinkIcon, PhoneIcon, PlusIcon, SaveIcon, SearchIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, UsersIcon, WarningIcon } from '../components/Icons';
@@ -16,6 +16,17 @@ import LoadingState from '../components/LoadingState';
 // Campos editables por servicio — se derivan dinámicamente desde config
 function getUserEditableFields(svcId) {
  return getUserFields(svcId);
+}
+
+function getGroupUserAlias(user) {
+ if (typeof user === 'string') return user;
+ return user?.userAlias || user?.alias || user?.memberAlias || user?.name || '';
+}
+
+function normalizeGroupUserRecord(user) {
+ if (typeof user === 'string') return { userAlias: user };
+ const userAlias = getGroupUserAlias(user);
+ return userAlias && user?.userAlias !== userAlias ? { ...user, userAlias } : user;
 }
 
 export default function Accounts({ navData, onNavigate }) {
@@ -51,10 +62,7 @@ export default function Accounts({ navData, onNavigate }) {
 
  const masterConfig = useMemo(() => {
    if (masterConfigDoc) {
-     const data = masterConfigDoc.services || masterConfigDoc;
-     const services = Object.fromEntries(
-       Object.entries(data).filter(([key]) => key !== 'id' && key !== 'updatedAt'),
-     );
+     const services = normalizeServicesConfigDocument(masterConfigDoc);
      return { ...DEFAULT_MASTER_CONFIG, ...services };
    }
    return DEFAULT_MASTER_CONFIG;
@@ -147,6 +155,39 @@ export default function Accounts({ navData, onNavigate }) {
  }, [refreshAccountsData]);
 
  useEffect(() => {
+   if (activeServiceIds.length === 0) {
+     setGroups({});
+     return undefined;
+   }
+
+   let isActive = true;
+   setGroups(prev => Object.fromEntries(
+     activeServiceIds.map(svc => [svc, prev[svc] || {}]),
+   ));
+
+   const unsubs = activeServiceIds.map(svc => onSnapshot(
+     collection(db, `groups/${svc}/lank-accounts`),
+     (snap) => {
+       if (!isActive) return;
+       const docs = {};
+       snap.docs.forEach(d => { docs[d.id] = d.data(); });
+       setGroups(prev => ({ ...prev, [svc]: docs }));
+     },
+     (err) => {
+       console.error(`Error en grupos Lank de ${svc}:`, err);
+       if (isActive) {
+         showToast(`No se pudieron sincronizar grupos de ${getServiceMeta(svc).name}.`, 'error');
+       }
+     },
+   ));
+
+   return () => {
+     isActive = false;
+     unsubs.forEach(unsub => unsub());
+   };
+ }, [activeServiceIds, showToast]);
+
+ useEffect(() => {
  if (highlightAccountId) {
       setExpandedId(highlightAccountId);
       setTimeout(() => {
@@ -229,8 +270,9 @@ export default function Accounts({ navData, onNavigate }) {
       const data = accts[String(acctId)];
       if (!data || !data.users) continue;
       for (const u of data.users) {
-        if (typeof u === 'string') { if (nMatch(u, q)) return true; continue; }
-        if (nMatch(u.userAlias, q)) return true;
+        const userAlias = getGroupUserAlias(u);
+        if (nMatch(userAlias, q)) return true;
+        if (typeof u === 'string') continue;
         if (nMatch(u.userEmail || u.email || u.invitationEmail, q)) return true;
         if (nMatch(u.phone || u.memberPhone, q)) return true;
         if (nMatch(u.profileName, q)) return true;
@@ -244,8 +286,9 @@ export default function Accounts({ navData, onNavigate }) {
  const isUserMatch = (user, q) => {
  if (!user || !q) return false;
  if (typeof user === 'string') return nMatch(user, q);
+ const userAlias = getGroupUserAlias(user);
  return (
-      nMatch(user.userAlias, q) ||
+      nMatch(userAlias, q) ||
       nMatch(user.userEmail || user.email || user.invitationEmail, q) ||
       nMatch(user.phone || user.memberPhone, q) ||
       nMatch(user.profileName, q) ||
@@ -698,7 +741,7 @@ export default function Accounts({ navData, onNavigate }) {
                     visibleServices.map(svc => {
                       const meta = getServiceMeta(svc.id);
                       const rawUsers = svc.data.users || [];
-                      const users = rawUsers.map(u => typeof u === 'string' ? { userAlias: u } : u);
+                      const users = rawUsers.map(normalizeGroupUserRecord);
                       const configuredMax = getMaxSlots(svc.id) || users.length;
                       // Never truncate existing users — show at least as many slots as users exist
                       const maxSlots = Math.max(configuredMax, users.length);

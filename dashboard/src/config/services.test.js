@@ -6,6 +6,7 @@ import {
   getDefaultUserFields,
   getBankMeta,
   normalizeServiceKey,
+  normalizeServicesConfigDocument,
 } from './services';
 
 describe('dynamic service helpers', () => {
@@ -36,6 +37,26 @@ describe('dynamic service helpers', () => {
 
     expect(slotFields.map(field => field.key)).toEqual(['memberAlias', 'profileName']);
     expect(userFields.map(field => field.key)).toContain('profileName');
+  });
+
+  it('normaliza config/services tanto anidado como top-level sin mezclar metadata', () => {
+    const topLevel = normalizeServicesConfigDocument({
+      id: 'services',
+      updatedAt: '2026-05-27T00:00:00Z',
+      hbo: { name: 'HBO Max Platino', maxSlotsPerRealAccount: 5, maxSlotsPerLankGroup: 3 },
+    });
+    const nested = normalizeServicesConfigDocument({
+      services: {
+        hbo: { name: 'HBO Max Platino', maxSlotsPerRealAccount: 5, maxSlotsPerLankGroup: 3 },
+      },
+      updatedAt: 'ignored',
+    });
+
+    expect(topLevel).toEqual(nested);
+    expect(topLevel.hbo.maxSlotsPerRealAccount).toBe(5);
+    expect(topLevel.hbo.maxSlotsPerLankGroup).toBe(3);
+    expect(topLevel.id).toBeUndefined();
+    expect(topLevel.updatedAt).toBeUndefined();
   });
 
   it('resuelve metadatos de Plata aunque el banco venga como Banco Plata', () => {

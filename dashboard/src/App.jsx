@@ -2,7 +2,7 @@ import { lazy, Suspense, useState, useEffect, useCallback, useRef } from 'react'
 import { onAuthStateChanged } from 'firebase/auth';
 import { onSnapshot, doc as firestoreDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
-import { setDynamicServices } from './config/services';
+import { setDynamicServices, normalizeServicesConfigDocument } from './config/services';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { getPageTransitionClass } from './utils/pageChrome';
 import {
@@ -184,7 +184,7 @@ function App() {
     const unsub = onSnapshot(firestoreDoc(db, 'config', 'services'), snap => {
       if (snap.exists()) {
         const data = snap.data();
-        const svcs = data.services || {};
+        const svcs = normalizeServicesConfigDocument(data);
         setDynamicServices(svcs);
         setServicesConfig(svcs);
       }
