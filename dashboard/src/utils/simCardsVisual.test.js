@@ -14,7 +14,7 @@ describe('SIM Cards visual details', () => {
       simCardsPage.indexOf('{/* Unregistered accounts'),
     );
 
-    expect(pendingSection).toContain('CARRIER_CONFIG[sim.carrier]');
+    expect(pendingSection).toContain('resolveSimCarrier(sim)');
     expect(pendingSection).toContain('sim-carrier-badge');
   });
 });

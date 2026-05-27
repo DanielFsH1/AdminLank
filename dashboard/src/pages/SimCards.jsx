@@ -9,15 +9,10 @@ import {
   PlusIcon, WarningIcon,
 } from '../components/Icons';
 import LoadingState from '../components/LoadingState';
+import { CARRIER_CONFIG, normalizeSimCarrier, resolveSimCarrier } from '../utils/simCardsCarrier';
 
 const MONTH_NAMES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 const MONTH_NAMES_FULL = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-
-const CARRIER_CONFIG = {
-  telcel:  { label: 'Telcel',   color: '#0033A0', rechargeDays: null, alertDays: 7 },
-  att:     { label: 'AT&T',     color: '#009FDB', rechargeDays: 85,   alertDays: 7 },
-  oxxocel: { label: 'OXXO Cel', color: '#E30613', rechargeDays: 170,  alertDays: 10 },
-};
 
 function formatPhone(phone) {
   if (!phone) return '—';
@@ -67,7 +62,7 @@ function RechargeModal({ sim, initialDate, onConfirm, onClose }) {
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
 
-  const carrier = sim.carrier || 'telcel';
+  const carrier = resolveSimCarrier(sim);
   const carrierCfg = CARRIER_CONFIG[carrier] || CARRIER_CONFIG.telcel;
   const nextDate = computeNextRechargeDate(rechargeDate, carrier);
   const nextDateFormatted = nextDate ? formatDateShort(nextDate) : '—';
@@ -328,14 +323,14 @@ export default function SimCards() {
       if (snap.exists()) {
         const data = snap.data();
         let flatSims = data.sims || migrateGroupsToFlat(data);
-        // Migrate: ensure all SIMs have a carrier field
+        // Migrate: ensure all SIMs have a valid carrier field
         let needsMigration = false;
         flatSims = flatSims.map(sim => {
-          if (!sim.carrier) {
+          const normalized = normalizeSimCarrier(sim);
+          if (normalized !== sim) {
             needsMigration = true;
-            return { ...sim, carrier: 'telcel' };
           }
-          return sim;
+          return normalized;
         });
         setSims(flatSims);
         if ((data.groups && !data.sims) || needsMigration) {
@@ -562,17 +557,19 @@ export default function SimCards() {
                     {monthSims.map(sim => {
                       const dLeft = daysUntil(sim.nextRechargeDate);
                       const urgency = getUrgencyLevel(dLeft);
+                      const carrier = resolveSimCarrier(sim);
+                      const carrierCfg = CARRIER_CONFIG[carrier];
                       return (
                         <div key={sim.lankAccountId} className={`sim-number-card ${urgency}`}>
                           <div className="sim-number-info">
                             <div className="sim-number-top">
                               <span className="sim-number-id">#{sim.lankAccountId}</span>
                               <span className="sim-number-alias">{sim.canonicalAlias || sim.fullName}</span>
-                              {sim.carrier && CARRIER_CONFIG[sim.carrier] && (
+                              {carrierCfg && (
                                 <span className="sim-carrier-badge" style={{
-                                  background: CARRIER_CONFIG[sim.carrier].color + '22',
-                                  color: CARRIER_CONFIG[sim.carrier].color,
-                                }}>{CARRIER_CONFIG[sim.carrier].label}</span>
+                                  background: carrierCfg.color + '22',
+                                  color: carrierCfg.color,
+                                }}>{carrierCfg.label}</span>
                               )}
                             </div>
                             <div className="sim-number-details">
@@ -633,47 +630,51 @@ export default function SimCards() {
               </span>
             </div>
             <div className="sim-number-list">
-              {pendingSims.map(sim => (
-                <div key={sim.lankAccountId} className="sim-number-card warning">
-                  <div className="sim-number-info">
-                    <div className="sim-number-top">
-                      <span className="sim-number-id">#{sim.lankAccountId}</span>
-                      <span className="sim-number-alias">{sim.canonicalAlias || sim.fullName}</span>
-                      {sim.carrier && CARRIER_CONFIG[sim.carrier] && (
-                        <span className="sim-carrier-badge" style={{
-                          background: CARRIER_CONFIG[sim.carrier].color + '22',
-                          color: CARRIER_CONFIG[sim.carrier].color,
-                        }}>{CARRIER_CONFIG[sim.carrier].label}</span>
-                      )}
+              {pendingSims.map(sim => {
+                const carrier = resolveSimCarrier(sim);
+                const carrierCfg = CARRIER_CONFIG[carrier];
+                return (
+                  <div key={sim.lankAccountId} className="sim-number-card warning">
+                    <div className="sim-number-info">
+                      <div className="sim-number-top">
+                        <span className="sim-number-id">#{sim.lankAccountId}</span>
+                        <span className="sim-number-alias">{sim.canonicalAlias || sim.fullName}</span>
+                        {carrierCfg && (
+                          <span className="sim-carrier-badge" style={{
+                            background: carrierCfg.color + '22',
+                            color: carrierCfg.color,
+                          }}>{carrierCfg.label}</span>
+                        )}
+                      </div>
+                      <div className="sim-number-details">
+                        <span className="sim-number-phone sim-phone-highlight">
+                          <PhoneIcon size={13} /> {formatPhone(sim.phone) || '—'}
+                        </span>
+                        <span className="sim-number-dates" style={{ color: 'var(--accent-warning)' }}>
+                          Sin recarga registrada
+                        </span>
+                      </div>
                     </div>
-                    <div className="sim-number-details">
-                      <span className="sim-number-phone sim-phone-highlight">
-                        <PhoneIcon size={13} /> {formatPhone(sim.phone) || '—'}
+                    <div className="sim-number-right">
+                      <span className="sim-number-urgency" style={{ color: 'var(--accent-warning)' }}>
+                        Pendiente
                       </span>
-                      <span className="sim-number-dates" style={{ color: 'var(--accent-warning)' }}>
-                        Sin recarga registrada
-                      </span>
+                      <button
+                        className="sim-recharge-btn"
+                        title="Registrar primera recarga"
+                        onClick={() => setRechargeModal({
+                          lankAccountId: sim.lankAccountId,
+                          name: sim.canonicalAlias || sim.fullName,
+                          rechargeDate: todayLocal(),
+                        })}
+                      >
+                        <CheckCircleIcon size={13} />
+                        <span>1ª Recarga</span>
+                      </button>
                     </div>
                   </div>
-                  <div className="sim-number-right">
-                    <span className="sim-number-urgency" style={{ color: 'var(--accent-warning)' }}>
-                      Pendiente
-                    </span>
-                    <button
-                      className="sim-recharge-btn"
-                      title="Registrar primera recarga"
-                      onClick={() => setRechargeModal({
-                        lankAccountId: sim.lankAccountId,
-                        name: sim.canonicalAlias || sim.fullName,
-                        rechargeDate: todayLocal(),
-                      })}
-                    >
-                      <CheckCircleIcon size={13} />
-                      <span>1ª Recarga</span>
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
