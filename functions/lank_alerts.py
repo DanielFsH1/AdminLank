@@ -377,6 +377,21 @@ def generate_sim_recharge_alerts(db):
         'att': 'AT&T',
         'oxxocel': 'OXXO Cel',
     }
+    CARRIER_BY_LANK_ACCOUNT_ID = {
+        '3': 'att',
+        '4': 'att',
+        '5': 'att',
+        '6': 'oxxocel',
+        '10': 'telcel',
+    }
+
+    def resolve_carrier(sim):
+        lank_id = str(sim.get('lankAccountId', '')).strip()
+        account_carrier = CARRIER_BY_LANK_ACCOUNT_ID.get(lank_id)
+        if account_carrier in CARRIER_ALERT_DAYS:
+            return account_carrier
+        carrier = sim.get('carrier') or 'telcel'
+        return carrier if carrier in CARRIER_ALERT_DAYS else 'telcel'
 
     print('[SIM Alerts] generate_sim_recharge_alerts() called')
 
@@ -413,7 +428,7 @@ def generate_sim_recharge_alerts(db):
         if not next_date_str:
             continue
 
-        carrier = sim.get('carrier', 'telcel')
+        carrier = resolve_carrier(sim)
         alert_window = CARRIER_ALERT_DAYS.get(carrier, 7)
         carrier_label = CARRIER_LABELS.get(carrier, carrier)
         phone = sim.get('phone', '')

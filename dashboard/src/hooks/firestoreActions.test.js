@@ -760,9 +760,9 @@ describe('markSimRechargeComplete - multi-carrier', () => {
 
   it('usa ciclo OXXO Cel (170 días) cuando el SIM es oxxocel', async () => {
     const sims = [
-      { lankAccountId: 10, phone: '56 3947 2383', fullName: 'Juan Hoyos', carrier: 'oxxocel', lastRechargeDate: null, nextRechargeDate: null },
+      { lankAccountId: 6, phone: '56 3947 2383', fullName: 'Juan Hoyos', carrier: 'oxxocel', lastRechargeDate: null, nextRechargeDate: null },
     ];
-    const result = await markSimRechargeComplete(sims, 10, '2026-05-15');
+    const result = await markSimRechargeComplete(sims, 6, '2026-05-15');
     expect(result[0].lastRechargeDate).toBe('2026-05-15');
     expect(result[0].nextRechargeDate).toBe('2026-11-01');
   });
@@ -797,7 +797,7 @@ describe('addSimCard - multi-carrier', () => {
 
   it('agrega SIM con carrier oxxocel', async () => {
     const result = await addSimCard([], {
-      lankAccountId: 10, phone: '56 3947 2383', fullName: 'Juan Hoyos',
+      lankAccountId: 6, phone: '56 3947 2383', fullName: 'Juan Hoyos',
       lastRechargeDate: '2026-05-01', carrier: 'oxxocel',
     });
     expect(result[0].carrier).toBe('oxxocel');

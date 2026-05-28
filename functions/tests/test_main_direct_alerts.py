@@ -1643,7 +1643,7 @@ class TestSimRechargeAlertsMultiCarrier:
     def test_oxxocel_alert_within_10_days(self, monkeypatch):
         self._freeze_time(monkeypatch, 2026, 10, 1)
         db = self._make_db([
-            {'lankAccountId': 10, 'phone': '56 3947 2383', 'fullName': 'Juan Hoyos',
+            {'lankAccountId': 6, 'phone': '56 3947 2383', 'fullName': 'Juan Hoyos',
              'carrier': 'oxxocel', 'nextRechargeDate': '2026-10-07'},
         ])
         result = lank_alerts.generate_sim_recharge_alerts(db)
@@ -1654,11 +1654,42 @@ class TestSimRechargeAlertsMultiCarrier:
     def test_oxxocel_no_alert_outside_10_day_window(self, monkeypatch):
         self._freeze_time(monkeypatch, 2026, 9, 20)
         db = self._make_db([
-            {'lankAccountId': 10, 'phone': '56 3947 2383', 'fullName': 'Juan Hoyos',
+            {'lankAccountId': 6, 'phone': '56 3947 2383', 'fullName': 'Juan Hoyos',
              'carrier': 'oxxocel', 'nextRechargeDate': '2026-10-07'},
         ])
         result = lank_alerts.generate_sim_recharge_alerts(db)
         assert result == 0
+
+    def test_lina_amalia_stale_oxxocel_is_treated_as_telcel(self, monkeypatch):
+        self._freeze_time(monkeypatch, 2026, 9, 29)
+        db = self._make_db([
+            {'lankAccountId': 10, 'phone': '55 1010 1010', 'fullName': 'Lina Amalia',
+             'carrier': 'oxxocel', 'nextRechargeDate': '2026-10-07'},
+        ])
+        result = lank_alerts.generate_sim_recharge_alerts(db)
+        assert result == 0
+
+    def test_juan_hoyos_account_6_uses_oxxocel_even_from_legacy_telcel(self, monkeypatch):
+        self._freeze_time(monkeypatch, 2026, 9, 29)
+        db = self._make_db([
+            {'lankAccountId': 6, 'phone': '56 3947 2383', 'fullName': 'Juan Hoyos',
+             'carrier': 'telcel', 'nextRechargeDate': '2026-10-07'},
+        ])
+        result = lank_alerts.generate_sim_recharge_alerts(db)
+        assert result == 1
+        alert = list(db.collection('alerts').store.values())[0]
+        assert 'OXXO Cel' in alert['title']
+
+    def test_known_att_accounts_use_att_even_from_legacy_telcel(self, monkeypatch):
+        self._freeze_time(monkeypatch, 2026, 7, 10)
+        db = self._make_db([
+            {'lankAccountId': 4, 'phone': '55 4444 4444', 'fullName': 'Juan53',
+             'carrier': 'telcel', 'nextRechargeDate': '2026-07-14'},
+        ])
+        result = lank_alerts.generate_sim_recharge_alerts(db)
+        assert result == 1
+        alert = list(db.collection('alerts').store.values())[0]
+        assert 'AT&T' in alert['title']
 
     def test_sim_without_carrier_defaults_to_telcel(self, monkeypatch):
         self._freeze_time(monkeypatch, 2027, 3, 10)
@@ -1678,7 +1709,7 @@ class TestSimRechargeAlertsMultiCarrier:
              'carrier': 'telcel', 'nextRechargeDate': '2027-03-15'},
             {'lankAccountId': 3, 'phone': '55 4550 3152', 'fullName': 'Israel',
              'carrier': 'att', 'nextRechargeDate': '2026-07-14'},
-            {'lankAccountId': 10, 'phone': '56 3947 2383', 'fullName': 'Juan Hoyos',
+            {'lankAccountId': 6, 'phone': '56 3947 2383', 'fullName': 'Juan Hoyos',
              'carrier': 'oxxocel', 'nextRechargeDate': '2026-10-07'},
         ])
         result = lank_alerts.generate_sim_recharge_alerts(db)
@@ -1689,7 +1720,7 @@ class TestSimRechargeAlertsMultiCarrier:
     def test_sim_without_next_date_is_skipped(self, monkeypatch):
         self._freeze_time(monkeypatch, 2026, 5, 15)
         db = self._make_db([
-            {'lankAccountId': 10, 'phone': '56 3947 2383', 'fullName': 'Juan Hoyos',
+            {'lankAccountId': 6, 'phone': '56 3947 2383', 'fullName': 'Juan Hoyos',
              'carrier': 'oxxocel', 'nextRechargeDate': ''},
         ])
         result = lank_alerts.generate_sim_recharge_alerts(db)
