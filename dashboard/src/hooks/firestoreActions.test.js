@@ -39,12 +39,15 @@ vi.mock('firebase/firestore', () => ({
 }));
 
 import {
+  addGroupUser,
   cancelScheduledManualAlert,
   confirmRecurringExpense,
   deleteVaultEmailAccount,
   createSlotDeletionAlert,
   createScheduledManualAlert,
+  removeGroupUser,
   saveSnowballConfig,
+  updateGroupUser,
   validateSnowballConfig,
 } from './firestoreActions';
 
@@ -442,6 +445,80 @@ describe('validateSnowballConfig', () => {
     expect(payload.connections).not.toHaveProperty('snowball_32_1779036167058');
     expect(payload.connections).toHaveProperty('snowball_14_1778975719076');
     expect(options).toBeUndefined();
+  });
+});
+
+describe('Lank group user writes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetDocs.mockResolvedValue({ docs: [] });
+    mockRunTransaction.mockImplementation(async (_db, handler) => handler(buildTransaction()));
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('edita un usuario leyendo el grupo actual y conserva usuarios ausentes en la vista local', async () => {
+    mockTransactionGet.mockResolvedValue(buildSnapshot({
+      users: [
+        { userAlias: 'Xbren', serviceAccountRef: 'hbo_1' },
+        { userAlias: 'Dann', serviceAccountRef: 'hbo_2' },
+        { userAlias: 'Chema Meco', serviceStatus: 'active' },
+      ],
+    }));
+
+    await updateGroupUser('hbo', '5', 0, { profileName: 'chema' }, [
+      { userAlias: 'Chema Meco', serviceStatus: 'active' },
+    ]);
+
+    expect(mockRunTransaction).toHaveBeenCalledTimes(1);
+    const [, payload] = mockTransactionUpdate.mock.calls.find(([ref]) => ref.path === 'groups/hbo/lank-accounts/5');
+    expect(payload.users).toEqual([
+      { userAlias: 'Xbren', serviceAccountRef: 'hbo_1' },
+      { userAlias: 'Dann', serviceAccountRef: 'hbo_2' },
+      { userAlias: 'Chema Meco', serviceStatus: 'active', profileName: 'chema' },
+    ]);
+    expect(payload.hasUsers).toBe(true);
+  });
+
+  it('elimina solo el usuario objetivo leyendo el grupo actual y conserva los demás usuarios', async () => {
+    mockTransactionGet.mockResolvedValue(buildSnapshot({
+      users: [
+        { userAlias: 'Xbren', serviceAccountRef: 'hbo_1' },
+        { userAlias: 'G10' },
+        { userAlias: 'Dann', serviceAccountRef: 'hbo_2' },
+        { userAlias: 'Chema Meco', serviceAccountRef: 'hbo_2' },
+      ],
+      notes: [],
+    }));
+
+    await removeGroupUser('hbo', '5', 'G10', [{ userAlias: 'G10' }], 'Baja manual desde dashboard');
+
+    const [, payload] = mockTransactionUpdate.mock.calls.find(([ref]) => ref.path === 'groups/hbo/lank-accounts/5');
+    expect(payload.users).toEqual([
+      { userAlias: 'Xbren', serviceAccountRef: 'hbo_1' },
+      { userAlias: 'Dann', serviceAccountRef: 'hbo_2' },
+      { userAlias: 'Chema Meco', serviceAccountRef: 'hbo_2' },
+    ]);
+    expect(payload.hasUsers).toBe(true);
+  });
+
+  it('agrega un usuario leyendo el grupo actual y conserva usuarios que no estaban en la vista local', async () => {
+    mockTransactionGet.mockResolvedValue(buildSnapshot({
+      users: [
+        { userAlias: 'Xbren', serviceAccountRef: 'hbo_1' },
+        { userAlias: 'Dann', serviceAccountRef: 'hbo_2' },
+      ],
+      notes: [],
+    }));
+
+    await addGroupUser('hbo', '5', { userAlias: 'Chema Meco' }, []);
+
+    const [, payload] = mockTransactionUpdate.mock.calls.find(([ref]) => ref.path === 'groups/hbo/lank-accounts/5');
+    expect(payload.users.map(user => user.userAlias)).toEqual(['Xbren', 'Dann', 'Chema Meco']);
+    expect(payload.users[2]).toMatchObject({ userAlias: 'Chema Meco', serviceStatus: 'active' });
+    expect(payload.hasUsers).toBe(true);
   });
 });
 

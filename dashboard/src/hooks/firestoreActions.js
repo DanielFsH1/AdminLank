@@ -20,6 +20,47 @@ function normalize(str) {
   return (str || '').trim().toLowerCase();
 }
 
+function groupUserAlias(user) {
+  if (typeof user === 'string') return user;
+  return user?.userAlias || user?.memberAlias || user?.alias || '';
+}
+
+function groupUserEmail(user) {
+  if (!user || typeof user !== 'object') return '';
+  return user.userEmail || user.memberEmail || user.email || user.invitationEmail || '';
+}
+
+function groupUserMatches(user, identity = {}) {
+  const alias = normalize(identity.userAlias);
+  const email = normalize(identity.userEmail);
+  if (alias && normalize(groupUserAlias(user)) === alias) return true;
+  if (email && normalize(groupUserEmail(user)) === email) return true;
+  return false;
+}
+
+function groupUserIdentity(user) {
+  return {
+    userAlias: groupUserAlias(user),
+    userEmail: groupUserEmail(user),
+  };
+}
+
+function groupUserAliasList(users) {
+  return (users || []).map(user => groupUserAlias(user)).filter(Boolean);
+}
+
+function findGroupUserIndex(users, targetUser, fallbackIndex) {
+  const identity = groupUserIdentity(targetUser);
+  if (identity.userAlias || identity.userEmail) {
+    const byIdentity = users.findIndex(user => groupUserMatches(user, identity));
+    if (byIdentity !== -1) return byIdentity;
+  }
+  if (Number.isInteger(fallbackIndex) && fallbackIndex >= 0 && fallbackIndex < users.length) {
+    return fallbackIndex;
+  }
+  return -1;
+}
+
 function buildLegacyManualEntryIdentifier(entry) {
   if (!entry || entry.entryId) return entry?.entryId || null;
 
@@ -579,16 +620,47 @@ export async function cancelScheduledManualAlert(scheduledAlertId) {
  * @param {object} updatedUser - Objeto usuario actualizado
  * @param {Array} currentUsers - Array completo de usuarios actual
  */
-export async function updateGroupUser(serviceKey, accountId, userIndex, updatedUser, currentUsers) {
+export async function updateGroupUser(serviceKey, accountId, userIndex, updatedUser, currentUsers = []) {
   const ref = doc(db, `groups/${serviceKey}/lank-accounts/${accountId}`);
-  const updatedUsers = [...currentUsers];
   const beforeUser = currentUsers[userIndex];
-  updatedUsers[userIndex] = { ...updatedUsers[userIndex], ...updatedUser };
-  await updateDoc(ref, { users: updatedUsers });
-  const alias = beforeUser?.userAlias || `usuario-${userIndex}`;
+  let liveBeforeUser = beforeUser;
+  let liveAfterUser = null;
+  let liveIndex = userIndex;
+  let beforeAliases = [];
+  let afterAliases = [];
+
+  await runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(ref);
+    if (!snap.exists()) {
+      throw new Error(`No existe el grupo ${serviceKey} cuenta ${accountId}`);
+    }
+    const liveUsers = Array.isArray(snap.data().users) ? snap.data().users : [];
+    liveIndex = findGroupUserIndex(liveUsers, beforeUser || updatedUser, userIndex);
+    if (liveIndex === -1) {
+      throw new Error(`No encontré al usuario ${groupUserAlias(beforeUser) || groupUserAlias(updatedUser) || userIndex} en el grupo actual`);
+    }
+
+    const updatedUsers = [...liveUsers];
+    liveBeforeUser = updatedUsers[liveIndex];
+    liveAfterUser = {
+      ...(typeof liveBeforeUser === 'object' ? liveBeforeUser : { userAlias: liveBeforeUser }),
+      ...updatedUser,
+    };
+    updatedUsers[liveIndex] = liveAfterUser;
+    beforeAliases = groupUserAliasList(liveUsers);
+    afterAliases = groupUserAliasList(updatedUsers);
+    transaction.update(ref, {
+      users: updatedUsers,
+      hasUsers: updatedUsers.length > 0,
+    });
+  });
+
+  const alias = groupUserAlias(beforeUser) || groupUserAlias(liveAfterUser) || `usuario-${userIndex}`;
   logManualChange('update_user', `Usuario editado: ${alias} en ${serviceKey} cuenta ${accountId}`, {
     collection: `groups/${serviceKey}/lank-accounts`, documentId: String(accountId),
-    field: `users[${userIndex}]`, before: beforeUser, after: updatedUsers[userIndex],
+    field: `users[${liveIndex}]`,
+    before: { user: liveBeforeUser, userAliases: beforeAliases },
+    after: { user: liveAfterUser, userAliases: afterAliases },
   });
   // Historial por entidad
   appendEntityHistory(ref, 'userHistory', {
@@ -610,26 +682,44 @@ export async function updateGroupUser(serviceKey, accountId, userIndex, updatedU
  * @param {Array} currentUsers - Array completo de usuarios actual
  * @param {string} [reason] - Razón de la baja
  */
-export async function removeGroupUser(serviceKey, accountId, userAlias, currentUsers, reason = '') {
+export async function removeGroupUser(serviceKey, accountId, userAlias, _currentUsers = [], reason = '') {
   const ref = doc(db, `groups/${serviceKey}/lank-accounts/${accountId}`);
-  const filteredUsers = currentUsers.filter(
-    u => normalize(typeof u === 'string' ? u : u.userAlias) !== normalize(userAlias)
-  );
   const dateStr = new Date().toLocaleDateString('es-MX', { day: '2-digit', month: 'short' });
   const noteText = `${dateStr}: ${userAlias} salió del grupo (manual). ${reason}`.trim();
+  let removedUser = null;
+  let filteredUsers = [];
+  let beforeAliases = [];
+  let afterAliases = [];
 
-  await updateDoc(ref, {
-    users: filteredUsers,
-    hasUsers: filteredUsers.length > 0,
-    // subscriptionActive NO se toca — un grupo puede estar activo sin usuarios
-    notes: arrayUnion(noteText),
+  await runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(ref);
+    if (!snap.exists()) {
+      throw new Error(`No existe el grupo ${serviceKey} cuenta ${accountId}`);
+    }
+    const liveUsers = Array.isArray(snap.data().users) ? snap.data().users : [];
+    const removeIndex = liveUsers.findIndex(u => normalize(groupUserAlias(u)) === normalize(userAlias));
+    if (removeIndex === -1) {
+      throw new Error(`No encontré al usuario ${userAlias} en el grupo actual`);
+    }
+    removedUser = liveUsers[removeIndex];
+    filteredUsers = liveUsers.filter((_, idx) => idx !== removeIndex);
+    beforeAliases = groupUserAliasList(liveUsers);
+    afterAliases = groupUserAliasList(filteredUsers);
+
+    transaction.update(ref, {
+      users: filteredUsers,
+      hasUsers: filteredUsers.length > 0,
+      // subscriptionActive NO se toca — un grupo puede estar activo sin usuarios
+      notes: arrayUnion(noteText),
+    });
   });
+
   logManualChange('remove_user', `Usuario eliminado: ${userAlias} de ${serviceKey} cuenta ${accountId}${reason ? ` — ${reason}` : ''}`, {
     collection: `groups/${serviceKey}/lank-accounts`, documentId: String(accountId),
-    before: { userAlias, usersCount: currentUsers.length }, after: { usersCount: filteredUsers.length },
+    before: { userAlias, usersCount: beforeAliases.length, userAliases: beforeAliases },
+    after: { usersCount: filteredUsers.length, userAliases: afterAliases },
   });
   // Historial por entidad
-  const removedUser = currentUsers.find(u => normalize(typeof u === 'string' ? u : u.userAlias) === normalize(userAlias));
   appendEntityHistory(ref, 'userHistory', {
     action: 'left',
     userAlias,
@@ -1525,25 +1615,43 @@ export async function deleteVaultCard(cardId) {
  * @param {object} newUser - Datos del nuevo usuario { userAlias, ... }
  * @param {Array} currentUsers - Array actual de usuarios
  */
-export async function addGroupUser(serviceKey, accountId, newUser, currentUsers) {
+export async function addGroupUser(serviceKey, accountId, newUser, _currentUsers = []) {
   const ref = doc(db, `groups/${serviceKey}/lank-accounts/${accountId}`);
-  const updatedUsers = [...currentUsers, {
+  const userToAdd = {
     ...newUser,
     serviceStatus: 'active',
     // matchStatus NO se establece aquí — lo escribe el sistema de análisis de correos
     addedAt: nowISO(),
-  }];
+  };
   const dateStr = new Date().toLocaleDateString('es-MX', { day: '2-digit', month: 'short' });
   const noteText = `${dateStr}: ${newUser.userAlias} agregado al grupo (manual).`;
+  let updatedUsers = [];
+  let beforeAliases = [];
+  let afterAliases = [];
 
-  await updateDoc(ref, {
-    users: updatedUsers,
-    hasUsers: true,
-    notes: arrayUnion(noteText),
+  await runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(ref);
+    if (!snap.exists()) {
+      throw new Error(`No existe el grupo ${serviceKey} cuenta ${accountId}`);
+    }
+    const liveUsers = Array.isArray(snap.data().users) ? snap.data().users : [];
+    if (liveUsers.some(user => groupUserMatches(user, groupUserIdentity(userToAdd)))) {
+      throw new Error(`${newUser.userAlias} ya existe en el grupo actual`);
+    }
+    updatedUsers = [...liveUsers, userToAdd];
+    beforeAliases = groupUserAliasList(liveUsers);
+    afterAliases = groupUserAliasList(updatedUsers);
+    transaction.update(ref, {
+      users: updatedUsers,
+      hasUsers: true,
+      notes: arrayUnion(noteText),
+    });
   });
+
   logManualChange('add_user', `Usuario agregado: ${newUser.userAlias} en ${serviceKey} cuenta ${accountId}`, {
     collection: `groups/${serviceKey}/lank-accounts`, documentId: String(accountId),
-    after: { userAlias: newUser.userAlias, serviceAccountRef: newUser.serviceAccountRef || null },
+    before: { userAliases: beforeAliases },
+    after: { userAlias: newUser.userAlias, serviceAccountRef: newUser.serviceAccountRef || null, userAliases: afterAliases },
   });
   // Historial por entidad
   appendEntityHistory(ref, 'userHistory', {
