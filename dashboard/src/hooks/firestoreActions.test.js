@@ -640,13 +640,17 @@ describe('scheduled manual alerts', () => {
 });
 
 describe('vault email accounts', () => {
+  let randomSpy;
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-05-09T12:00:00Z'));
     vi.clearAllMocks();
+    randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
   });
 
   afterEach(() => {
+    randomSpy?.mockRestore();
     vi.useRealTimers();
   });
 
