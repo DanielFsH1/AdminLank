@@ -4817,6 +4817,52 @@ body {
   gap: 6px; font-size: 11px; color: var(--text-muted);
   opacity: 0.6; margin-top: 8px;
 }
+.vault-key-card {
+  max-width: 420px;
+}
+.vault-key-input {
+  width: 100%;
+  min-height: 44px;
+  border-radius: 8px;
+  border: 1px solid var(--border-secondary);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 15px;
+  padding: 0 12px;
+  margin-bottom: 16px;
+}
+.vault-key-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(50,100,200,.18);
+}
+.vault-key-error {
+  margin: -6px 0 14px;
+}
+.vault-key-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.vault-key-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  border: 1px solid var(--accent-primary);
+  border-radius: 8px;
+  background: var(--accent-primary);
+  color: #fff;
+  font-weight: 700;
+  padding: 0 16px;
+  cursor: pointer;
+}
+.vault-key-submit:hover {
+  filter: brightness(1.06);
+}
 
 /* Security buttons */
 .vault-security-btn {

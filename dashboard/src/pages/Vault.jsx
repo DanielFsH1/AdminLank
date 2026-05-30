@@ -3,7 +3,7 @@ import { collection, doc, getDoc, getDocs, setDoc, updateDoc, query, where } fro
 import { db } from '../firebase';
 import { useDocument } from '../hooks/useFirestore';
 import { getServiceMeta, getBankMeta } from '../config/services';
-import { encrypt, decrypt, encryptFields, decryptFields } from '../utils/crypto';
+import { clearVaultKey, configureVaultKey, decrypt, decryptFields, encrypt, encryptFields, hasVaultKey } from '../utils/crypto';
 import { completeAlert, createManualAlert, createRealAccount, createLinkedRealAccount, deleteRealAccount, createVaultCard, deleteVaultCard, DEFAULT_MASTER_CONFIG, addRecurringCharge, removeRecurringCharge, toggleRecurringCharge, updateRecurringCharge, createVaultEmailAccount, updateVaultEmailAccount, deleteVaultEmailAccount, createLankMasterAccount, syncVaultEmailPassword } from '../hooks/firestoreActions';
 import { ConfirmDialog, Toast } from '../components/EditModal';
 import { ModalActions, ModalShell } from '../components/Modal';
@@ -103,6 +103,9 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
  const [settingPin, setSettingPin] = useState(false); // modo configurar PIN por primera vez
  const [pinConfirm, setPinConfirm] = useState('');
  const [changingPin, setChangingPin] = useState(false); // modo cambiar PIN
+ const [vaultKeyInput, setVaultKeyInput] = useState('');
+ const [vaultKeyError, setVaultKeyError] = useState('');
+ const [vaultKeyReady, setVaultKeyReady] = useState(() => hasVaultKey());
  const lastActivityRef = useRef(Date.now());
  const lockTimerRef = useRef(null);
  const vaultTabsRef = useRef(null);
@@ -205,8 +208,11 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
    lockTimerRef.current = setInterval(() => {
      if (Date.now() - lastActivityRef.current > VAULT_LOCK_TIMEOUT) {
        setVaultUnlocked(false);
+       clearVaultKey();
+       setVaultKeyReady(false);
        setRevealedFields(new Set());
        setPinInput('');
+       setVaultKeyInput('');
        showToast('Bóveda bloqueada por inactividad', 'error');
      }
    }, 10000); // chequear cada 10s
@@ -337,10 +343,25 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
  // ─── SEGURIDAD: Bloquear bóveda manualmente ───
  const handleLockVault = useCallback(() => {
    setVaultUnlocked(false);
+   clearVaultKey();
+   setVaultKeyReady(false);
    setRevealedFields(new Set());
    setPinInput('');
+   setVaultKeyInput('');
    showToast('Bóveda bloqueada');
  }, [showToast]);
+
+ const handleVaultKeySubmit = useCallback((e) => {
+   e.preventDefault();
+   if (!configureVaultKey(vaultKeyInput)) {
+     setVaultKeyError('Ingresa la clave maestra de la Bóveda');
+     return;
+   }
+   setVaultKeyInput('');
+   setVaultKeyError('');
+   setVaultKeyReady(true);
+   lastActivityRef.current = Date.now();
+ }, [vaultKeyInput]);
 
  // ─── SEGURIDAD: Ocultar todos los campos revelados ───
  const handleHideAll = useCallback(() => {
@@ -1330,6 +1351,43 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
            <span>Protegido con PIN de 4 dígitos</span>
          </div>
        </div>
+     </div>
+   );
+ }
+
+ if (!vaultKeyReady) {
+   return (
+     <div className="vault-pin-gate">
+       <form className="vault-pin-card vault-key-card" onSubmit={handleVaultKeySubmit}>
+         <div className="vault-pin-icon">
+           <LockKeyIcon size={48} />
+         </div>
+         <h2 className="vault-pin-title">Clave maestra de Bóveda</h2>
+         <p className="vault-pin-subtitle">
+           Se usa solo en esta sesión para descifrar credenciales. No se guarda en el navegador.
+         </p>
+         <input
+           className="vault-key-input"
+           type="password"
+           value={vaultKeyInput}
+           onChange={e => { setVaultKeyInput(e.target.value); setVaultKeyError(''); }}
+           autoComplete="off"
+           autoFocus
+         />
+         {vaultKeyError && <p className="vault-pin-error vault-key-error">{vaultKeyError}</p>}
+         <div className="vault-key-actions">
+           <button className="vault-key-submit" type="submit">
+             <LockKeyIcon size={16} /> Desbloquear
+           </button>
+           <button className="vault-pin-cancel-btn" type="button" onClick={handleLockVault}>
+             Cancelar
+           </button>
+         </div>
+         <div className="vault-pin-footer">
+           <LockKeyIcon size={14} />
+           <span>Clave fuera del bundle público</span>
+         </div>
+       </form>
      </div>
    );
  }

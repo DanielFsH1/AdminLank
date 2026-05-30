@@ -4,18 +4,35 @@
  */
 import CryptoJS from 'crypto-js';
 
-const VAULT_KEY_SEED = import.meta.env.VITE_VAULT_KEY_SEED || '';
 const VAULT_SALT = import.meta.env.VITE_VAULT_SALT || 'AdminLank_Vault';
-const DERIVED_KEY = VAULT_KEY_SEED ? CryptoJS.PBKDF2(VAULT_KEY_SEED, VAULT_SALT, {
-  keySize: 256 / 32,
-  iterations: 1000,
-}).toString() : '';
+let derivedVaultKey = '';
+
+export function configureVaultKey(seed) {
+  const cleanSeed = String(seed || '').trim();
+  if (!cleanSeed) {
+    derivedVaultKey = '';
+    return false;
+  }
+  derivedVaultKey = CryptoJS.PBKDF2(cleanSeed, VAULT_SALT, {
+    keySize: 256 / 32,
+    iterations: 1000,
+  }).toString();
+  return true;
+}
+
+export function clearVaultKey() {
+  derivedVaultKey = '';
+}
+
+export function hasVaultKey() {
+  return Boolean(derivedVaultKey);
+}
 
 function requireVaultKey() {
-  if (!DERIVED_KEY) {
-    throw new Error('VITE_VAULT_KEY_SEED no esta configurada');
+  if (!derivedVaultKey) {
+    throw new Error('La clave de Boveda no esta desbloqueada en esta sesion');
   }
-  return DERIVED_KEY;
+  return derivedVaultKey;
 }
 
 /**
