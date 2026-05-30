@@ -1,9 +1,48 @@
 // Configuración centralizada de servicios, bancos y utilidades de avatar
 // SERVICES se mantiene como seed/fallback mientras carga la configuración dinámica de Firestore
 
+const LOCAL_ASSET_LOGO_RE = /^\/assets\//;
+
+function getInitials(label) {
+  const words = String(label || 'AL')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9 ]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  const chars = words.length > 1
+    ? `${words[0][0]}${words[1][0]}`
+    : (words[0] || 'AL').slice(0, 2);
+  return chars.toUpperCase();
+}
+
+export function buildPlaceholderLogo(label = 'AL', color = '#64748b') {
+  const safeColor = /^#[0-9a-fA-F]{3,8}$/.test(color) ? color : '#64748b';
+  const initials = getInitials(label);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96"><rect width="96" height="96" rx="18" fill="${safeColor}"/><text x="48" y="58" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="28" font-weight="800" fill="#fff">${initials}</text></svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+function resolvePublicLogo(logo, label, color) {
+  const value = String(logo || '').trim();
+  if (value && !LOCAL_ASSET_LOGO_RE.test(value)) return value;
+  return buildPlaceholderLogo(label, color);
+}
+
+function withResolvedLogo(meta = {}, fallbackName = 'AL') {
+  const color = meta.color || '#64748b';
+  const name = meta.name || fallbackName;
+  return {
+    ...meta,
+    color,
+    logo: resolvePublicLogo(meta.logo || meta.logoUrl, name, color),
+  };
+}
+
 export const SERVICES = {
   chatgpt: {
-    name: 'ChatGPT Plus', color: '#10a37f', logo: '/assets/ChatGPT.png', maxSlots: 4,
+    name: 'ChatGPT Plus', color: '#10a37f', logo: buildPlaceholderLogo('ChatGPT Plus', '#10a37f'), maxSlots: 4,
     usesPool: true, accessType: 'credentials', accessTypeLabel: 'Perfil / proyecto', displayOrder: 1,
     nameAliases: ['ChatGPT Plus', 'ChatGPT'],
     slotFields: [
@@ -17,7 +56,7 @@ export const SERVICES = {
     ],
   },
   gemini: {
-    name: 'Google AI Pro', color: '#8e44ec', logo: '/assets/Gemini.png', maxSlots: 5,
+    name: 'Google AI Pro', color: '#8e44ec', logo: buildPlaceholderLogo('Google AI Pro', '#8e44ec'), maxSlots: 5,
     usesPool: true, accessType: 'email_invitation', displayOrder: 2,
     nameAliases: ['Gemini AI', 'Google/Gemini AI', 'Google AI Pro'],
     slotFields: [
@@ -31,7 +70,7 @@ export const SERVICES = {
     ],
   },
   youtube: {
-    name: 'YouTube Premium', color: '#ff0000', logo: '/assets/YouTube.jpg', maxSlots: 5,
+    name: 'YouTube Premium', color: '#ff0000', logo: buildPlaceholderLogo('YouTube Premium', '#ff0000'), maxSlots: 5,
     usesPool: true, accessType: 'email_invitation', displayOrder: 3,
     nameAliases: ['YouTube Premium', 'YouTube'],
     slotFields: [
@@ -45,7 +84,7 @@ export const SERVICES = {
     ],
   },
   hbo: {
-    name: 'HBO Max Platino', color: '#b535f6', logo: '/assets/HBO Max.jpg', maxSlots: 3,
+    name: 'HBO Max Platino', color: '#b535f6', logo: buildPlaceholderLogo('HBO Max Platino', '#b535f6'), maxSlots: 3,
     usesPool: true, accessType: 'profile_project', displayOrder: 4,
     nameAliases: ['HBO Max Platino'],
     slotFields: [
@@ -59,7 +98,7 @@ export const SERVICES = {
     ],
   },
   f1tv: {
-    name: 'F1 TV Premium', color: '#e10600', logo: '/assets/F1 TV.png', maxSlots: 5,
+    name: 'F1 TV Premium', color: '#e10600', logo: buildPlaceholderLogo('F1 TV Premium', '#e10600'), maxSlots: 5,
     usesPool: true, accessType: 'credentials', displayOrder: 5,
     nameAliases: ['F1 TV Premium', 'F1 TV'],
     slotFields: [
@@ -71,7 +110,7 @@ export const SERVICES = {
     ],
   },
   microsoft365: {
-    name: 'Microsoft 365', color: '#0078d4', logo: '/assets/Microsoft.png', maxSlots: 5,
+    name: 'Microsoft 365', color: '#0078d4', logo: buildPlaceholderLogo('Microsoft 365', '#0078d4'), maxSlots: 5,
     usesPool: false, accessType: 'email_invitation', displayOrder: 6,
     isRenewalBased: true,
     nameAliases: ['Microsoft 365', 'Office365'],
@@ -180,18 +219,18 @@ export function buildServiceConfig(input = {}, existing = {}) {
 }
 
 export const BANKS = {
-  'DiDi':           { color: '#ff6600', logo: '/assets/DiDi.png' },
-  'OpenBank':       { color: '#00a877', logo: '/assets/Openbank.webp' },
-  'Plata Débito':   { color: '#7c3aed', logo: '/assets/Plata.png' },
-  'Plata Crédito':  { color: '#7c3aed', logo: '/assets/Plata.png' },
-  'Klar':           { color: '#00c389', logo: '/assets/Klar.jpg' },
-  'Klar Crédito':   { color: '#00c389', logo: '/assets/Klar.jpg' },
-  'Nu':             { color: '#820ad1', logo: '/assets/NU.png' },
-  'Nu Crédito':     { color: '#820ad1', logo: '/assets/NU.png' },
-  'BBVA':           { color: '#004481', logo: '/assets/BBVA.png' },
-  'Mifel':          { color: '#003b71', logo: '/assets/Mifel.png' },
-  'Mercado Pago':   { color: '#009ee3', logo: '/assets/Mercado Pago.jpg' },
-  'AstroPay':       { color: '#0066ff', logo: '/assets/AstroPay.png' },
+  'DiDi':           { color: '#ff6600', logo: buildPlaceholderLogo('DiDi', '#ff6600') },
+  'OpenBank':       { color: '#00a877', logo: buildPlaceholderLogo('OpenBank', '#00a877') },
+  'Plata Débito':   { color: '#7c3aed', logo: buildPlaceholderLogo('Plata Débito', '#7c3aed') },
+  'Plata Crédito':  { color: '#7c3aed', logo: buildPlaceholderLogo('Plata Crédito', '#7c3aed') },
+  'Klar':           { color: '#00c389', logo: buildPlaceholderLogo('Klar', '#00c389') },
+  'Klar Crédito':   { color: '#00c389', logo: buildPlaceholderLogo('Klar Crédito', '#00c389') },
+  'Nu':             { color: '#820ad1', logo: buildPlaceholderLogo('Nu', '#820ad1') },
+  'Nu Crédito':     { color: '#820ad1', logo: buildPlaceholderLogo('Nu Crédito', '#820ad1') },
+  'BBVA':           { color: '#004481', logo: buildPlaceholderLogo('BBVA', '#004481') },
+  'Mifel':          { color: '#003b71', logo: buildPlaceholderLogo('Mifel', '#003b71') },
+  'Mercado Pago':   { color: '#009ee3', logo: buildPlaceholderLogo('Mercado Pago', '#009ee3') },
+  'AstroPay':       { color: '#0066ff', logo: buildPlaceholderLogo('AstroPay', '#0066ff') },
 };
 
 // ─── Servicios dinámicos (cargados desde Firestore en runtime) ──────────────
@@ -237,7 +276,7 @@ export function normalizeServicesConfigDocument(data = {}) {
 
 // Ruta a la imagen de perfil de una cuenta Lank
 export function getProfileImage(accountId) {
-  return `/assets/profiles/account_${accountId}.png`;
+  return buildPlaceholderLogo(accountId ? `Cuenta ${accountId}` : 'Cuenta Lank', '#64748b');
 }
 
 // Formatear moneda MXN
@@ -249,9 +288,9 @@ export function formatMXN(n) {
 // Obtener metadata de servicio con fallback
 export function getServiceMeta(id) {
   if (_dynamicServices && _dynamicServices[id]) {
-    return _dynamicServices[id];
+    return withResolvedLogo(_dynamicServices[id], id);
   }
-  return SERVICES[id] || { name: id, color: '#666', logo: '', maxSlots: 0 };
+  return withResolvedLogo(SERVICES[id] || { name: id, color: '#666', maxSlots: 0 }, id);
 }
 
 let _customBankAccounts = {};
@@ -284,13 +323,13 @@ function findBankMetaByLooseName(bankName, source) {
 
 // Obtener metadata de banco con fallback
 export function getBankMeta(bankName) {
-  if (BANKS[bankName]) return BANKS[bankName];
-  if (_customBankAccounts[bankName]) return _customBankAccounts[bankName];
+  if (BANKS[bankName]) return withResolvedLogo(BANKS[bankName], bankName);
+  if (_customBankAccounts[bankName]) return withResolvedLogo(_customBankAccounts[bankName], bankName);
   const customMeta = findBankMetaByLooseName(bankName, _customBankAccounts);
-  if (customMeta) return customMeta;
+  if (customMeta) return withResolvedLogo(customMeta, bankName);
   const defaultMeta = findBankMetaByLooseName(bankName, BANKS);
-  if (defaultMeta) return defaultMeta;
-  return { color: '#64748b', logo: '' };
+  if (defaultMeta) return withResolvedLogo(defaultMeta, bankName);
+  return withResolvedLogo({ color: '#64748b' }, bankName || 'Banco');
 }
 
 /**

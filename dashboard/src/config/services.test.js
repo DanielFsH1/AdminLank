@@ -60,7 +60,7 @@ describe('dynamic service helpers', () => {
   });
 
   it('resuelve metadatos de Plata aunque el banco venga como Banco Plata', () => {
-    expect(getBankMeta('Plata').logo).toBe('/assets/Plata.png');
-    expect(getBankMeta('Banco Plata').logo).toBe('/assets/Plata.png');
+    expect(getBankMeta('Plata').logo).toMatch(/^data:image\/svg\+xml,/);
+    expect(getBankMeta('Banco Plata').logo).toMatch(/^data:image\/svg\+xml,/);
   });
 });

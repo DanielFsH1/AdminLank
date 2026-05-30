@@ -4,6 +4,7 @@ import { db } from '../firebase';
 import { useAdminbotState } from '../hooks/adminbotState';
 import { authenticatedFetch, ensureAdminFunctionResponse } from '../utils/authenticatedFetch';
 import { buildCloudFunctionUrl } from '../config/runtime';
+import { getProfileImage } from '../config/services';
 import { AnalyzeIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClipboardIcon, ClockIcon, CloudSunIcon, DoorIcon, EmailIcon, EmptyMailIcon, HourglassIcon, InboxIcon, LightningIcon, MoneyIcon, MoonIcon, PinIcon, RefreshIcon, SatelliteIcon, SearchIcon, SleepIcon, StopwatchIcon, TargetIcon, UsersIcon, WarningIcon, WrenchIcon, XCircleIcon } from '../components/Icons';
 import LoadingState from '../components/LoadingState';
 import { ModalActions, ModalShell } from '../components/Modal';
@@ -56,7 +57,7 @@ function timeSince(dateStr) {
 }
 
 function getProfileImg(accountId) {
- return `/assets/profiles/account_${accountId}.png`;
+ return getProfileImage(accountId);
 }
 
 export default function Analyze({ navData }) {

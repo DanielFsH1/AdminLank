@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useCollection } from '../hooks/useFirestore';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
-import { getServiceMeta, getServiceKeyByName, getPoolServiceKeys, getAllServiceKeys } from '../config/services';
+import { getProfileImage, getServiceMeta, getServiceKeyByName, getPoolServiceKeys, getAllServiceKeys } from '../config/services';
 import {
  completeAlert,
  discardAlert,
@@ -79,7 +79,7 @@ function buildRichDescription(alert) {
 }
 
 function getProfileImg(accountId) {
- return `/assets/profiles/account_${accountId}.png`;
+ return getProfileImage(accountId);
 }
 
 function formatScheduledDate(value) {

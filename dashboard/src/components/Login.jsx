@@ -32,8 +32,8 @@ export default function Login() {
     <div className="login-container">
       <div className="login-card">
         <div className="login-logo">
-          <img src="/assets/logo-icon.png" alt="AdminLank" className="login-logo-img" />
-          <img src="/assets/logo-text.png" alt="AdminLank" className="login-logo-text" />
+          <div className="login-logo-img" aria-hidden="true">AL</div>
+          <h1>AdminLank</h1>
           <p>Panel de gestión de suscripciones</p>
         </div>
 

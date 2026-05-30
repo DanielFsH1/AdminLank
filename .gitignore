@@ -20,6 +20,9 @@ dist/
 mcp.json
 .claude/
 .agents/
+AGENTS.md
+CLAUDE.md
+HERMES.md
 firebase-auth-export*.json
 **/*service-account*.json
 **/*serviceAccount*.json
@@ -45,6 +48,13 @@ dumps/
 *.bak
 *.csv
 *.jsonl
+
+# Local/private visual assets. Public GitHub keeps generated placeholders only.
+dashboard/assets/
+dashboard/public/assets/
+dashboard/src/assets/
+dashboard/public/*.png
+dashboard/public/*.ico
 
 # IDE
 .vscode/

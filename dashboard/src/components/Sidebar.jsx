@@ -102,9 +102,9 @@ export default function Sidebar({ activeTab, onTabChange, mobileOpen, onClose, c
       <aside className={`sidebar ${mobileOpen ? 'open' : ''} ${collapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-header">
           <div className="sidebar-brand">
-            <img src="/assets/logo-icon.png" alt="AdminLank" className="sidebar-brand-logo" />
+            <div className="sidebar-brand-logo" aria-hidden="true">AL</div>
             <div className="sidebar-brand-copy">
-              <img src="/assets/logo-text.png" alt="AdminLank" className="sidebar-brand-text" />
+              <h2>AdminLank</h2>
               <span>v2.1 Firebase</span>
             </div>
           </div>

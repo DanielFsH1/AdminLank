@@ -1289,7 +1289,7 @@ export default function Tools() {
                 <div className="tools-svc-field">
                   <label>Logo</label>
                   <div className="tools-svc-logo-row">
-                    <input className="edit-modal-input" value={serviceForm.logo} onChange={e => updateServiceForm('logo', e.target.value)} placeholder="https://... o /assets/..." />
+                    <input className="edit-modal-input" value={serviceForm.logo} onChange={e => updateServiceForm('logo', e.target.value)} placeholder="https://..." />
                     <input
                       ref={serviceLogoInputRef}
                       type="file"

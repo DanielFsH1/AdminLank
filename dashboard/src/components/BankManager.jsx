@@ -542,7 +542,7 @@ export default function BankManager({ vaultCards = {} }) {
               </div>
               <div className="vault-form-group">
                 <label>URL del logo</label>
-                <input type="text" value={bankValues.logoUrl} onChange={e => setBankValues(p => ({ ...p, logoUrl: e.target.value }))} placeholder="https://... o /assets/..." />
+                <input type="text" value={bankValues.logoUrl} onChange={e => setBankValues(p => ({ ...p, logoUrl: e.target.value }))} placeholder="https://..." />
                 {bankValues.logoUrl && <img src={bankValues.logoUrl} alt="" style={{ width: '40px', height: '40px', borderRadius: '6px', objectFit: 'cover', marginTop: '4px' }} onError={e => { e.target.style.display = 'none'; }} />}
               </div>
               {bankModal === 'create' && (

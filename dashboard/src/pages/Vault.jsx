@@ -2031,7 +2031,7 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
             <div className="vault-service-group">
               <div className="vault-service-header expanded" style={{ '--svc-color': '#4285f4', cursor: 'default' }}>
                 <div className="vault-service-header-left">
-                  <img src="/assets/Gmail.png" alt="Gmail" className="vault-service-logo" onError={e => { e.target.style.display = 'none'; }} />
+                  <div className="vault-service-logo" aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: '#64748b', color: '#fff', fontSize: '11px', fontWeight: 800 }}>GM</div>
                   <div>
                     <div className="vault-service-name">App Passwords de Gmail (IMAP)</div>
                     <div className="vault-service-count">{imapCredentials.length} cuentas configuradas — Usadas para analizar correos</div>
