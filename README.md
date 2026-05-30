@@ -39,3 +39,14 @@ Do not commit:
 - local MCP, agent, logs, cache, or backup files
 
 If a local-only file is required for operations, keep it ignored or outside the repository.
+
+## Secret Scanning
+
+Install pre-commit hooks before committing:
+
+```bash
+pipx install pre-commit
+pre-commit install
+```
+
+The hooks run `gitleaks` and `detect-secrets`. If a real secret is found, remove it from the change and rotate the exposed credential before sharing the branch.
