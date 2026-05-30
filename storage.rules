@@ -13,13 +13,13 @@ service firebase.storage {
     }
 
     match /bank-logos/{fileName} {
-      allow read: if true;
+      allow read: if isAdmin();
       allow write: if isAdmin() && isLogoImage();
       allow delete: if isAdmin();
     }
 
     match /service-logos/{fileName} {
-      allow read: if true;
+      allow read: if isAdmin();
       allow write: if isAdmin() && isLogoImage();
       allow delete: if isAdmin();
     }
