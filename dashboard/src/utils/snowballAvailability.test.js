@@ -6,10 +6,10 @@ import {
 } from './snowballAvailability';
 
 const accounts = [
-  { id: '1', canonicalAlias: 'Daniel' },
-  { id: '2', canonicalAlias: 'Silva' },
-  { id: '3', canonicalAlias: 'Domingo' },
-  { id: '4', canonicalAlias: 'Santiago' },
+  { id: '1', canonicalAlias: 'Cuenta Demo 1' },
+  { id: '2', canonicalAlias: 'Cuenta Demo 2' },
+  { id: '3', canonicalAlias: 'Cuenta Demo 3' },
+  { id: '4', canonicalAlias: 'Cuenta Demo 4' },
 ];
 
 const config = {

@@ -114,7 +114,7 @@ def test_cmd_alertas_lists_only_pending_firestore_alerts():
                     "priority": "high",
                     "service": "ChatGPT Plus",
                     "accountId": 12,
-                    "userAlias": "Mario",
+                    "userAlias": "User A",
                 },
             ),
             FakeCollectionDoc(
@@ -126,7 +126,7 @@ def test_cmd_alertas_lists_only_pending_firestore_alerts():
                     "priority": "low",
                     "service": "ChatGPT Plus",
                     "accountId": 13,
-                    "userAlias": "Luigi",
+                    "userAlias": "User B",
                 },
             ),
         ],
@@ -136,5 +136,5 @@ def test_cmd_alertas_lists_only_pending_firestore_alerts():
 
     assert "1 alerta(s) pendiente(s)" in response
     assert "Eliminar perfil" in response
-    assert "Peach" not in response
+    assert "User D" not in response
 

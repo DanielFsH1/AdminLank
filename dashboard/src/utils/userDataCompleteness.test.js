@@ -19,17 +19,17 @@ const youtubeUserFields = [
 describe('user data completeness', () => {
   it('marks a group user as pending when phone is missing even if phone is not required in service config', () => {
     const missing = getMissingUserDataFields({
-      user: { userAlias: 'Chaco65', profileName: 'Chaco' },
+      user: { userAlias: 'User D', profileName: 'Profile A' },
       userFields: hboUserFields,
     });
 
     expect(missing).toEqual(['Teléfono']);
-    expect(hasMissingUserData({ user: { userAlias: 'Chaco65' }, userFields: hboUserFields })).toBe(true);
+    expect(hasMissingUserData({ user: { userAlias: 'User D' }, userFields: hboUserFields })).toBe(true);
   });
 
   it('does not duplicate equivalent phone fields', () => {
     const missing = getMissingUserDataFields({
-      user: { userAlias: 'Moni130', memberPhone: '5512345678' },
+      user: { userAlias: 'User A130', memberPhone: '5500000000' },
       userFields: hboUserFields,
     });
 
@@ -38,14 +38,14 @@ describe('user data completeness', () => {
 
   it('uses linked real-account slot data as fallback for service-specific profile or email fields', () => {
     const missingHbo = getMissingUserDataFields({
-      user: { userAlias: 'Chaco65', phone: '5512345678' },
+      user: { userAlias: 'User D', phone: '5500000000' },
       userFields: hboUserFields,
-      linkedSlot: { profileName: 'Chaco' },
+      linkedSlot: { profileName: 'Profile A' },
     });
     const missingYoutube = getMissingUserDataFields({
-      user: { userAlias: 'Kytzia1', phone: '5512345678' },
+      user: { userAlias: 'User A', phone: '5500000000' },
       userFields: youtubeUserFields,
-      linkedSlot: { memberEmail: 'kytzia@example.com' },
+      linkedSlot: { memberEmail: 'member@example.com' },
     });
 
     expect(missingHbo).toEqual([]);

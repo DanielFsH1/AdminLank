@@ -11,10 +11,10 @@ describe('subscription slot assignment candidates', () => {
       {
         id: 'silva-herrera',
         accountId: 2,
-        accountAlias: 'Silva Herrera',
+        accountAlias: 'Cuenta Demo 1',
         groupStatus: 'active',
         users: [
-          { userAlias: 'Kytzia1', serviceAccountRef: 'hbo_1' },
+          { userAlias: 'User A', serviceAccountRef: 'hbo_1' },
           { userAlias: 'Libre', userEmail: 'libre@example.com' },
           { userAlias: 'EnSlotPeroSinRef' },
           'TextoLibre',
@@ -42,11 +42,11 @@ describe('subscription slot assignment candidates', () => {
       {
         id: 'juan-felipe',
         accountId: 5,
-        accountAlias: 'Juan Felipe',
+        accountAlias: 'Cuenta Demo 5',
         groupStatus: 'active',
         users: [
-          { userAlias: 'Ana', serviceAccountRef: 'hbo_1' },
-          { userAlias: 'Beto' },
+          { userAlias: 'User A', serviceAccountRef: 'hbo_1' },
+          { userAlias: 'User B' },
         ],
       },
       {
@@ -57,14 +57,14 @@ describe('subscription slot assignment candidates', () => {
       },
     ];
     const realAccounts = [
-      { id: 'hbo_2', slots: [{ status: 'active', memberAlias: 'Beto' }] },
+      { id: 'hbo_2', slots: [{ status: 'active', memberAlias: 'User B' }] },
     ];
 
     expect(buildAssignableLankAccountsForSlot({ groups, realAccounts })).toEqual([]);
   });
 
   it('treats serviceAccountRef as an assignment even before checking slots', () => {
-    expect(isGroupUserAssignedToRealAccount({ userAlias: 'Moni', serviceAccountRef: 'chatgpt_2' })).toBe(true);
-    expect(isGroupUserAssignedToRealAccount({ userAlias: 'Moni' })).toBe(false);
+    expect(isGroupUserAssignedToRealAccount({ userAlias: 'User A', serviceAccountRef: 'chatgpt_2' })).toBe(true);
+    expect(isGroupUserAssignedToRealAccount({ userAlias: 'User A' })).toBe(false);
   });
 });

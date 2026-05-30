@@ -270,7 +270,7 @@ function getUrgencyLabel(daysLeft) {
 
 /**
  * Corrige fechas legacy: suma 1 mes a nextRechargeDate y lastRechargeDate.
- * Aplica a todos los SIMs excepto #1 (Daniel Silva) que ya fue corregido manualmente.
+ * Aplica a todos los SIMs excepto #1, que ya fue corregido manualmente.
  */
 function fixLegacyDate(dateStr) {
   if (!dateStr) return dateStr;

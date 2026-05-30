@@ -6,14 +6,14 @@ import {
 } from './financeWithdrawalDestination';
 
 const accounts = [
-  { id: '14', canonicalAlias: 'Fática Cáceres' },
-  { id: '32', canonicalAlias: 'Ezequiel Chico' },
+  { id: '14', canonicalAlias: 'Cuenta Lank 14' },
+  { id: '32', canonicalAlias: 'Cuenta Lank 32' },
 ];
 
 const snowballConfig = {
   wallets: {
-    14: { accountId: '14', accountAlias: 'Fática Cáceres', walletClabe: '646180141414141414', active: true },
-    32: { accountId: '32', accountAlias: 'Ezequiel Chico', walletClabe: '646180323232323232', active: true },
+    14: { accountId: '14', accountAlias: 'Cuenta Lank 14', walletClabe: '646180141414141414', active: true },
+    32: { accountId: '32', accountAlias: 'Cuenta Lank 32', walletClabe: '646180323232323232', active: true },
   },
   connections: {
     snowball_32_14: {
@@ -40,7 +40,7 @@ describe('resolveWithdrawalDestinationLabel', () => {
       snowballConfig,
     });
 
-    expect(label).toBe('Retiro a cuenta #14 Fática Cáceres');
+    expect(label).toBe('Retiro a cuenta #14 Cuenta Lank 14');
   });
 
   it('infers the Snowball destination from the withdrawal CLABE even when AdminBot did not store destinationAccountId', () => {
@@ -53,7 +53,7 @@ describe('resolveWithdrawalDestinationLabel', () => {
       snowballConfig,
     });
 
-    expect(label).toBe('Retiro a cuenta #14 Fática Cáceres');
+    expect(label).toBe('Retiro a cuenta #14 Cuenta Lank 14');
   });
 
   it('uses an active Snowball wallet CLABE as the destination even without a matching connection', () => {
@@ -69,7 +69,7 @@ describe('resolveWithdrawalDestinationLabel', () => {
       },
     });
 
-    expect(label).toBe('Retiro a cuenta #14 Fática Cáceres');
+    expect(label).toBe('Retiro a cuenta #14 Cuenta Lank 14');
   });
 
   it('keeps registered external bank labels when the CLABE is not a Snowball wallet', () => {
@@ -101,6 +101,6 @@ describe('resolveWithdrawalDestinationLabel', () => {
     expect(isOperationalExternalBankLabel('BBVA')).toBe(true);
     expect(isOperationalExternalBankLabel('STP')).toBe(false);
     expect(isOperationalExternalBankLabel(UNCLASSIFIED_DESTINATION_LABEL)).toBe(false);
-    expect(isOperationalExternalBankLabel('Retiro a cuenta #14 Fática Cáceres')).toBe(false);
+    expect(isOperationalExternalBankLabel('Retiro a cuenta #14 Cuenta Lank 14')).toBe(false);
   });
 });

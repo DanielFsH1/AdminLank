@@ -462,22 +462,22 @@ describe('Lank group user writes', () => {
   it('edita un usuario leyendo el grupo actual y conserva usuarios ausentes en la vista local', async () => {
     mockTransactionGet.mockResolvedValue(buildSnapshot({
       users: [
-        { userAlias: 'Xbren', serviceAccountRef: 'hbo_1' },
-        { userAlias: 'Dann', serviceAccountRef: 'hbo_2' },
-        { userAlias: 'Chema Meco', serviceStatus: 'active' },
+        { userAlias: 'User A', serviceAccountRef: 'hbo_1' },
+        { userAlias: 'User B', serviceAccountRef: 'hbo_2' },
+        { userAlias: 'User C', serviceStatus: 'active' },
       ],
     }));
 
-    await updateGroupUser('hbo', '5', 0, { profileName: 'chema' }, [
-      { userAlias: 'Chema Meco', serviceStatus: 'active' },
+    await updateGroupUser('hbo', '5', 0, { profileName: 'user-c' }, [
+      { userAlias: 'User C', serviceStatus: 'active' },
     ]);
 
     expect(mockRunTransaction).toHaveBeenCalledTimes(1);
     const [, payload] = mockTransactionUpdate.mock.calls.find(([ref]) => ref.path === 'groups/hbo/lank-accounts/5');
     expect(payload.users).toEqual([
-      { userAlias: 'Xbren', serviceAccountRef: 'hbo_1' },
-      { userAlias: 'Dann', serviceAccountRef: 'hbo_2' },
-      { userAlias: 'Chema Meco', serviceStatus: 'active', profileName: 'chema' },
+      { userAlias: 'User A', serviceAccountRef: 'hbo_1' },
+      { userAlias: 'User B', serviceAccountRef: 'hbo_2' },
+      { userAlias: 'User C', serviceStatus: 'active', profileName: 'user-c' },
     ]);
     expect(payload.hasUsers).toBe(true);
   });
@@ -485,10 +485,10 @@ describe('Lank group user writes', () => {
   it('elimina solo el usuario objetivo leyendo el grupo actual y conserva los demás usuarios', async () => {
     mockTransactionGet.mockResolvedValue(buildSnapshot({
       users: [
-        { userAlias: 'Xbren', serviceAccountRef: 'hbo_1' },
+        { userAlias: 'User A', serviceAccountRef: 'hbo_1' },
         { userAlias: 'G10' },
-        { userAlias: 'Dann', serviceAccountRef: 'hbo_2' },
-        { userAlias: 'Chema Meco', serviceAccountRef: 'hbo_2' },
+        { userAlias: 'User B', serviceAccountRef: 'hbo_2' },
+        { userAlias: 'User C', serviceAccountRef: 'hbo_2' },
       ],
       notes: [],
     }));
@@ -497,9 +497,9 @@ describe('Lank group user writes', () => {
 
     const [, payload] = mockTransactionUpdate.mock.calls.find(([ref]) => ref.path === 'groups/hbo/lank-accounts/5');
     expect(payload.users).toEqual([
-      { userAlias: 'Xbren', serviceAccountRef: 'hbo_1' },
-      { userAlias: 'Dann', serviceAccountRef: 'hbo_2' },
-      { userAlias: 'Chema Meco', serviceAccountRef: 'hbo_2' },
+      { userAlias: 'User A', serviceAccountRef: 'hbo_1' },
+      { userAlias: 'User B', serviceAccountRef: 'hbo_2' },
+      { userAlias: 'User C', serviceAccountRef: 'hbo_2' },
     ]);
     expect(payload.hasUsers).toBe(true);
   });
@@ -507,17 +507,17 @@ describe('Lank group user writes', () => {
   it('agrega un usuario leyendo el grupo actual y conserva usuarios que no estaban en la vista local', async () => {
     mockTransactionGet.mockResolvedValue(buildSnapshot({
       users: [
-        { userAlias: 'Xbren', serviceAccountRef: 'hbo_1' },
-        { userAlias: 'Dann', serviceAccountRef: 'hbo_2' },
+        { userAlias: 'User A', serviceAccountRef: 'hbo_1' },
+        { userAlias: 'User B', serviceAccountRef: 'hbo_2' },
       ],
       notes: [],
     }));
 
-    await addGroupUser('hbo', '5', { userAlias: 'Chema Meco' }, []);
+    await addGroupUser('hbo', '5', { userAlias: 'User C' }, []);
 
     const [, payload] = mockTransactionUpdate.mock.calls.find(([ref]) => ref.path === 'groups/hbo/lank-accounts/5');
-    expect(payload.users.map(user => user.userAlias)).toEqual(['Xbren', 'Dann', 'Chema Meco']);
-    expect(payload.users[2]).toMatchObject({ userAlias: 'Chema Meco', serviceStatus: 'active' });
+    expect(payload.users.map(user => user.userAlias)).toEqual(['User A', 'User B', 'User C']);
+    expect(payload.users[2]).toMatchObject({ userAlias: 'User C', serviceStatus: 'active' });
     expect(payload.hasUsers).toBe(true);
   });
 });
@@ -688,8 +688,8 @@ describe('slot deletion alerts', () => {
     const alertId = await createSlotDeletionAlert({
       service: 'ChatGPT Plus',
       accountId: '28',
-      accountAlias: 'Daniel',
-      userAlias: 'Alan',
+      accountAlias: 'Cuenta Demo 1',
+      userAlias: 'User D',
       serviceAccountRef: 'chatgpt_2',
       realAccountEmail: 'pool@example.com',
       slotNumber: 1,
@@ -755,7 +755,7 @@ describe('markSimRechargeComplete - multi-carrier', () => {
 
   it('usa ciclo AT&T (85 días) cuando el SIM es att', async () => {
     const sims = [
-      { lankAccountId: 3, phone: '55 4550 3152', fullName: 'Israel', carrier: 'att', lastRechargeDate: '2026-04-20', nextRechargeDate: '2026-07-14' },
+      { lankAccountId: 3, phone: '55 0000 0003', fullName: 'Cuenta Demo 3', carrier: 'att', lastRechargeDate: '2026-04-20', nextRechargeDate: '2026-07-14' },
     ];
     const result = await markSimRechargeComplete(sims, 3, '2026-07-14');
     expect(result[0].lastRechargeDate).toBe('2026-07-14');
@@ -764,7 +764,7 @@ describe('markSimRechargeComplete - multi-carrier', () => {
 
   it('usa ciclo OXXO Cel (170 días) cuando el SIM es oxxocel', async () => {
     const sims = [
-      { lankAccountId: 6, phone: '56 3947 2383', fullName: 'Juan Hoyos', carrier: 'oxxocel', lastRechargeDate: null, nextRechargeDate: null },
+      { lankAccountId: 6, phone: '55 0000 0006', fullName: 'Cuenta Demo 6', carrier: 'oxxocel', lastRechargeDate: null, nextRechargeDate: null },
     ];
     const result = await markSimRechargeComplete(sims, 6, '2026-05-15');
     expect(result[0].lastRechargeDate).toBe('2026-05-15');
@@ -773,7 +773,7 @@ describe('markSimRechargeComplete - multi-carrier', () => {
 
   it('defaultea a Telcel si SIM no tiene carrier', async () => {
     const sims = [
-      { lankAccountId: 1, phone: '55 1234 5678', fullName: 'Test', lastRechargeDate: '2026-01-10', nextRechargeDate: '2026-12-15' },
+      { lankAccountId: 1, phone: '55 0000 0000', fullName: 'Test', lastRechargeDate: '2026-01-10', nextRechargeDate: '2026-12-15' },
     ];
     const result = await markSimRechargeComplete(sims, 1, '2026-12-15');
     expect(result[0].nextRechargeDate).toBe('2027-11-15');
@@ -791,8 +791,8 @@ describe('addSimCard - multi-carrier', () => {
 
   it('agrega SIM con carrier att y calcula siguiente recarga correcta', async () => {
     const result = await addSimCard([], {
-      lankAccountId: 3, phone: '55 4550 3152', fullName: 'Israel',
-      canonicalAlias: 'Israel', lastRechargeDate: '2026-04-20', carrier: 'att',
+      lankAccountId: 3, phone: '55 0000 0003', fullName: 'Cuenta Demo 3',
+      canonicalAlias: 'Cuenta Demo 3', lastRechargeDate: '2026-04-20', carrier: 'att',
     });
     expect(result).toHaveLength(1);
     expect(result[0].carrier).toBe('att');
@@ -801,7 +801,7 @@ describe('addSimCard - multi-carrier', () => {
 
   it('agrega SIM con carrier oxxocel', async () => {
     const result = await addSimCard([], {
-      lankAccountId: 6, phone: '56 3947 2383', fullName: 'Juan Hoyos',
+      lankAccountId: 6, phone: '55 0000 0006', fullName: 'Cuenta Demo 6',
       lastRechargeDate: '2026-05-01', carrier: 'oxxocel',
     });
     expect(result[0].carrier).toBe('oxxocel');
@@ -810,7 +810,7 @@ describe('addSimCard - multi-carrier', () => {
 
   it('defaultea carrier a telcel si no se especifica', async () => {
     const result = await addSimCard([], {
-      lankAccountId: 1, phone: '55 1111 2222', fullName: 'Test',
+      lankAccountId: 1, phone: '55 0000 0001', fullName: 'Test',
       lastRechargeDate: '2026-01-10',
     });
     expect(result[0].carrier).toBe('telcel');

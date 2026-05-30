@@ -217,7 +217,7 @@ def test_classify_event_marks_unknown_clabe_for_review():
 def test_build_domain_summary_separates_finance_from_membership_and_deposits_create_work():
     ok_accounts = [{
         "accountId": 17,
-        "accountAlias": "Marco Fuentes",
+        "accountAlias": "Cuenta Demo 8",
         "access": "ok",
         "rawEmails": [
             {
@@ -282,7 +282,7 @@ def test_build_domain_summary_separates_finance_from_membership_and_deposits_cre
 def test_build_domain_summary_marks_finance_only_accounts_without_group_empty_language():
     ok_accounts = [{
         "accountId": 18,
-        "accountAlias": "Andrés Casanova",
+        "accountAlias": "Cuenta Demo 9",
         "access": "ok",
         "rawEmails": [{"uid": 401, "subject": "¡Ya acreditamos tu pago!"}],
         "events": [{
@@ -434,12 +434,12 @@ def test_save_notifications_keeps_raw_mail_trace_without_operational_parse_field
     main.save_notifications(
         db,
         2,
-        "Silva Herrera",
+        "Cuenta Demo 1",
         [{
             "uid": 201,
             "date": format_datetime(email_date),
             "subject": "Un usuario ha dejado tu grupo",
-            "bodySnippet": "El usuario Kytzia1 ha dejado el grupo de YouTube.",
+            "bodySnippet": "El usuario User A ha dejado el grupo de YouTube.",
             "messageId": "<msg-201>",
         }],
         analysis_timestamp=(email_date + timedelta(minutes=5)).isoformat(),
@@ -448,7 +448,7 @@ def test_save_notifications_keeps_raw_mail_trace_without_operational_parse_field
     item = db.documents["notifications/2"]["items"][0]
     assert item["messageId"] == "<msg-201>"
     assert item["subject"] == "Un usuario ha dejado tu grupo"
-    assert item["bodySnippet"] == "El usuario Kytzia1 ha dejado el grupo de YouTube."
+    assert item["bodySnippet"] == "El usuario User A ha dejado el grupo de YouTube."
     assert "parsedService" not in item
     assert "parsedUserAlias" not in item
     assert "parseConfidence" not in item
@@ -487,8 +487,8 @@ def test_generate_alerts_for_accounts_creates_direct_alerts_and_external_notices
         groups={
             "groups/chatgpt/lank-accounts/12": {
                 "users": [
-                    {"userAlias": "Mario", "serviceAccountRef": "Perfil 1"},
-                    {"userAlias": "Luigi", "serviceAccountRef": "Perfil 1"},
+                    {"userAlias": "User A", "serviceAccountRef": "Perfil 1"},
+                    {"userAlias": "User B", "serviceAccountRef": "Perfil 1"},
                 ]
             }
         }
@@ -503,8 +503,8 @@ def test_generate_alerts_for_accounts_creates_direct_alerts_and_external_notices
                     "event": {
                         "kind": "user_left_self",
                         "subscription": "ChatGPT Plus",
-                        "userName": "Mario",
-                        "userEmail": "mario@example.com",
+                        "userName": "User A",
+                        "userEmail": "member@example.com",
                     },
                     "uid": 101,
                     "messageId": "msg-101",
@@ -515,7 +515,7 @@ def test_generate_alerts_for_accounts_creates_direct_alerts_and_external_notices
                         "action": "revocar acceso",
                         "reason": "salió del grupo",
                         "dbGroupStatus": "active",
-                        "matchesCurrent": [{"alias": "Mario"}],
+                        "matchesCurrent": [{"alias": "User A"}],
                         "matchesStale": [],
                     },
                 },
@@ -523,7 +523,7 @@ def test_generate_alerts_for_accounts_creates_direct_alerts_and_external_notices
                     "event": {
                         "kind": "unknown",
                         "subscription": "ChatGPT Plus",
-                        "userName": "Mario",
+                        "userName": "User A",
                     },
                     "uid": 102,
                     "messageId": "msg-102",
@@ -557,9 +557,9 @@ def test_generate_alerts_for_accounts_creates_direct_alerts_and_external_notices
                 "accountAlias": event["accountAlias"],
                 "userAlias": event["userName"],
                 "serviceAccountRef": kwargs["enrichment"]["serviceAccountRef"],
-                "businessKey": "profile_delete|ChatGPT Plus|12|mario",
+                "businessKey": "profile_delete|ChatGPT Plus|12|user a",
                 "title": "Eliminar perfil",
-                "description": "Eliminar perfil de Mario",
+                "description": "Eliminar perfil de User A",
             }
         ]
 
@@ -595,14 +595,14 @@ def test_generate_alerts_for_accounts_creates_direct_alerts_and_external_notices
     assert saved_alert["serviceAccountRef"] == "Perfil 1"
     assert saved_alert["id"].startswith("alert_")
     assert saved_alert["createdAt"] == "2026-04-22T12:00:00+00:00"
-    assert db.collection("alerts").store[saved_alert["id"]]["businessKey"] == "profile_delete|ChatGPT Plus|12|mario"
+    assert db.collection("alerts").store[saved_alert["id"]]["businessKey"] == "profile_delete|ChatGPT Plus|12|user a"
 
     assert len(captured_direct_calls) == 2
     leave_call = captured_direct_calls[0]
     assert leave_call["event"]["accountId"] == 12
     assert leave_call["event"]["accountAlias"] == "Cuenta 12"
     assert leave_call["enrichment"]["serviceAccountRef"] == "Perfil 1"
-    assert leave_call["enrichment"]["otherUsers"] == ["Luigi"]
+    assert leave_call["enrichment"]["otherUsers"] == ["User B"]
     assert leave_call["enrichment"]["realAccountEmail"] == "perfil1@example.com"
     assert leave_call["enrichment"]["realAccountStatus"] == "active"
     assert leave_call["enrichment"]["groupStatus"] == "active"
@@ -611,7 +611,7 @@ def test_generate_alerts_for_accounts_creates_direct_alerts_and_external_notices
         {
             "accountId": 12,
             "accountAlias": "Cuenta 12",
-            "userName": "Mario",
+            "userName": "User A",
             "subscription": "ChatGPT Plus",
             "kind": "unknown",
             "category": "info",
@@ -631,7 +631,7 @@ def test_generate_alerts_for_accounts_skips_unmanaged_info_notices(monkeypatch):
             "accountAlias": "Cuenta 12",
             "events": [
                 {
-                    "event": {"kind": "user_join_direct", "subscription": "Microsoft 365", "userName": "Mario"},
+                    "event": {"kind": "user_join_direct", "subscription": "Microsoft 365", "userName": "User A"},
                     "uid": 211,
                     "messageId": "msg-211",
                     "date": "2026-04-22T10:00:00+00:00",
@@ -739,14 +739,14 @@ def test_generate_alerts_for_accounts_deduplicates_alerts_within_same_run(monkey
             "accountAlias": "Cuenta 12",
             "events": [
                 {
-                    "event": {"kind": "user_join_direct", "subscription": "ChatGPT Plus", "userName": "Mario"},
+                    "event": {"kind": "user_join_direct", "subscription": "ChatGPT Plus", "userName": "User A"},
                     "uid": 201,
                     "messageId": "msg-201",
                     "date": "2026-04-22T10:00:00+00:00",
                     "dbReview": {"service": "ChatGPT Plus", "category": "pending", "action": "dar acceso", "reason": "alta"},
                 },
                 {
-                    "event": {"kind": "user_join_direct", "subscription": "ChatGPT Plus", "userName": "Mario"},
+                    "event": {"kind": "user_join_direct", "subscription": "ChatGPT Plus", "userName": "User A"},
                     "uid": 202,
                     "messageId": "msg-202",
                     "date": "2026-04-22T10:05:00+00:00",
@@ -768,10 +768,10 @@ def test_generate_alerts_for_accounts_deduplicates_alerts_within_same_run(monkey
                 "service": "ChatGPT Plus",
                 "accountId": "12",
                 "accountAlias": "Cuenta 12",
-                "userAlias": "Mario",
-                "businessKey": "user_needs_access|ChatGPT Plus|12|mario",
+                "userAlias": "User A",
+                "businessKey": "user_needs_access|ChatGPT Plus|12|user a",
                 "title": "Dar acceso",
-                "description": "Dar acceso a Mario",
+                "description": "Dar acceso a User A",
             }
         ],
     )
@@ -799,7 +799,7 @@ def test_generate_alerts_for_accounts_keeps_review_alerts(monkeypatch):
             "accountAlias": "Cuenta 12",
             "events": [
                 {
-                    "event": {"kind": "user_join_direct", "subscription": "ChatGPT Plus", "userEmail": "mario@example.com"},
+                    "event": {"kind": "user_join_direct", "subscription": "ChatGPT Plus", "userEmail": "member@example.com"},
                     "uid": 301,
                     "messageId": "msg-301",
                     "date": "2026-04-22T10:00:00+00:00",
@@ -821,8 +821,8 @@ def test_generate_alerts_for_accounts_keeps_review_alerts(monkeypatch):
                 "service": "ChatGPT Plus",
                 "accountId": "12",
                 "accountAlias": "Cuenta 12",
-                "userAlias": "mario@example.com",
-                "businessKey": "user_needs_access|ChatGPT Plus|12|mario@example.com",
+                "userAlias": "member@example.com",
+                "businessKey": "user_needs_access|ChatGPT Plus|12|member@example.com",
                 "title": "Dar acceso",
                 "description": "Revisar acceso manualmente",
             }
@@ -848,8 +848,8 @@ def test_generate_alerts_for_accounts_updates_group_and_adds_agent_finding_witho
         groups={
             "groups/chatgpt/lank-accounts/12": {
                 "users": [
-                    {"userAlias": "Mario"},
-                    {"userAlias": "Luigi"},
+                    {"userAlias": "User A"},
+                    {"userAlias": "User B"},
                 ]
             }
         }
@@ -861,7 +861,7 @@ def test_generate_alerts_for_accounts_updates_group_and_adds_agent_finding_witho
             "accountAlias": "Cuenta 12",
             "events": [
                 {
-                    "event": {"kind": "user_left_self", "subscription": "ChatGPT Plus", "userName": "Mario"},
+                    "event": {"kind": "user_left_self", "subscription": "ChatGPT Plus", "userName": "User A"},
                     "uid": 302,
                     "messageId": "msg-302",
                     "date": "2026-04-22T10:00:00+00:00",
@@ -1055,7 +1055,7 @@ def test_analyze_emails_enqueues_adminbot_work_after_saving_latest_report(monkey
     monkeypatch.setattr(main.firestore, "client", lambda: db)
     monkeypatch.setattr(main, "load_service_config", lambda _db: ({}, {}, set()))
     monkeypatch.setattr(main, "load_imap_credentials", lambda _db: [
-        {"accountId": 12, "email": "owner@example.com", "appPassword": "secret", "enabled": True}
+        {"accountId": 12, "email": "owner@example.com", "appPassword": "example-app-password", "enabled": True}
     ])
     monkeypatch.setattr(main, "load_account_registry", lambda _db: [
         {"id": 12, "canonicalAlias": "Cuenta 12", "fullName": "Cuenta Principal"}
@@ -1154,7 +1154,7 @@ def test_analyze_emails_includes_scheduled_manual_alerts_in_backend_count(monkey
     monkeypatch.setattr(main.firestore, "client", lambda: db)
     monkeypatch.setattr(main, "load_service_config", lambda _db: ({}, {}, set()))
     monkeypatch.setattr(main, "load_imap_credentials", lambda _db: [
-        {"accountId": 12, "email": "owner@example.com", "appPassword": "secret", "enabled": True}
+        {"accountId": 12, "email": "owner@example.com", "appPassword": "example-app-password", "enabled": True}
     ])
     monkeypatch.setattr(main, "load_account_registry", lambda _db: [
         {"id": 12, "canonicalAlias": "Cuenta 12", "fullName": "Cuenta Principal"}
@@ -1234,7 +1234,7 @@ def test_scheduled_analysis_enqueues_adminbot_work_for_current_slot(monkeypatch)
     monkeypatch.setattr(main, "load_system_flags", lambda _db: {})
     monkeypatch.setattr(main, "load_service_config", lambda _db: ({}, {}, set()))
     monkeypatch.setattr(main, "load_imap_credentials", lambda _db: [
-        {"accountId": 12, "email": "owner@example.com", "appPassword": "secret", "enabled": True}
+        {"accountId": 12, "email": "owner@example.com", "appPassword": "example-app-password", "enabled": True}
     ])
     monkeypatch.setattr(main, "load_account_registry", lambda _db: [
         {"id": 12, "canonicalAlias": "Cuenta 12", "fullName": "Cuenta Principal"}
@@ -1314,7 +1314,7 @@ def test_scheduled_analysis_includes_scheduled_manual_alerts_in_backend_count(mo
     monkeypatch.setattr(main, "load_system_flags", lambda _db: {})
     monkeypatch.setattr(main, "load_service_config", lambda _db: ({}, {}, set()))
     monkeypatch.setattr(main, "load_imap_credentials", lambda _db: [
-        {"accountId": 12, "email": "owner@example.com", "appPassword": "secret", "enabled": True}
+        {"accountId": 12, "email": "owner@example.com", "appPassword": "example-app-password", "enabled": True}
     ])
     monkeypatch.setattr(main, "load_account_registry", lambda _db: [
         {"id": 12, "canonicalAlias": "Cuenta 12", "fullName": "Cuenta Principal"}
@@ -1603,7 +1603,7 @@ class TestSimRechargeAlertsMultiCarrier:
     def test_telcel_alert_within_7_days(self, monkeypatch):
         self._freeze_time(monkeypatch, 2027, 3, 10)
         db = self._make_db([
-            {'lankAccountId': 1, 'phone': '55 1111 2222', 'fullName': 'Daniel',
+            {'lankAccountId': 1, 'phone': '55 0000 0001', 'fullName': 'Cuenta Demo 1',
              'carrier': 'telcel', 'nextRechargeDate': '2027-03-15'},
         ])
         result = lank_alerts.generate_sim_recharge_alerts(db)
@@ -1615,7 +1615,7 @@ class TestSimRechargeAlertsMultiCarrier:
     def test_telcel_no_alert_outside_window(self, monkeypatch):
         self._freeze_time(monkeypatch, 2027, 3, 1)
         db = self._make_db([
-            {'lankAccountId': 1, 'phone': '55 1111 2222', 'fullName': 'Daniel',
+            {'lankAccountId': 1, 'phone': '55 0000 0001', 'fullName': 'Cuenta Demo 1',
              'carrier': 'telcel', 'nextRechargeDate': '2027-03-15'},
         ])
         result = lank_alerts.generate_sim_recharge_alerts(db)
@@ -1624,7 +1624,7 @@ class TestSimRechargeAlertsMultiCarrier:
     def test_att_alert_within_7_days(self, monkeypatch):
         self._freeze_time(monkeypatch, 2026, 7, 10)
         db = self._make_db([
-            {'lankAccountId': 3, 'phone': '55 4550 3152', 'fullName': 'Israel',
+            {'lankAccountId': 3, 'phone': '55 0000 0003', 'fullName': 'Cuenta Demo 3',
              'carrier': 'att', 'nextRechargeDate': '2026-07-14'},
         ])
         result = lank_alerts.generate_sim_recharge_alerts(db)
@@ -1635,7 +1635,7 @@ class TestSimRechargeAlertsMultiCarrier:
     def test_att_no_alert_outside_7_day_window(self, monkeypatch):
         self._freeze_time(monkeypatch, 2026, 7, 1)
         db = self._make_db([
-            {'lankAccountId': 3, 'phone': '55 4550 3152', 'fullName': 'Israel',
+            {'lankAccountId': 3, 'phone': '55 0000 0003', 'fullName': 'Cuenta Demo 3',
              'carrier': 'att', 'nextRechargeDate': '2026-07-14'},
         ])
         result = lank_alerts.generate_sim_recharge_alerts(db)
@@ -1644,7 +1644,7 @@ class TestSimRechargeAlertsMultiCarrier:
     def test_oxxocel_alert_within_10_days(self, monkeypatch):
         self._freeze_time(monkeypatch, 2026, 10, 1)
         db = self._make_db([
-            {'lankAccountId': 6, 'phone': '56 3947 2383', 'fullName': 'Juan Hoyos',
+            {'lankAccountId': 6, 'phone': '55 0000 0006', 'fullName': 'Cuenta Demo 6',
              'carrier': 'oxxocel', 'nextRechargeDate': '2026-10-07'},
         ])
         result = lank_alerts.generate_sim_recharge_alerts(db)
@@ -1655,7 +1655,7 @@ class TestSimRechargeAlertsMultiCarrier:
     def test_oxxocel_no_alert_outside_10_day_window(self, monkeypatch):
         self._freeze_time(monkeypatch, 2026, 9, 20)
         db = self._make_db([
-            {'lankAccountId': 6, 'phone': '56 3947 2383', 'fullName': 'Juan Hoyos',
+            {'lankAccountId': 6, 'phone': '55 0000 0006', 'fullName': 'Cuenta Demo 6',
              'carrier': 'oxxocel', 'nextRechargeDate': '2026-10-07'},
         ])
         result = lank_alerts.generate_sim_recharge_alerts(db)
@@ -1664,7 +1664,7 @@ class TestSimRechargeAlertsMultiCarrier:
     def test_lina_amalia_stale_oxxocel_is_treated_as_telcel(self, monkeypatch):
         self._freeze_time(monkeypatch, 2026, 9, 29)
         db = self._make_db([
-            {'lankAccountId': 10, 'phone': '55 1010 1010', 'fullName': 'Lina Amalia',
+            {'lankAccountId': 10, 'phone': '55 0000 0010', 'fullName': 'Cuenta Demo 10',
              'carrier': 'oxxocel', 'nextRechargeDate': '2026-10-07'},
         ])
         result = lank_alerts.generate_sim_recharge_alerts(db)
@@ -1673,7 +1673,7 @@ class TestSimRechargeAlertsMultiCarrier:
     def test_juan_hoyos_account_6_uses_oxxocel_even_from_legacy_telcel(self, monkeypatch):
         self._freeze_time(monkeypatch, 2026, 9, 29)
         db = self._make_db([
-            {'lankAccountId': 6, 'phone': '56 3947 2383', 'fullName': 'Juan Hoyos',
+            {'lankAccountId': 6, 'phone': '55 0000 0006', 'fullName': 'Cuenta Demo 6',
              'carrier': 'telcel', 'nextRechargeDate': '2026-10-07'},
         ])
         result = lank_alerts.generate_sim_recharge_alerts(db)
@@ -1684,7 +1684,7 @@ class TestSimRechargeAlertsMultiCarrier:
     def test_known_att_accounts_use_att_even_from_legacy_telcel(self, monkeypatch):
         self._freeze_time(monkeypatch, 2026, 7, 10)
         db = self._make_db([
-            {'lankAccountId': 4, 'phone': '55 4444 4444', 'fullName': 'Juan53',
+            {'lankAccountId': 4, 'phone': '55 0000 0004', 'fullName': 'Cuenta Demo 4',
              'carrier': 'telcel', 'nextRechargeDate': '2026-07-14'},
         ])
         result = lank_alerts.generate_sim_recharge_alerts(db)
@@ -1695,7 +1695,7 @@ class TestSimRechargeAlertsMultiCarrier:
     def test_sim_without_carrier_defaults_to_telcel(self, monkeypatch):
         self._freeze_time(monkeypatch, 2027, 3, 10)
         db = self._make_db([
-            {'lankAccountId': 2, 'phone': '55 3333 4444', 'fullName': 'Legacy',
+            {'lankAccountId': 2, 'phone': '55 0000 0002', 'fullName': 'Legacy',
              'nextRechargeDate': '2027-03-15'},
         ])
         result = lank_alerts.generate_sim_recharge_alerts(db)
@@ -1706,22 +1706,22 @@ class TestSimRechargeAlertsMultiCarrier:
     def test_mixed_carriers_only_due_sims_get_alerts(self, monkeypatch):
         self._freeze_time(monkeypatch, 2026, 7, 10)
         db = self._make_db([
-            {'lankAccountId': 1, 'phone': '55 1111 2222', 'fullName': 'Daniel',
+            {'lankAccountId': 1, 'phone': '55 0000 0001', 'fullName': 'Cuenta Demo 1',
              'carrier': 'telcel', 'nextRechargeDate': '2027-03-15'},
-            {'lankAccountId': 3, 'phone': '55 4550 3152', 'fullName': 'Israel',
+            {'lankAccountId': 3, 'phone': '55 0000 0003', 'fullName': 'Cuenta Demo 3',
              'carrier': 'att', 'nextRechargeDate': '2026-07-14'},
-            {'lankAccountId': 6, 'phone': '56 3947 2383', 'fullName': 'Juan Hoyos',
+            {'lankAccountId': 6, 'phone': '55 0000 0006', 'fullName': 'Cuenta Demo 6',
              'carrier': 'oxxocel', 'nextRechargeDate': '2026-10-07'},
         ])
         result = lank_alerts.generate_sim_recharge_alerts(db)
         assert result == 1
         alert = list(db.collection('alerts').store.values())[0]
-        assert 'Israel' in alert['title']
+        assert 'Cuenta Demo 3' in alert['title']
 
     def test_sim_without_next_date_is_skipped(self, monkeypatch):
         self._freeze_time(monkeypatch, 2026, 5, 15)
         db = self._make_db([
-            {'lankAccountId': 6, 'phone': '56 3947 2383', 'fullName': 'Juan Hoyos',
+            {'lankAccountId': 6, 'phone': '55 0000 0006', 'fullName': 'Cuenta Demo 6',
              'carrier': 'oxxocel', 'nextRechargeDate': ''},
         ])
         result = lank_alerts.generate_sim_recharge_alerts(db)

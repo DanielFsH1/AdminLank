@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { normalizeSimCarrier, resolveSimCarrier } from './simCardsCarrier';
 
 describe('SIM Cards carrier normalization', () => {
-  it('normalizes Juan Hoyos account #6 as OXXO Cel even if it was previously defaulted to Telcel', () => {
+  it('normalizes Cuenta Demo 6 account #6 as OXXO Cel even if it was previously defaulted to Telcel', () => {
     const sim = {
       lankAccountId: 6,
-      fullName: 'Juan Hoyos',
-      canonicalAlias: 'Juan Hoyos',
+      fullName: 'Cuenta Demo 6',
+      canonicalAlias: 'Cuenta Demo 6',
       carrier: 'telcel',
     };
 
@@ -14,11 +14,11 @@ describe('SIM Cards carrier normalization', () => {
     expect(normalizeSimCarrier(sim)).toEqual({ ...sim, carrier: 'oxxocel' });
   });
 
-  it('corrects Lina Amalia account #10 away from stale OXXO Cel data', () => {
+  it('corrects Cuenta Demo 10 account #10 away from stale OXXO Cel data', () => {
     const sim = {
       lankAccountId: 10,
-      fullName: 'Lina Amalia Sotto',
-      canonicalAlias: 'Lina Amalia',
+      fullName: 'Cuenta Demo 10',
+      canonicalAlias: 'Cuenta Demo 10',
       carrier: 'oxxocel',
     };
 
@@ -27,9 +27,9 @@ describe('SIM Cards carrier normalization', () => {
   });
 
   it('normalizes known AT&T accounts from legacy Telcel defaults', () => {
-    expect(resolveSimCarrier({ lankAccountId: 3, canonicalAlias: 'Israel', carrier: 'telcel' })).toBe('att');
-    expect(resolveSimCarrier({ lankAccountId: 4, canonicalAlias: 'Juan53' })).toBe('att');
-    expect(resolveSimCarrier({ lankAccountId: 5, canonicalAlias: 'Juan Felipe', carrier: 'telcel' })).toBe('att');
+    expect(resolveSimCarrier({ lankAccountId: 3, canonicalAlias: 'Cuenta Demo 3', carrier: 'telcel' })).toBe('att');
+    expect(resolveSimCarrier({ lankAccountId: 4, canonicalAlias: 'Cuenta Demo 4' })).toBe('att');
+    expect(resolveSimCarrier({ lankAccountId: 5, canonicalAlias: 'Cuenta Demo 5', carrier: 'telcel' })).toBe('att');
   });
 
   it('keeps explicit non-legacy carriers for other SIMs', () => {

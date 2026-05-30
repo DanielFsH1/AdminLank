@@ -146,7 +146,7 @@ def test_known_external_bank_clabe_sets_registered_destination_bank_id():
         "clabes": ["012345678901234567"],
     }
     known_banks = [
-        {"id": "bank-account-1", "bankId": "bbva_israel", "bank": "BBVA", "clabe": "012345678901234567"},
+        {"id": "bank-account-1", "bankId": "bbva_demo", "bank": "BBVA", "clabe": "012345678901234567"},
     ]
 
     result = main.resolve_withdrawal_destination(
@@ -157,9 +157,9 @@ def test_known_external_bank_clabe_sets_registered_destination_bank_id():
 
     assert result["movementType"] == "external_bank"
     assert event["movementType"] == "external_bank"
-    assert event["destinationBankId"] == "bbva_israel"
-    assert result["destinationBankId"] == "bbva_israel"
-    assert event["knownBankAccount"]["bankId"] == "bbva_israel"
+    assert event["destinationBankId"] == "bbva_demo"
+    assert result["destinationBankId"] == "bbva_demo"
+    assert event["knownBankAccount"]["bankId"] == "bbva_demo"
     assert "destinationAccountId" not in event
 
 
@@ -239,19 +239,19 @@ def test_multiple_distinct_clabe_candidates_are_not_guessed_even_if_one_matches(
     assert "destinationBankId" not in event
 
 
-def test_concrete_withdrawal_from_account_4_juan53_to_account_3_israel_stp_snowball_is_internal_transfer():
+def test_concrete_withdrawal_from_account_4_account_4_demo_to_account_3_demo_stp_snowball_is_internal_transfer():
     db = FakeDb(documents={
         "config/snowball": {
             "wallets": {
                 "3": {
                     "accountId": "3",
-                    "accountAlias": "Israel",
+                    "accountAlias": "Cuenta Demo 3",
                     "walletClabe": "646180333333333333",
                     "active": True,
                 },
                 "4": {
                     "accountId": "4",
-                    "accountAlias": "Juan53",
+                    "accountAlias": "Cuenta Demo 4",
                     "walletClabe": "646180444444444444",
                     "active": True,
                 },
@@ -260,10 +260,10 @@ def test_concrete_withdrawal_from_account_4_juan53_to_account_3_israel_stp_snowb
                 "snowball_4_3": {
                     "id": "snowball_4_3",
                     "fromAccountId": "4",
-                    "fromAccountAlias": "Juan53",
+                    "fromAccountAlias": "Cuenta Demo 4",
                     "destinationType": "lank_wallet",
                     "toAccountId": "3",
-                    "toAccountAlias": "Israel",
+                    "toAccountAlias": "Cuenta Demo 3",
                     "destinationClabe": "646180333333333333",
                     "active": True,
                 }
@@ -278,7 +278,7 @@ def test_concrete_withdrawal_from_account_4_juan53_to_account_3_israel_stp_snowb
     event = {
         "kind": "withdrawal_completed",
         "accountId": "4",
-        "accountAlias": "Juan53",
+        "accountAlias": "Cuenta Demo 4",
         "amount": "1500",
         "bank": "STP",
         "accountNumber": "646180333333333333",

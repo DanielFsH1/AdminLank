@@ -15,7 +15,7 @@ def test_build_direct_alerts_attaches_notification_trace_and_business_key():
         "subscription": "ChatGPT Plus",
         "accountId": "12",
         "accountAlias": "Cuenta 12",
-        "userName": "Mario",
+        "userName": "User A",
         "messageId": "<msg-1>",
         "uid": "901",
         "date": "2026-04-21T12:00:00+00:00",
@@ -35,7 +35,7 @@ def test_build_direct_alerts_attaches_notification_trace_and_business_key():
     assert alerts[0]["messageId"] == "<msg-1>"
     assert alerts[0]["emailUid"] == "901"
     assert alerts[0]["analysisGeneratedAt"] == GENERATED_AT
-    assert alerts[0]["businessKey"] == "user_needs_access|ChatGPT Plus|12|mario"
+    assert alerts[0]["businessKey"] == "user_needs_access|ChatGPT Plus|12|user a"
     assert "id" not in alerts[0]
     assert "createdAt" not in alerts[0]
 
@@ -99,7 +99,7 @@ def test_build_direct_alerts_skips_incomplete_leave_event_without_service_accoun
         "subscription": "ChatGPT Plus",
         "accountId": "12",
         "accountAlias": "Cuenta 12",
-        "userName": "Mario",
+        "userName": "User A",
     }
     review = {"category": "pending"}
 
@@ -121,7 +121,7 @@ def test_build_direct_alerts_returns_empty_for_info_mail():
         "subscription": "ChatGPT Plus",
         "accountId": "12",
         "accountAlias": "Cuenta 12",
-        "userName": "Mario",
+        "userName": "User A",
     }
     review = {"category": "info"}
 
@@ -142,7 +142,7 @@ def test_build_direct_alerts_treats_dynamic_profile_project_as_password_shared()
         "subscription": "Netflix Familiar",
         "accountId": "15",
         "accountAlias": "Cuenta 15",
-        "userName": "Peach",
+        "userName": "User D",
     }
     review = {"category": "pending"}
 
@@ -155,7 +155,7 @@ def test_build_direct_alerts_treats_dynamic_profile_project_as_password_shared()
         enrichment={
             "serviceAccountRef": "netflix_1",
             "realAccountEmail": "netflix@example.com",
-            "otherUsers": ["Mario"],
+            "otherUsers": ["User A"],
         },
         services_config={
             "netflix": {
