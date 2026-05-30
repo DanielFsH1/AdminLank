@@ -659,7 +659,7 @@ describe('vault email accounts', () => {
       .mockResolvedValueOnce(buildSnapshot({
         type: 'lank_google',
         lankAccountId: '12',
-        email: 'principal@gmail.com',
+        email: 'principal@example.com',
       }))
       .mockResolvedValueOnce({
         exists: () => false,

@@ -7,6 +7,7 @@ import { useDocument } from '../hooks/useFirestore';
 import { ACCESS_TYPES, buildServiceConfig, normalizeServiceKey } from '../config/services';
 import { setServiceCatalogEntryActive, upsertServiceCatalogEntry } from '../hooks/firestoreActions';
 import { authenticatedFetch, ensureAdminFunctionResponse } from '../utils/authenticatedFetch';
+import { buildCloudFunctionUrl } from '../config/runtime';
 import { uploadLogoFile } from '../utils/logoUploads';
 
 import { AnalyzeIcon, BankIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClockIcon, ContainerIcon, CreditCardIcon, DollarIcon, DownloadIcon, EditIcon, EmailIcon, FileStorageIcon, HourglassIcon, ImageIcon, KeyIcon, LightbulbIcon, LockIcon, LockKeyIcon, MailboxIcon, MoneyIcon, PackageIcon, PlusIcon, SaveIcon, ShieldCheckIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, TrendUpIcon, UploadIcon, UsersIcon, WarningIcon, XCircleIcon } from '../components/Icons';
@@ -18,13 +19,11 @@ function hashPin(pin) {
   return CryptoJS.SHA256(pin + '_AdminLank_VaultPIN_2026').toString();
 }
 
-const CLOUD_FUNCTIONS_URL = '***REMOVED***';
-
 /* ─── Collection map ───────────────────────────────────────────────────────── */
 
 const COLLECTIONS = [
 
- { key: 'config/account-registry', label: 'Registro de Cuentas', icon: <UsersIcon size={16} />, type: 'doc', desc: '37 cuentas Lank' },
+ { key: 'config/account-registry', label: 'Registro de Cuentas', icon: <UsersIcon size={16} />, type: 'doc', desc: 'Cuentas configuradas' },
  { key: 'config/imap-credentials', label: 'Credenciales IMAP', icon: <LockKeyIcon size={16} />, type: 'doc', desc: 'App Passwords de Gmail', sensitive: true },
  { key: 'config/rates', label: 'Tarifas', icon: <DollarIcon size={16} />, type: 'doc', desc: 'Precios de suscripciones' },
  { key: 'config/services', label: 'Catálogo de Servicios', icon: <PackageIcon size={16} />, type: 'doc', desc: 'Servicios dinámicos y reglas operativas' },
@@ -541,7 +540,7 @@ export default function Tools() {
     setStorageLoading(true);
     setStorageError(null);
     try {
-      const res = await authenticatedFetch(`${CLOUD_FUNCTIONS_URL}/manage_storage`);
+      const res = await authenticatedFetch(buildCloudFunctionUrl('manage_storage'));
       await ensureAdminFunctionResponse(res);
       const data = await res.json();
       setStorageData(data);
@@ -564,7 +563,7 @@ export default function Tools() {
     setCleanupLoading(true);
     setCleanupResult(null);
     try {
-      const res = await authenticatedFetch(`${CLOUD_FUNCTIONS_URL}/manage_storage`, {
+      const res = await authenticatedFetch(buildCloudFunctionUrl('manage_storage'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, pinHash }),
@@ -589,7 +588,7 @@ export default function Tools() {
   const savePolicies = useCallback(async (pinHash) => {
     setPolicySaving(true);
     try {
-      const res = await authenticatedFetch(`${CLOUD_FUNCTIONS_URL}/manage_storage`, {
+      const res = await authenticatedFetch(buildCloudFunctionUrl('manage_storage'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'set_policies', policies, pinHash }),

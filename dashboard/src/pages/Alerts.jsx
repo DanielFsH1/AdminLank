@@ -972,7 +972,7 @@ export default function Alerts({ onNavigate, navData }) {
             key: 'phone',
             label: 'Número de teléfono / WhatsApp',
             required: true,
-            placeholder: '+525512345678',
+            placeholder: '+52...',
             hint: 'Formato con código de país. Ej: +52 para México.',
           },
         ]}

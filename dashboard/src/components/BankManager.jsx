@@ -793,7 +793,7 @@ export default function BankManager({ vaultCards = {} }) {
               </div>
               <div className="vault-form-group">
                 <label>Número de tarjeta</label>
-                <input type="text" value={formatCardInput(cardCreateValues.number)} onChange={e => setCardCreateValues(p => ({ ...p, number: e.target.value.replace(/\D/g, '').slice(0, 16) }))} placeholder="1234 5678 9012 3456" maxLength={19} autoComplete="off" />
+                <input type="text" value={formatCardInput(cardCreateValues.number)} onChange={e => setCardCreateValues(p => ({ ...p, number: e.target.value.replace(/\D/g, '').slice(0, 16) }))} placeholder="Numero de tarjeta" maxLength={19} autoComplete="off" />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div className="vault-form-group">

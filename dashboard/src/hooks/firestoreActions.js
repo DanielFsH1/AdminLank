@@ -1,6 +1,6 @@
 /**
  * Acciones de escritura a Firestore desde el dashboard.
- * Solo el admin (UID Ls1vtEv0rvY8DIyKKKmQY5SlOOQ2) puede escribir,
+ * Solo administradores autorizados pueden escribir,
  * garantizado por las Firestore Security Rules.
  */
 import { doc, updateDoc, setDoc, deleteDoc, deleteField, arrayUnion, Timestamp, getDoc as firestoreGetDoc, collection, addDoc, query, orderBy, getDocs, writeBatch, where, runTransaction, limit as firestoreLimit } from 'firebase/firestore';

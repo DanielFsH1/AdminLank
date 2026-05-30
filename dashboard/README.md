@@ -5,7 +5,7 @@ Panel de administración para el sistema Lank.
 ## Stack Tecnológico
 - **Frontend**: React + Vite
 - **Backend**: Firebase (Firestore, Cloud Functions, Hosting, Auth)
-- **Hosting**: adminlank.web.app
+- **Hosting**: configurar en `.env.local`
 
 ## Desarrollo local
 ```bash

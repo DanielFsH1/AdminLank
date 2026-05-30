@@ -3,9 +3,11 @@ import { limit } from 'firebase/firestore';
 import { useCollection, useDocument } from '../hooks/useFirestore';
 import { useAdminbotState } from '../hooks/adminbotState';
 import { authenticatedFetch, ensureAdminFunctionResponse } from '../utils/authenticatedFetch';
+import { buildCloudFunctionUrl } from '../config/runtime';
 import { AnalyzeIcon, BarChartIcon, BellIcon, BuildIcon, CheckIcon, ClipboardIcon, ClockIcon, CloseIcon, DotGray, DotGreen, DotRed, DotYellow, EmailIcon, GlobeIcon, InboxIcon, KeyIcon, LightningIcon, LockKeyIcon, MailboxIcon, RefreshIcon, SatelliteIcon, SaveIcon, ServerIcon, TrendUpIcon, WarningIcon } from '../components/Icons';
 
-const CLOUD_FN_BASE = '***REMOVED***';
+const FIREBASE_HOSTING_URL = import.meta.env.VITE_FIREBASE_HOSTING_URL || 'Configurar VITE_FIREBASE_HOSTING_URL';
+const FIREBASE_CONSOLE_URL = import.meta.env.VITE_FIREBASE_CONSOLE_URL || 'https://console.firebase.google.com/';
 
 const SERVICE_META = {
  firestore: { icon: <ServerIcon size={16} />, label: 'Cloud Firestore', desc: 'Base de datos principal' },
@@ -71,7 +73,7 @@ function DetailRow({ label, value, color }) {
 function renderHostingDetails() {
  return (
  <div className="status-detail-info">
-      <DetailRow label="URL" value="adminlank.web.app" />
+      <DetailRow label="URL" value={FIREBASE_HOSTING_URL} />
       <DetailRow label="Protocolo" value="HTTPS / HTTP2" />
       <DetailRow label="CDN" value="Firebase Global CDN" />
       <DetailRow label="Framework" value="React + Vite" />
@@ -298,7 +300,7 @@ export default function Status() {
  let lastErr = null;
  for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const resp = await authenticatedFetch(`${CLOUD_FN_BASE}/health_check`);
+        const resp = await authenticatedFetch(buildCloudFunctionUrl('health_check'));
         await ensureAdminFunctionResponse(resp);
         const data = await resp.json();
         setHealthData(data);
@@ -442,7 +444,7 @@ export default function Status() {
             <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '6px 0 0' }}>
               Esto puede ocurrir si el plan de Firebase no es Blaze, si las Cloud Functions están
               inactivas por un cambio de plan, o si hay un problema temporal de red. Verifica tu
-              plan en la <a href="***REMOVED***" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-primary)' }}>consola de Firebase</a>.
+              plan en la <a href={FIREBASE_CONSOLE_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--accent-primary)' }}>consola de Firebase</a>.
             </p>
             <button
               className="status-refresh-btn"

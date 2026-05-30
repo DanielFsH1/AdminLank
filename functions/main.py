@@ -11,6 +11,7 @@ El estado del análisis se guarda en Firestore (analysis/state, analysis/history
 """
 import json
 import imaplib
+import os
 import re
 import unicodedata
 import traceback
@@ -32,9 +33,15 @@ from alert_pipeline import build_direct_alerts
 
 app = initialize_app()
 
-LANK_FROM = '***REMOVED***'
+LANK_FROM = os.environ.get('LANK_FROM_EMAIL', 'info@example.com')
 IGNORED_EVENT_KINDS = {'payment_user', 'payment_cashback', 'monthly_summary', 'cashback_validated', 'unknown'}
 ADMINBOT_REVIEW_FINANCE_EVENT_KINDS = {'payment_user', 'payment_cashback'}
+PROJECT_ID = (
+    os.environ.get('FIREBASE_PROJECT_ID')
+    or os.environ.get('GOOGLE_CLOUD_PROJECT')
+    or os.environ.get('GCLOUD_PROJECT')
+    or ''
+)
 JOIN_EVENT_KINDS = {'user_join_direct', 'user_join_transferred'}
 LEAVE_EVENT_KINDS = {'user_left_self', 'user_left_transferred'}
 WITHDRAWAL_EVENT_KINDS = {'withdrawal_requested', 'withdrawal_completed', 'withdrawal_detected'}
@@ -44,7 +51,7 @@ ROUTINE_INFO_EVENT_KINDS = {'group_validated', 'cashback_validated', 'monthly_su
 # (no hay cuentas reales que gestionar, solo se monitorean renovaciones)
 # Se deriva dinámicamente desde config/services (usesPool == false)
 UNMANAGED_JOIN_LEAVE_SERVICES = {'Microsoft 365'}  # Fallback, se sobreescribe con config dinámica
-ADMIN_UID = '***REMOVED***'
+ADMIN_UID = os.environ.get('DASHBOARD_ADMIN_UID', '')
 
 
 def _json_response(payload, status=200):
@@ -56,7 +63,13 @@ def _json_response(payload, status=200):
 
 
 def require_dashboard_admin(req):
-    """Return an HTTP error response unless req has Daniel's Firebase ID token."""
+    """Return an HTTP error response unless req has the configured admin Firebase ID token."""
+    if not ADMIN_UID:
+        return _json_response(
+            {'success': False, 'error': 'DASHBOARD_ADMIN_UID no configurado'},
+            status=500,
+        )
+
     headers = getattr(req, 'headers', {}) or {}
     authorization = ''
     if hasattr(headers, 'get'):
@@ -2809,8 +2822,8 @@ def scheduled_analysis(event: scheduler_fn.ScheduledEvent) -> None:
             if cs_del > 0:
                 print(f'[Auto-cleanup CS] {cs_del} objetos, {cs_freed / (1024*1024):.1f} MB liberados')
 
-        if ar_policy.get('autoCleanup'):
-            ar_del, ar_freed, _ = _cleanup_artifact_registry('adminlank')
+        if ar_policy.get('autoCleanup') and PROJECT_ID:
+            ar_del, ar_freed, _ = _cleanup_artifact_registry(PROJECT_ID)
             if ar_del > 0:
                 print(f'[Auto-cleanup AR] {ar_del} versiones, {ar_freed / (1024*1024):.1f} MB liberados')
     except Exception as ac_err:
@@ -3071,7 +3084,12 @@ def telegram_setup(req: https_fn.Request) -> https_fn.Response:
         )
 
     if action == 'set_webhook':
-        webhook_url = '***REMOVED***/telegram_webhook'
+        webhook_url = os.environ.get('TELEGRAM_WEBHOOK_URL', '')
+        if not webhook_url:
+            return https_fn.Response(
+                json.dumps({'error': 'TELEGRAM_WEBHOOK_URL no configurado'}),
+                status=500, content_type='application/json',
+            )
         result = tg.set_webhook(webhook_url)
         return https_fn.Response(
             json.dumps(result, default=str),
@@ -3368,7 +3386,12 @@ def manage_storage(req: https_fn.Request) -> https_fn.Response:
         return auth_error
 
     db = firestore.client()
-    project_id = 'adminlank'
+    project_id = PROJECT_ID
+    if not project_id:
+        return _json_response(
+            {'success': False, 'error': 'FIREBASE_PROJECT_ID no configurado'},
+            status=500,
+        )
 
     if req.method == 'GET':
         query_type = req.args.get('type', 'all')

@@ -3,11 +3,10 @@ import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from 'firebase/fi
 import { db } from '../firebase';
 import { useAdminbotState } from '../hooks/adminbotState';
 import { authenticatedFetch, ensureAdminFunctionResponse } from '../utils/authenticatedFetch';
+import { buildCloudFunctionUrl } from '../config/runtime';
 import { AnalyzeIcon, BarChartIcon, BellIcon, CheckCircleIcon, CheckIcon, CheckboxChecked, CheckboxEmpty, CleanIcon, ClipboardIcon, ClockIcon, CloudSunIcon, DoorIcon, EmailIcon, EmptyMailIcon, HourglassIcon, InboxIcon, LightningIcon, MoneyIcon, MoonIcon, PinIcon, RefreshIcon, SatelliteIcon, SearchIcon, SleepIcon, StopwatchIcon, TargetIcon, UsersIcon, WarningIcon, WrenchIcon, XCircleIcon } from '../components/Icons';
 import LoadingState from '../components/LoadingState';
 import { ModalActions, ModalShell } from '../components/Modal';
-
-const CLOUD_FUNCTIONS_URL = '***REMOVED***';
 
 const KIND_LABELS = {
  user_left_self: <><DoorIcon size={16} /> Baja voluntaria</>,
@@ -218,7 +217,7 @@ export default function Analyze({ navData }) {
  setAnalysisRunning(true);
  setAnalysisResult(null);
  try {
-      const res = await authenticatedFetch(`${CLOUD_FUNCTIONS_URL}/analyze_emails`, {
+      const res = await authenticatedFetch(buildCloudFunctionUrl('analyze_emails'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -244,7 +243,7 @@ export default function Analyze({ navData }) {
       // Desactivar - directo sin confirmación
       setScheduleEnabled(false);
       setScheduleStartTime(null);
-      authenticatedFetch(`${CLOUD_FUNCTIONS_URL}/update_schedule`, {
+      authenticatedFetch(buildCloudFunctionUrl('update_schedule'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: false, frequencyHours: scheduleFrequency }),
@@ -305,7 +304,7 @@ export default function Analyze({ navData }) {
  setActiveHoursEnd(activeHoursPayload.endHour);
 
  try {
-      const res = await authenticatedFetch(`${CLOUD_FUNCTIONS_URL}/update_schedule`, {
+      const res = await authenticatedFetch(buildCloudFunctionUrl('update_schedule'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -331,7 +330,7 @@ export default function Analyze({ navData }) {
  setScheduleFrequency(freq);
  // Recalculate startTime to maintain the same start hour but with new frequency
  try {
-      const res = await authenticatedFetch(`${CLOUD_FUNCTIONS_URL}/update_schedule`, {
+      const res = await authenticatedFetch(buildCloudFunctionUrl('update_schedule'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

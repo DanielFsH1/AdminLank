@@ -22,12 +22,12 @@ export const SERVICES = {
     nameAliases: ['Gemini AI', 'Google/Gemini AI', 'Google AI Pro'],
     slotFields: [
       { key: 'memberAlias', label: 'Alias del usuario', required: true, placeholder: 'Nombre del usuario' },
-      { key: 'memberEmail', label: 'Correo de invitación', type: 'email', placeholder: 'correo@ejemplo.com' },
+      { key: 'memberEmail', label: 'Correo de invitación', type: 'email', placeholder: 'correo@example.com' },
     ],
     userFields: [
       { key: 'userAlias', label: 'Alias del usuario', required: true, placeholder: 'Nombre visible del usuario' },
       { key: 'phone', label: 'Teléfono', placeholder: '+52...' },
-      { key: 'userEmail', label: 'Correo de invitación', type: 'email', placeholder: 'correo@ejemplo.com' },
+      { key: 'userEmail', label: 'Correo de invitación', type: 'email', placeholder: 'correo@example.com' },
     ],
   },
   youtube: {
@@ -36,12 +36,12 @@ export const SERVICES = {
     nameAliases: ['YouTube Premium', 'YouTube'],
     slotFields: [
       { key: 'memberAlias', label: 'Alias del usuario', required: true, placeholder: 'Nombre del usuario' },
-      { key: 'memberEmail', label: 'Correo de invitación', type: 'email', placeholder: 'correo@ejemplo.com' },
+      { key: 'memberEmail', label: 'Correo de invitación', type: 'email', placeholder: 'correo@example.com' },
     ],
     userFields: [
       { key: 'userAlias', label: 'Alias del usuario', required: true, placeholder: 'Nombre visible del usuario' },
       { key: 'phone', label: 'Teléfono', placeholder: '+52...' },
-      { key: 'userEmail', label: 'Correo de invitación', type: 'email', placeholder: 'correo@ejemplo.com' },
+      { key: 'userEmail', label: 'Correo de invitación', type: 'email', placeholder: 'correo@example.com' },
     ],
   },
   hbo: {
@@ -78,7 +78,7 @@ export const SERVICES = {
     userFields: [
       { key: 'userAlias', label: 'Alias del usuario', required: true, placeholder: 'Nombre visible del usuario' },
       { key: 'phone', label: 'Teléfono', placeholder: '+52...' },
-      { key: 'invitationEmail', label: 'Correo de invitación', type: 'email', placeholder: 'correo@ejemplo.com' },
+      { key: 'invitationEmail', label: 'Correo de invitación', type: 'email', placeholder: 'correo@example.com' },
     ],
   },
 };
@@ -119,7 +119,7 @@ export function getDefaultSlotFields(accessType = 'email_invitation') {
   ];
 
   if (accessType === 'email_invitation') {
-    fields.push({ key: 'memberEmail', label: 'Correo de invitacion', type: 'email', placeholder: 'correo@ejemplo.com' });
+    fields.push({ key: 'memberEmail', label: 'Correo de invitacion', type: 'email', placeholder: 'correo@example.com' });
   } else if (accessType === 'profile_project') {
     fields.push({ key: 'profileName', label: 'Perfil asignado', placeholder: 'Nombre del perfil' });
   }
@@ -134,7 +134,7 @@ export function getDefaultUserFields(accessType = 'email_invitation') {
   ];
 
   if (accessType === 'email_invitation') {
-    fields.push({ key: 'userEmail', label: 'Correo de invitacion', type: 'email', placeholder: 'correo@ejemplo.com' });
+    fields.push({ key: 'userEmail', label: 'Correo de invitacion', type: 'email', placeholder: 'correo@example.com' });
   } else if (accessType === 'profile_project') {
     fields.push({ key: 'profileName', label: 'Perfil asignado', placeholder: 'Nombre del perfil' });
   }

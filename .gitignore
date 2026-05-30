@@ -1,19 +1,50 @@
 # Dependencies
 node_modules/
+dashboard/node_modules/
 .pnp
 .pnp.js
 
 # Build output
 dashboard/dist/
 dist/
+.firebase/
 
 # Environment
-.env
-.env.local
-.env.*.local
+.env*
+!.env.example
 
-# Firebase
-.firebase/
+# Secrets and local/private configuration
+.secrets/
+.firebaserc
+.mcp.json
+mcp.json
+.claude/
+.agents/
+firebase-auth-export*.json
+**/*service-account*.json
+**/*serviceAccount*.json
+**/*credentials*.json
+**/*credential*.json
+**/*secret*.json
+**/*token*.json
+**/*.pem
+**/*.p8
+**/*.p12
+**/*.key
+**/*.crt
+
+# Operational data, exports, and dumps
+data/
+exports/
+backups/
+dumps/
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.bak
+*.csv
+*.jsonl
 
 # IDE
 .vscode/
@@ -32,7 +63,6 @@ npm-debug.log*
 # Runtime / local agent artifacts
 .claude/scheduled_tasks.lock
 .hermes/
-docs/superpowers/
 .worktrees/
 
 # Python
@@ -40,3 +70,4 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+functions/venv/

@@ -1115,8 +1115,8 @@ export default function Accounts({ navData, onNavigate }) {
         fields={[
           { key: 'canonicalAlias', label: 'Alias', placeholder: 'Alias canónico' },
           { key: 'fullName', label: 'Nombre completo', placeholder: 'Nombre completo' },
-          { key: 'email', label: 'Correo Gmail Lank', type: 'email', placeholder: 'correo@gmail.com' },
-          { key: 'whatsapp', label: 'WhatsApp', placeholder: '+52 1234567890' },
+          { key: 'email', label: 'Correo Gmail Lank', type: 'email', placeholder: 'correo@example.com' },
+          { key: 'whatsapp', label: 'WhatsApp', placeholder: 'Numero de contacto' },
         ]}
         initialValues={editAccountValues}
         saveLabel={<><SaveIcon size={16} /> Guardar cambios</>}

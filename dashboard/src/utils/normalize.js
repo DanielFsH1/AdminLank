@@ -4,7 +4,7 @@
  *
  *   normalizeSearch('García')  → 'garcia'
  *   normalizeSearch('José María Ñoño') → 'jose maria nono'
- *   normalizeSearch('correo+tag@gmail.com') → 'correotaggmailcom'
+ *   normalizeSearch('correo+tag@example.com') → 'correotagexamplecom'
  */
 export function normalizeSearch(str) {
   if (!str) return '';

@@ -301,7 +301,7 @@ export default function AddClabeModal({ open, onClose, onSave, customBankAccount
                     className="edit-modal-input"
                     value={clabe}
                     onChange={e => { setClabe(e.target.value.replace(/\D/g, '').slice(0, 18)); setError(''); }}
-                    placeholder="000000000000000000"
+                    placeholder="CLABE de 18 digitos"
                     maxLength={18}
                     inputMode="numeric"
                     style={{ fontFamily: 'monospace', letterSpacing: '1px' }}

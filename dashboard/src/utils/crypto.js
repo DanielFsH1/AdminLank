@@ -4,13 +4,19 @@
  */
 import CryptoJS from 'crypto-js';
 
-// Clave derivada del UID del admin + salt
-const ADMIN_UID = '***REMOVED***';
-const SALT = '***REMOVED***';
-const DERIVED_KEY = CryptoJS.PBKDF2(ADMIN_UID, SALT, {
+const VAULT_KEY_SEED = import.meta.env.VITE_VAULT_KEY_SEED || '';
+const VAULT_SALT = import.meta.env.VITE_VAULT_SALT || 'AdminLank_Vault';
+const DERIVED_KEY = VAULT_KEY_SEED ? CryptoJS.PBKDF2(VAULT_KEY_SEED, VAULT_SALT, {
   keySize: 256 / 32,
   iterations: 1000,
-}).toString();
+}).toString() : '';
+
+function requireVaultKey() {
+  if (!DERIVED_KEY) {
+    throw new Error('VITE_VAULT_KEY_SEED no esta configurada');
+  }
+  return DERIVED_KEY;
+}
 
 /**
  * Cifra un string con AES-256.
@@ -19,7 +25,7 @@ const DERIVED_KEY = CryptoJS.PBKDF2(ADMIN_UID, SALT, {
  */
 export function encrypt(plainText) {
   if (!plainText || typeof plainText !== 'string') return '';
-  return CryptoJS.AES.encrypt(plainText, DERIVED_KEY).toString();
+  return CryptoJS.AES.encrypt(plainText, requireVaultKey()).toString();
 }
 
 /**
@@ -30,7 +36,7 @@ export function encrypt(plainText) {
 export function decrypt(cipherText) {
   if (!cipherText || typeof cipherText !== 'string') return '';
   try {
-    const bytes = CryptoJS.AES.decrypt(cipherText, DERIVED_KEY);
+    const bytes = CryptoJS.AES.decrypt(cipherText, requireVaultKey());
     return bytes.toString(CryptoJS.enc.Utf8);
   } catch (e) {
     console.error('Error al descifrar:', e);

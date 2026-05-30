@@ -7,8 +7,7 @@ import { encrypt, decrypt, encryptFields, decryptFields } from '../utils/crypto'
 import { completeAlert, createManualAlert, createRealAccount, createLinkedRealAccount, deleteRealAccount, createVaultCard, deleteVaultCard, DEFAULT_MASTER_CONFIG, addRecurringCharge, removeRecurringCharge, toggleRecurringCharge, updateRecurringCharge, createVaultEmailAccount, updateVaultEmailAccount, deleteVaultEmailAccount, createLankMasterAccount, syncVaultEmailPassword } from '../hooks/firestoreActions';
 import { ConfirmDialog, Toast } from '../components/EditModal';
 import { ModalActions, ModalShell } from '../components/Modal';
-import { seedGooglePasswords } from '../utils/seedGooglePasswords';
-import { BadgeIcon, BankIcon, CalendarIcon, CashIcon, CheckCircleIcon, ClipboardIcon, CreditCardIcon, DotRed, EditIcon, EmailIcon, HashIcon, HourglassIcon, KeyIcon, LinkIcon, LockIcon, LockKeyIcon, NotesIcon, PhoneIcon, PlusIcon, ReceiptIcon, RefreshIcon, SaveIcon, SearchIcon, SeedlingIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, WarningIcon } from '../components/Icons';
+import { BadgeIcon, BankIcon, CalendarIcon, CashIcon, CheckCircleIcon, ClipboardIcon, CreditCardIcon, DotRed, EditIcon, EmailIcon, HashIcon, KeyIcon, LinkIcon, LockIcon, LockKeyIcon, NotesIcon, PhoneIcon, PlusIcon, ReceiptIcon, RefreshIcon, SaveIcon, SearchIcon, ToggleOnIcon, ToggleOffIcon, TrashIcon, UserIcon, WarningIcon } from '../components/Icons';
 import { normalizeSearch, nMatch } from '../utils/normalize';
 import { normalizeCardExpiryInput } from '../utils/cardExpiry';
 import SearchBar from '../components/SearchBar';
@@ -39,7 +38,7 @@ function cleanAppPassword(input) {
   return input.replace(/\s/g, '').slice(0, APP_PASSWORD_MAX_LEN).toLowerCase();
 }
 
-// Formatear número de tarjeta: "1234567890123456" → "1234 5678 9012 3456"
+// Formatear numero de tarjeta para mostrar bloques de 4 digitos.
 function formatCardNumber(raw) {
   if (!raw) return '';
   const digits = raw.replace(/\D/g, '').slice(0, 16);
@@ -84,7 +83,6 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
  const [createValues, setCreateValues] = useState({});
  const [confirmDialog, setConfirmDialog] = useState(null);
  const [toast, setToast] = useState({ visible: false, message: '', type: 'success' });
- const [seeding, setSeeding] = useState(false);
  const [expandedGoogleAccounts, setExpandedGoogleAccounts] = useState(new Set());
  const [recurringModal, setRecurringModal] = useState(null); // { cardId, cardLabel, editChargeId? }
  const [recurringValues, setRecurringValues] = useState({ description: '', amount: '', billingDay: '', serviceKey: '', serviceAccountRef: '' });
@@ -1892,27 +1890,6 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
           <div className="vault-credentials-section">
             {/* Barra de acciones superior */}
             <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
-              {/* Seed button — solo si no hay cuentas */}
-              {allEmailAccounts.filter(a => a.isPrincipal).length === 0 && (
-                <button
-                  className="vault-action-btn create"
-                  style={{ padding: '10px 20px', fontSize: '13px' }}
-                  onClick={async () => {
-                    if (seeding) return;
-                    setSeeding(true);
-                    try {
-                      const res = await seedGooglePasswords();
-                      showToast(`Cuentas Google: ${res.created} creadas, ${res.updated} actualizadas`);
-                    } catch (err) {
-                      showToast('Error: ' + err.message, 'error');
-                    }
-                    setSeeding(false);
-                  }}
-                  disabled={seeding}
-                >
-                  {seeding ? <><HourglassIcon size={16} /> Cargando...</> : <><SeedlingIcon size={16} /> Cargar cuentas Lank</>}
-                </button>
-              )}
               <button
                 className="vault-action-btn create"
                 style={{ padding: '10px 20px', fontSize: '13px' }}
@@ -2252,7 +2229,7 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
                 </div>
                 <div className="vault-form-group">
                   <label><EmailIcon size={16} /> Email</label>
-                  <input type="email" value={editValues.email} onChange={e => setEditValues(p => ({ ...p, email: e.target.value }))} placeholder="correo@ejemplo.com" />
+                  <input type="email" value={editValues.email} onChange={e => setEditValues(p => ({ ...p, email: e.target.value }))} placeholder="correo@example.com" />
                 </div>
               </div>
               <div className="vault-form-group">
@@ -2327,7 +2304,7 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
                       const cleaned = cleanCardNumber(e.target.value);
                       setCardEditValues(p => ({ ...p, number: cleaned }));
                     }}
-                    placeholder="1234 5678 9012 3456" autoComplete="off"
+                    placeholder="Numero de tarjeta" autoComplete="off"
                   />
                   <RevealBtn fieldKey="modal-card-num" />
                 </div>
@@ -2445,7 +2422,7 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
                       {/* Creating a new secondary email inline */}
                       <div className="vault-form-group">
                         <label><EmailIcon size={16} /> Email del servicio</label>
-                        <input type="email" value={createValues.email} onChange={e => setCreateValues(p => ({ ...p, email: e.target.value }))} placeholder="correo@gmail.com" autoComplete="off" />
+                        <input type="email" value={createValues.email} onChange={e => setCreateValues(p => ({ ...p, email: e.target.value }))} placeholder="correo@example.com" autoComplete="off" />
                       </div>
                       <div className="vault-form-group">
                         <label><KeyIcon size={16} /> {getEmailLabel(createValues.email)}</label>
@@ -2498,7 +2475,7 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
                       {/* Manual entry (legacy behavior) */}
                       <div className="vault-form-group">
                         <label><EmailIcon size={16} /> Email</label>
-                        <input type="email" value={createValues.email} onChange={e => setCreateValues(p => ({ ...p, email: e.target.value }))} placeholder="correo@gmail.com" />
+                        <input type="email" value={createValues.email} onChange={e => setCreateValues(p => ({ ...p, email: e.target.value }))} placeholder="correo@example.com" />
                       </div>
                       {createModal.accessType === 'credentials' && (
                         <>
@@ -2542,7 +2519,7 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
                           const cleaned = cleanCardNumber(e.target.value);
                           setCreateValues(p => ({ ...p, number: cleaned }));
                         }}
-                        placeholder="1234 5678 9012 3456" autoComplete="off"
+                        placeholder="Numero de tarjeta" autoComplete="off"
                       />
                       <RevealBtn fieldKey="create-card-num" />
                     </div>
@@ -2738,7 +2715,7 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
                   type="email"
                   value={googleEditValues.email}
                   onChange={e => setGoogleEditValues(p => ({ ...p, email: e.target.value }))}
-                  placeholder="correo@gmail.com"
+                  placeholder="correo@example.com"
                   autoComplete="off"
                 />
               </div>
@@ -2811,7 +2788,7 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
               )}
               <div className="vault-form-group">
                 <label><EmailIcon size={16} /> Email</label>
-                <input type="email" value={googleCreateValues.email} onChange={e => setGoogleCreateValues(p => ({ ...p, email: e.target.value }))} placeholder="correo@gmail.com" autoComplete="off" />
+                <input type="email" value={googleCreateValues.email} onChange={e => setGoogleCreateValues(p => ({ ...p, email: e.target.value }))} placeholder="correo@example.com" autoComplete="off" />
               </div>
               <div className="vault-form-group">
                 <label><LockKeyIcon size={16} /> Contraseña del correo</label>

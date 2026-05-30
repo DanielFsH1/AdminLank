@@ -3,7 +3,7 @@ service firebase.storage {
   match /b/{bucket}/o {
     function isAdmin() {
       return request.auth != null
-        && request.auth.uid == '***REMOVED***';
+        && request.auth.token.admin == true;
     }
 
     function isLogoImage() {

@@ -73,7 +73,8 @@ import lank_alerts
 import main
 
 
-ADMIN_UID = "Ls1vtEv0rvY8DIyKKKmQY5SlOOQ2"
+ADMIN_UID = "test-admin"
+main.ADMIN_UID = ADMIN_UID
 ADMIN_HEADERS = {"Authorization": "Bearer admin-token"}
 
 
