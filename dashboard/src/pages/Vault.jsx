@@ -103,6 +103,7 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
  const [settingPin, setSettingPin] = useState(false); // modo configurar PIN por primera vez
  const [pinConfirm, setPinConfirm] = useState('');
  const [changingPin, setChangingPin] = useState(false); // modo cambiar PIN
+ const [vaultKeySeed, setVaultKeySeed] = useState('');
  const [vaultKeyInput, setVaultKeyInput] = useState('');
  const [vaultKeyError, setVaultKeyError] = useState('');
  const [vaultKeyReady, setVaultKeyReady] = useState(() => hasVaultKey());
@@ -181,7 +182,9 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
      try {
        const pinDoc = await getDoc(doc(db, 'config', 'vault-security'));
        if (pinDoc.exists() && pinDoc.data().pinHash) {
-         setPinHash(pinDoc.data().pinHash);
+         const data = pinDoc.data();
+         setPinHash(data.pinHash);
+         setVaultKeySeed(String(data.vaultKeySeed || ''));
        } else {
          setPinHash(null); // No hay PIN configurado
          setSettingPin(true); // Activar modo de configuración
@@ -226,6 +229,16 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
    };
  }, [vaultUnlocked, showToast]);
 
+ const unlockVaultKeyForSession = useCallback(() => {
+   if (vaultKeySeed && configureVaultKey(vaultKeySeed)) {
+     setVaultKeyReady(true);
+     setVaultKeyError('');
+     return true;
+   }
+   setVaultKeyReady(hasVaultKey());
+   return hasVaultKey();
+ }, [vaultKeySeed]);
+
  // ─── SEGURIDAD: Verificar PIN ───
  const handlePinSubmit = useCallback(async (pin) => {
    if (settingPin) {
@@ -256,6 +269,7 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
        setSettingPin(false);
        setPinConfirm('');
        setVaultUnlocked(true);
+       unlockVaultKeyForSession();
        lastActivityRef.current = Date.now();
        showToast('PIN de Bóveda configurado correctamente');
      } catch (err) {
@@ -300,6 +314,7 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
    const hashed = hashPin(pin);
    if (hashed === pinHash) {
      setVaultUnlocked(true);
+     unlockVaultKeyForSession();
      lastActivityRef.current = Date.now();
      setPinError('');
      setPinInput('');
@@ -307,7 +322,7 @@ export default function Vault({ onNavigate, navData, _servicesConfig }) {
      setPinError('PIN incorrecto');
      setPinInput('');
    }
- }, [pinHash, settingPin, changingPin, pinConfirm, showToast]);
+ }, [pinHash, settingPin, changingPin, pinConfirm, showToast, unlockVaultKeyForSession]);
 
  // ─── SEGURIDAD: Captura de teclado para PIN ───
  const pinInputRef = useRef(pinInput);

@@ -32,7 +32,7 @@ export default function Login() {
     <div className="login-container">
       <div className="login-card">
         <div className="login-logo">
-          <div className="login-logo-img" aria-hidden="true">AL</div>
+          <img className="login-logo-img" src="/assets/logo-icon.png" alt="" />
           <h1>AdminLank</h1>
           <p>Panel de gestión de suscripciones</p>
         </div>

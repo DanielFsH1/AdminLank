@@ -1,8 +1,6 @@
 // Configuración centralizada de servicios, bancos y utilidades de avatar
 // SERVICES se mantiene como seed/fallback mientras carga la configuración dinámica de Firestore
 
-const LOCAL_ASSET_LOGO_RE = /^\/assets\//;
-
 function getInitials(label) {
   const words = String(label || 'AL')
     .normalize('NFD')
@@ -26,7 +24,7 @@ export function buildPlaceholderLogo(label = 'AL', color = '#64748b') {
 
 function resolvePublicLogo(logo, label, color) {
   const value = String(logo || '').trim();
-  if (value && !LOCAL_ASSET_LOGO_RE.test(value)) return value;
+  if (value) return value;
   return buildPlaceholderLogo(label, color);
 }
 
@@ -276,7 +274,9 @@ export function normalizeServicesConfigDocument(data = {}) {
 
 // Ruta a la imagen de perfil de una cuenta Lank
 export function getProfileImage(accountId) {
-  return buildPlaceholderLogo(accountId ? `Cuenta ${accountId}` : 'Cuenta Lank', '#64748b');
+  return accountId
+    ? `/assets/profiles/account_${accountId}.png`
+    : buildPlaceholderLogo('Cuenta Lank', '#64748b');
 }
 
 // Formatear moneda MXN

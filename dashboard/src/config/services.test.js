@@ -5,8 +5,11 @@ import {
   getDefaultSlotFields,
   getDefaultUserFields,
   getBankMeta,
+  getProfileImage,
+  getServiceMeta,
   normalizeServiceKey,
   normalizeServicesConfigDocument,
+  setDynamicServices,
 } from './services';
 
 describe('dynamic service helpers', () => {
@@ -62,5 +65,16 @@ describe('dynamic service helpers', () => {
   it('resuelve metadatos de Plata aunque el banco venga como Banco Plata', () => {
     expect(getBankMeta('Plata').logo).toMatch(/^data:image\/svg\+xml,/);
     expect(getBankMeta('Banco Plata').logo).toMatch(/^data:image\/svg\+xml,/);
+  });
+
+  it('conserva rutas privadas de assets cargadas desde Firestore/runtime', () => {
+    setDynamicServices({
+      demo: { name: 'Demo', color: '#123456', logo: '/assets/demo.png', active: true },
+    });
+
+    expect(getServiceMeta('demo').logo).toBe('/assets/demo.png');
+    expect(getProfileImage(7)).toBe('/assets/profiles/account_7.png');
+
+    setDynamicServices(null);
   });
 });
